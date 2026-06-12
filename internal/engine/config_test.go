@@ -1,0 +1,922 @@
+package engine
+
+import (
+	"os"
+	"path/filepath"
+	"reflect"
+	"strings"
+	"testing"
+)
+
+func TestConfigFileOptions_collectsRepeatedDirectoryEntries(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "facter.conf")
+	content := `global : {
+  external-dir : [ "/first/external" ],
+}
+cli : {
+  external-dir : [ "/second/external" ],
+}`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := ConfigFileOptions(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"/first/external", "/second/external"}; !reflect.DeepEqual(got.ExternalDirs, want) {
+		t.Fatalf("ExternalDirs = %#v, want %#v", got.ExternalDirs, want)
+	}
+}
+
+func TestConfigFileOptions_ignoresRetiredCustomFactKeys(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "facter.conf")
+	content := `global : {
+  external-dir : [ "/kept/external" ],
+  custom-dir : [ "/retired/custom" ],
+  no-custom-facts : true,
+  no-ruby : true,
+}`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var warnings []string
+	SetWarningHandler(func(message string) { warnings = append(warnings, message) })
+	t.Cleanup(func() { SetWarningHandler(nil) })
+
+	got, err := ConfigFileOptions(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := ConfigOptions{ExternalDirs: []string{"/kept/external"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("ConfigFileOptions() = %#v, want retired keys inert: %#v", got, want)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %#v, want retired keys silently ignored", warnings)
+	}
+}
+
+func TestDefaultExternalFactDirsSearchesNativePathsBeforeFacterCompatPaths(t *testing.T) {
+	tests := []struct {
+		name           string
+		windows        bool
+		root           bool
+		home           string
+		windowsDataDir string
+		want           []string
+	}{
+		{
+			name: "linux root",
+			root: true,
+			want: []string{
+				"/etc/facts/facts.d",
+				"/etc/puppetlabs/facter/facts.d",
+				"/etc/facter/facts.d/",
+				"/opt/puppetlabs/facter/facts.d",
+			},
+		},
+		{
+			name: "darwin root",
+			root: true,
+			want: []string{
+				"/etc/facts/facts.d",
+				"/etc/puppetlabs/facter/facts.d",
+				"/etc/facter/facts.d/",
+				"/opt/puppetlabs/facter/facts.d",
+			},
+		},
+		{
+			name: "freebsd root",
+			root: true,
+			want: []string{
+				"/etc/facts/facts.d",
+				"/etc/puppetlabs/facter/facts.d",
+				"/etc/facter/facts.d/",
+				"/opt/puppetlabs/facter/facts.d",
+			},
+		},
+		{
+			name:           "windows with data dir",
+			windows:        true,
+			root:           true,
+			windowsDataDir: `C:\ProgramData`,
+			want: []string{
+				`C:\ProgramData/facts/facts.d`,
+				`C:\ProgramData/PuppetLabs/facter/facts.d`,
+			},
+		},
+		{
+			name:    "windows without data dir",
+			windows: true,
+			root:    true,
+			want:    nil,
+		},
+		{
+			name: "non root with home",
+			home: "/home/alice",
+			want: []string{
+				"/home/alice/.facts/facts.d",
+				"/home/alice/.facter/facts.d",
+				"/home/alice/.puppetlabs/opt/facter/facts.d",
+			},
+		},
+		{
+			name: "non root without home",
+			want: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := DefaultExternalFactDirs(tt.windows, tt.root, tt.home, tt.windowsDataDir)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("DefaultExternalFactDirs() = %#v, want %#v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestPlatformDefaultConfigPathMatchesRubyConfigReader(t *testing.T) {
+	tests := []struct {
+		name string
+		goos string
+		want string
+	}{
+		{
+			name: "linux",
+			goos: "linux",
+			want: "/etc/puppetlabs/facter/facter.conf",
+		},
+		{
+			name: "darwin",
+			goos: "darwin",
+			want: "/etc/puppetlabs/facter/facter.conf",
+		},
+		{
+			name: "freebsd",
+			goos: "freebsd",
+			want: "/etc/puppetlabs/facter/facter.conf",
+		},
+		{
+			name: "windows",
+			goos: "windows",
+			want: "C:/ProgramData/PuppetLabs/facter/etc/facter.conf",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := platformDefaultConfigPathFor(tt.goos)
+			if got != tt.want {
+				t.Fatalf("platformDefaultConfigPathFor(%q) = %q, want %q", tt.goos, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestPlatformNativeDefaultConfigPath(t *testing.T) {
+	tests := []struct {
+		name string
+		goos string
+		want string
+	}{
+		{
+			name: "linux",
+			goos: "linux",
+			want: "/etc/facts/facts.conf",
+		},
+		{
+			name: "darwin",
+			goos: "darwin",
+			want: "/etc/facts/facts.conf",
+		},
+		{
+			name: "freebsd",
+			goos: "freebsd",
+			want: "/etc/facts/facts.conf",
+		},
+		{
+			name: "windows",
+			goos: "windows",
+			want: "C:/ProgramData/facts/facts.conf",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := platformNativeDefaultConfigPathFor(tt.goos)
+			if got != tt.want {
+				t.Fatalf("platformNativeDefaultConfigPathFor(%q) = %q, want %q", tt.goos, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestConfigFileOptions_nativeDefaultConfigDiscovery pins the default-config
+// precedence of the facts-native input surface: with no explicit path, the
+// facts-native facts.conf is consulted first, the facter-compatible
+// facter.conf second, and the first existing file wins.
+func TestConfigFileOptions_nativeDefaultConfigDiscovery(t *testing.T) {
+	dir := t.TempDir()
+	nativePath := filepath.Join(dir, "facts.conf")
+	compatPath := filepath.Join(dir, "facter.conf")
+	nativeContent := []byte(`global : { external-dir : "/native/external" }`)
+	compatContent := []byte(`global : { external-dir : "/compat/external" }`)
+
+	tests := []struct {
+		name   string
+		native bool
+		compat bool
+		want   []string
+	}{
+		{name: "native only", native: true, want: []string{"/native/external"}},
+		{name: "compat only", compat: true, want: []string{"/compat/external"}},
+		{name: "both present native wins", native: true, compat: true, want: []string{"/native/external"}},
+		{name: "neither", want: nil},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := os.RemoveAll(nativePath); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.RemoveAll(compatPath); err != nil {
+				t.Fatal(err)
+			}
+			if tt.native {
+				if err := os.WriteFile(nativePath, nativeContent, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tt.compat {
+				if err := os.WriteFile(compatPath, compatContent, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			oldNative := NativeDefaultConfigPath
+			oldCompat := DefaultConfigPath
+			NativeDefaultConfigPath = func() string { return nativePath }
+			DefaultConfigPath = func() string { return compatPath }
+			t.Cleanup(func() {
+				NativeDefaultConfigPath = oldNative
+				DefaultConfigPath = oldCompat
+			})
+
+			got, err := ConfigFileOptions("")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got.ExternalDirs, tt.want) {
+				t.Fatalf("ExternalDirs = %#v, want %#v", got.ExternalDirs, tt.want)
+			}
+		})
+	}
+}
+
+func TestConfigFileOptions_acceptsBareDirectoryPaths(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "facter.conf")
+	content := `global : {
+  external-dir : [ /first/external, /second/external ],
+}`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := ConfigFileOptions(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"/first/external", "/second/external"}; !reflect.DeepEqual(got.ExternalDirs, want) {
+		t.Fatalf("ExternalDirs = %#v, want %#v", got.ExternalDirs, want)
+	}
+}
+
+func TestConfigFileOptions_warnsAndIgnoresUnreadableConfig(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "missing.conf")
+	warnings := []string{}
+	SetWarningHandler(func(message string) {
+		warnings = append(warnings, message)
+	})
+	t.Cleanup(func() { SetWarningHandler(nil) })
+
+	got, err := ConfigFileOptions(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, ConfigOptions{}) {
+		t.Fatalf("ConfigFileOptions() = %#v, want empty options", got)
+	}
+	if len(warnings) != 1 {
+		t.Fatalf("warnings = %#v, want one warning", warnings)
+	}
+	if !strings.Contains(warnings[0], "Facts failed to read config file") {
+		t.Fatalf("warning = %q, want config read warning", warnings[0])
+	}
+}
+
+func TestConfigFileOptions_warnsAndIgnoresInvalidConfig(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "facter.conf")
+	if err := os.WriteFile(path, []byte("some corrupt information"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	warnings := []string{}
+	SetWarningHandler(func(message string) {
+		warnings = append(warnings, message)
+	})
+	t.Cleanup(func() { SetWarningHandler(nil) })
+
+	got, err := ConfigFileOptions(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, ConfigOptions{}) {
+		t.Fatalf("ConfigFileOptions() = %#v, want empty options", got)
+	}
+	if len(warnings) != 1 {
+		t.Fatalf("warnings = %#v, want one warning", warnings)
+	}
+	if !strings.Contains(warnings[0], "Facts failed to read config file") {
+		t.Fatalf("warning = %q, want config read warning", warnings[0])
+	}
+}
+
+func TestConfigFileOptions_emptyReadableConfigReturnsEmptySections(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "facter.conf")
+	if err := os.WriteFile(path, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	warnings := []string{}
+	SetWarningHandler(func(message string) {
+		warnings = append(warnings, message)
+	})
+	t.Cleanup(func() { SetWarningHandler(nil) })
+
+	options, err := ConfigFileOptions(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(options, ConfigOptions{}) {
+		t.Fatalf("ConfigFileOptions() = %#v, want empty options", options)
+	}
+
+	blocklist, err := ConfigBlocklist(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if blocklist != nil {
+		t.Fatalf("ConfigBlocklist() = %#v, want nil", blocklist)
+	}
+
+	ttls, err := ConfigTTLs(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ttls != nil {
+		t.Fatalf("ConfigTTLs() = %#v, want nil", ttls)
+	}
+
+	groups, err := ConfigFactGroups(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if groups != nil {
+		t.Fatalf("ConfigFactGroups() = %#v, want nil", groups)
+	}
+
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %#v, want none", warnings)
+	}
+}
+
+func TestConfigFileOptions_collectsRepeatedBooleanOptions(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "facter.conf")
+	content := `global : {
+	no-external-facts : false,
+	force-dot-resolution : false,
+}
+cli : {
+	no-external-facts : true,
+	force-dot-resolution : true,
+}`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := ConfigFileOptions(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.NoExternalFacts {
+		t.Fatal("NoExternalFacts = false, want true")
+	}
+	if !got.ForceDotResolution {
+		t.Fatal("ForceDotResolution = false, want true")
+	}
+}
+
+func TestConfigFileOptions_retiredShowLegacyKeyIsInert(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "facter.conf")
+	content := `global : {
+	show-legacy : true,
+}`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	warnings := []string{}
+	SetWarningHandler(func(message string) { warnings = append(warnings, message) })
+	t.Cleanup(func() { SetWarningHandler(nil) })
+
+	got, err := ConfigFileOptions(path)
+	if err != nil {
+		t.Fatalf("ConfigFileOptions() error = %v, want nil for retired show-legacy key", err)
+	}
+	if !reflect.DeepEqual(got, ConfigOptions{}) {
+		t.Fatalf("ConfigFileOptions() = %#v, want zero options: show-legacy is retired and inert", got)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %#v, want none for retired show-legacy key", warnings)
+	}
+}
+
+func TestConfigFileOptions_readsConfiguredSequentialLikeRubyOptionStore(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "facter.conf")
+	content := `global : {
+	sequential : false,
+}`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := ConfigFileOptions(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.SequentialSet {
+		t.Fatal("SequentialSet = false, want true")
+	}
+	if got.Sequential {
+		t.Fatal("Sequential = true, want false")
+	}
+}
+
+func TestConfigBlocklist_collectsRepeatedEntries(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "facter.conf")
+	content := `facts : {
+  blocklist : [ "ec2", "os" ],
+}
+cli : {
+  blocklist : [ "networking" ],
+}`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := ConfigBlocklist(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"ec2", "os", "networking"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("ConfigBlocklist() = %#v, want %#v", got, want)
+	}
+}
+
+func TestConfigBlocklist_acceptsBareEntries(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "facter.conf")
+	content := `facts : {
+  blocklist : [ ec2, os.name ],
+}`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := ConfigBlocklist(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"ec2", "os.name"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("ConfigBlocklist() = %#v, want %#v", got, want)
+	}
+}
+
+func TestConfigFileOptions_ignoresCommentedEntries(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "facter.conf")
+	content := `global : {
+  # external-dir : [ "/commented/external" ],
+  // external-dir : [ "/commented/external-two" ],
+  no-external-facts : false,
+  # no-external-facts : true,
+}
+facts : {
+  blocklist : [ "os" ],
+  // blocklist : [ "networking" ],
+}`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	options, err := ConfigFileOptions(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(options.ExternalDirs) != 0 {
+		t.Fatalf("ExternalDirs = %#v, want commented entry ignored", options.ExternalDirs)
+	}
+	if options.NoExternalFacts {
+		t.Fatal("NoExternalFacts = true, want commented true value ignored")
+	}
+
+	blocklist, err := ConfigBlocklist(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"os"}; !reflect.DeepEqual(blocklist, want) {
+		t.Fatalf("ConfigBlocklist() = %#v, want %#v", blocklist, want)
+	}
+}
+
+func TestConfigTTLs_returnsConfiguredFactTTLs(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "facter.conf")
+	content := `facts : {
+  ttls : [
+    { "timezone" : "30 days" },
+    { "networking" : "1 hour" },
+    { "operating system" : "30 minutes" }
+  ],
+}`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := ConfigTTLs(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []FactTTL{
+		{Fact: "timezone", TTL: "30 days"},
+		{Fact: "networking", TTL: "1 hour"},
+		{Fact: "operating system", TTL: "30 minutes"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("ConfigTTLs() = %#v, want %#v", got, want)
+	}
+}
+
+func TestConfigTTLs_acceptsBareFactNamesAndValues(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "facter.conf")
+	content := `facts : {
+  ttls : [
+    { memory : 10000 },
+    { hostname : 30 h }
+  ],
+}`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := ConfigTTLs(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []FactTTL{
+		{Fact: "memory", TTL: "10000"},
+		{Fact: "hostname", TTL: "30 h"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("ConfigTTLs() = %#v, want %#v", got, want)
+	}
+}
+
+func TestGroupTTLSeconds_convertsRubyCompatibleUnits(t *testing.T) {
+	tests := []struct {
+		name string
+		ttls []FactTTL
+		fact string
+		want int64
+	}{
+		{name: "minutes", ttls: []FactTTL{{Fact: "operating system", TTL: "30 minutes"}}, fact: "operating system", want: 1800},
+		{name: "nanoseconds", ttls: []FactTTL{{Fact: "operating system", TTL: "10000000000000 ns"}}, fact: "operating system", want: 10000},
+		{name: "bare milliseconds", ttls: []FactTTL{{Fact: "memory", TTL: "10000"}}, fact: "memory", want: 10},
+		{name: "short hours", ttls: []FactTTL{{Fact: "hostname", TTL: "30 h"}}, fact: "hostname", want: 108000},
+		{name: "singular hour", ttls: []FactTTL{{Fact: "operating system", TTL: "1 hour"}}, fact: "operating system", want: 3600},
+		{name: "singular day", ttls: []FactTTL{{Fact: "memory", TTL: "1 day"}}, fact: "memory", want: 86400},
+		{name: "nanos alias", ttls: []FactTTL{{Fact: "operating system", TTL: "10000000000000 nanos"}}, fact: "operating system", want: 10000},
+		{name: "micros alias", ttls: []FactTTL{{Fact: "memory", TTL: "10000000 micros"}}, fact: "memory", want: 10},
+		{name: "milis alias", ttls: []FactTTL{{Fact: "hostname", TTL: "10000 milis"}}, fact: "hostname", want: 10},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := GroupTTLSeconds(tt.ttls, tt.fact)
+			if !ok {
+				t.Fatalf("GroupTTLSeconds(%q) did not find TTL", tt.fact)
+			}
+			if got != tt.want {
+				t.Fatalf("GroupTTLSeconds(%q) = %d, want %d", tt.fact, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFactGroupName_returnsGroupContainingFact(t *testing.T) {
+	groups := []FactGroup{{Name: "operating system", Facts: []string{"os", "os.name"}}}
+
+	got, ok := FactGroupName(groups, "os")
+	if !ok {
+		t.Fatal("FactGroupName(os) did not find group")
+	}
+	if got != "operating system" {
+		t.Fatalf("FactGroupName(os) = %q, want %q", got, "operating system")
+	}
+
+	if got, ok := FactGroupName(groups, "memory"); ok {
+		t.Fatalf("FactGroupName(memory) = %q, true; want false", got)
+	}
+}
+
+func TestFactGroupName_returnsGroupContainingDescendantFact(t *testing.T) {
+	groups := []FactGroup{{Name: "operating system", Facts: []string{"os", "os.name"}}}
+
+	got, ok := FactGroupName(groups, "os.name.full")
+	if !ok {
+		t.Fatal("FactGroupName(os.name.full) did not find group")
+	}
+	if got != "operating system" {
+		t.Fatalf("FactGroupName(os.name.full) = %q, want %q", got, "operating system")
+	}
+}
+
+func TestGroupTTLSeconds_returnsFalseForMissingOrInvalidTTL(t *testing.T) {
+	tests := []struct {
+		name string
+		ttls []FactTTL
+		fact string
+	}{
+		{name: "missing", ttls: []FactTTL{{Fact: "operating system", TTL: "30 minutes"}}, fact: "memory"},
+		{name: "invalid unit", ttls: []FactTTL{{Fact: "hostname", TTL: "30 invalid_unit"}}, fact: "hostname"},
+		{name: "invalid number", ttls: []FactTTL{{Fact: "hostname", TTL: "many hours"}}, fact: "hostname"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got, ok := GroupTTLSeconds(tt.ttls, tt.fact); ok {
+				t.Fatalf("GroupTTLSeconds(%q) = %d, true; want false", tt.fact, got)
+			}
+		})
+	}
+}
+
+func TestGroupTTLSeconds_logsRubyCompatibleInvalidUnitError(t *testing.T) {
+	errors := []string{}
+	SetErrorHandler(func(message string) {
+		errors = append(errors, message)
+	})
+	t.Cleanup(func() { SetErrorHandler(nil) })
+
+	if got, ok := GroupTTLSeconds([]FactTTL{{Fact: "hostname", TTL: "30 invalid_unit"}}, "hostname"); ok {
+		t.Fatalf("GroupTTLSeconds(hostname) = %d, true; want false", got)
+	}
+	if len(errors) != 1 {
+		t.Fatalf("errors = %#v, want one error", errors)
+	}
+	want := "Could not parse time unit invalid_units (try ns, nanos, nanoseconds, us, micros, microseconds, ms, milis, milliseconds, s, seconds, m, minutes, h, hours, d, days)"
+	if errors[0] != want {
+		t.Fatalf("error = %q, want %q", errors[0], want)
+	}
+}
+
+func TestBlocklistedFactsForFiltering_retiredLegacyGroupBlocksNothing(t *testing.T) {
+	blocked := BlocklistedFactsForFiltering([]string{"legacy"}, nil)
+
+	facts := []ResolvedFact{
+		{Name: "os.name", Value: "Darwin"},
+		{Name: "networking.hostname", Value: "host.example.com"},
+		{Name: "processors.count", Value: 8},
+	}
+	got := FilterBlockedFacts(facts, blocked)
+	if !reflect.DeepEqual(got, facts) {
+		t.Fatalf("FilterBlockedFacts(legacy blocklist) = %#v, want discovery unchanged %#v", got, facts)
+	}
+}
+
+func TestBlocklistedFactsWithGroups_expandsGroupWithoutBlockingGroupName(t *testing.T) {
+	got := BlocklistedFactsWithGroups([]string{"blocked_group", "blocked_fact"}, []FactGroup{{Name: "blocked_group", Facts: []string{"fact1", "fact2"}}})
+	want := map[string]bool{"fact1": true, "fact2": true, "blocked_fact": true}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("BlocklistedFactsWithGroups() = %#v, want %#v", got, want)
+	}
+}
+
+func TestFilterBlockedFacts_blocksExactNameAndRoot(t *testing.T) {
+	facts := []ResolvedFact{
+		{Name: "os.name", Value: "Darwin", Type: "core"},
+		{Name: "networking.hostname", Value: "host.example.com", Type: "core"},
+	}
+
+	got := FilterBlockedFacts(facts, map[string]bool{"os.name": true})
+	want := []ResolvedFact{{Name: "networking.hostname", Value: "host.example.com", Type: "core"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("FilterBlockedFacts(os.name) = %#v, want %#v", got, want)
+	}
+
+	got = FilterBlockedFacts(facts, map[string]bool{"networking": true})
+	want = []ResolvedFact{{Name: "os.name", Value: "Darwin", Type: "core"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("FilterBlockedFacts(networking) = %#v, want %#v", got, want)
+	}
+}
+
+func TestConfigFactGroups_returnsConfiguredFactGroups(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "facter.conf")
+	content := `fact-groups : {
+  cached-custom-facts : [ "site_role", "site_location" ],
+  hardware : [ "dmi" ],
+}`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := ConfigFactGroups(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []FactGroup{
+		{Name: "cached-custom-facts", Facts: []string{"site_role", "site_location"}},
+		{Name: "hardware", Facts: []string{"dmi"}},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("ConfigFactGroups() = %#v, want %#v", got, want)
+	}
+}
+
+func TestConfigFactGroups_acceptsQuotedGroupNamesWithSpaces(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "facter.conf")
+	content := `fact-groups : {
+  "operating system" : [ "os", "os.name" ],
+}`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := ConfigFactGroups(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []FactGroup{{Name: "operating system", Facts: []string{"os", "os.name"}}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("ConfigFactGroups() = %#v, want %#v", got, want)
+	}
+}
+
+func TestConfigFactGroups_acceptsBareFactNames(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "facter.conf")
+	content := `fact-groups : {
+  cached-custom-facts : [ site_role, site_location ],
+}`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := ConfigFactGroups(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []FactGroup{{Name: "cached-custom-facts", Facts: []string{"site_role", "site_location"}}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("ConfigFactGroups() = %#v, want %#v", got, want)
+	}
+}
+
+func TestConfigFactGroups_acceptsScalarFactGroupValue(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "facter.conf")
+	content := `fact-groups : {
+  kernel : kernelversion,
+}`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := ConfigFactGroups(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []FactGroup{{Name: "kernel", Facts: []string{"kernelversion"}}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("ConfigFactGroups() = %#v, want %#v", got, want)
+	}
+}
+
+// TestConfigParser_pinnedSubsetBoundary pins the supported facter.conf
+// subset boundary documented in docs/FACTER_CONF_COMPATIBILITY.md: accepted
+// syntax on the supported side, and the behavior of general-HOCON features
+// (includes, substitutions) the Go port does not implement.
+func TestConfigParser_pinnedSubsetBoundary(t *testing.T) {
+	writeConfig := func(t *testing.T, content string) string {
+		t.Helper()
+		path := filepath.Join(t.TempDir(), "facter.conf")
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+
+	t.Run("equals separators and json style are accepted", func(t *testing.T) {
+		path := writeConfig(t, `global = {
+  external-dir = [ "/json/external" ]
+}`)
+		got, err := ConfigFileOptions(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := []string{"/json/external"}; !reflect.DeepEqual(got.ExternalDirs, want) {
+			t.Fatalf("ExternalDirs = %#v, want %#v", got.ExternalDirs, want)
+		}
+	})
+
+	t.Run("single-quoted strings are accepted leniently", func(t *testing.T) {
+		path := writeConfig(t, `cli : {
+  log-level : 'trace',
+}`)
+		got, err := ConfigFileOptions(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.LogLevel != "trace" {
+			t.Fatalf("LogLevel = %q, want %q", got.LogLevel, "trace")
+		}
+	})
+
+	t.Run("substitutions are never expanded", func(t *testing.T) {
+		path := writeConfig(t, `base-dir : "/resolved"
+global : {
+  external-dir : [ "${base-dir}" ],
+}`)
+		got, err := ConfigFileOptions(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, dir := range got.ExternalDirs {
+			if dir == "/resolved" {
+				t.Fatalf("ExternalDirs = %#v, substitution must not be expanded", got.ExternalDirs)
+			}
+		}
+	})
+
+	t.Run("include directives are not processed", func(t *testing.T) {
+		dir := t.TempDir()
+		included := filepath.Join(dir, "included.conf")
+		if err := os.WriteFile(included, []byte(`global : { external-dir : [ "/from/include" ] }`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(dir, "facter.conf")
+		content := "include \"" + included + "\"\nglobal : {\n  external-dir : [ \"/direct/external\" ],\n}"
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		got, err := ConfigFileOptions(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := []string{"/direct/external"}; !reflect.DeepEqual(got.ExternalDirs, want) {
+			t.Fatalf("ExternalDirs = %#v, include must not be processed: want %#v", got.ExternalDirs, want)
+		}
+	})
+
+	t.Run("config without key separators warns and is ignored", func(t *testing.T) {
+		path := writeConfig(t, "this is not hocon at all")
+		var warnings []string
+		SetWarningHandler(func(message string) { warnings = append(warnings, message) })
+		t.Cleanup(func() { SetWarningHandler(nil) })
+
+		got, err := ConfigFileOptions(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(got, ConfigOptions{}) {
+			t.Fatalf("ConfigFileOptions() = %#v, want empty options", got)
+		}
+		if len(warnings) != 1 || !strings.Contains(warnings[0], "invalid config") {
+			t.Fatalf("warnings = %#v, want one invalid config warning", warnings)
+		}
+	})
+
+	t.Run("inline comments after values are ignored", func(t *testing.T) {
+		path := writeConfig(t, `global : {
+  external-dir : [ "/kept" ], # comment with , and : inside
+  no-external-facts : true // trailing comment
+}`)
+		got, err := ConfigFileOptions(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := []string{"/kept"}; !reflect.DeepEqual(got.ExternalDirs, want) {
+			t.Fatalf("ExternalDirs = %#v, want %#v", got.ExternalDirs, want)
+		}
+		if !got.NoExternalFacts {
+			t.Fatal("NoExternalFacts = false, want true")
+		}
+	})
+}

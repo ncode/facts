@@ -1,0 +1,8 @@
+Facts
+Copyright 2026 Juliano Martinez
+
+This product is a Go port of Facter (https://github.com/puppetlabs/facter),
+Copyright Puppet, Inc., licensed under the Apache License, Version 2.0.
+The `facts` CLI it ships preserves Facter's command-line behavior, and the
+repository retains material derived from the Facter project, including its
+historical changelog, manual page, and behavior contracts.

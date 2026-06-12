@@ -1,0 +1,311 @@
+.\" generated with Ronn/v0.7.3
+.\" http://github.com/rtomayko/ronn/tree/0.7.3
+.
+.TH "FACTS" "8" "June 2026" "Facts" "Facts manual"
+.
+.SH "NAME"
+\fBfacts\fR \- collect and display facts about the current system
+.
+.SH "SYNOPSIS"
+\fBfacts\fR [options] [query] [query] [\.\.\.]
+.
+.SH "DESCRIPTION"
+\fBfacts\fR is a command\-line tool that gathers basic facts about nodes (systems) such as hardware details, network settings, OS type and version, and more\. These facts are made available as variables in your Puppet manifests and can be used to inform conditional expressions in Puppet\.
+.
+.P
+If no queries are given, then all facts will be returned\.
+.
+.P
+Many of the command line options can also be set via the HOCON config file\. This file can also be used to block or cache certain fact groups\.
+.
+.SH "OPTIONS"
+.
+.TP
+\fB\-\-color\fR:
+.
+.IP
+Force color output (by default, color is enabled when writing to a terminal and disabled otherwise)\. In the default output format, fact keys are colored by nesting depth\.
+.
+.TP
+\fB\-\-no\-color\fR:
+.
+.IP
+Disable color output\.
+.
+.TP
+\fB\-c\fR, \fB\-\-config\fR:
+.
+.IP
+The location of the config file\.
+.
+.TP
+\fB\-d\fR, \fB\-\-debug\fR:
+.
+.IP
+Enable debug output\.
+.
+.TP
+\fB\-\-external\-dir\fR:
+.
+.IP
+A directory to use for external facts\.
+.
+.TP
+\fB\-\-hocon\fR:
+.
+.IP
+Output in Hocon format\.
+.
+.TP
+\fB\-j\fR, \fB\-\-json\fR:
+.
+.IP
+Output in JSON format\.
+.
+.TP
+\fB\-l\fR, \fB\-\-log\-level\fR:
+.
+.IP
+Set logging level\. Supported levels are: none, trace, debug, info, warn, error, and fatal\.
+.
+.TP
+\fB\-\-no\-block\fR:
+.
+.IP
+Disable fact blocking\.
+.
+.TP
+\fB\-\-no\-cache\fR:
+.
+.IP
+Disable loading and refreshing facts from the cache
+.
+.TP
+\fB\-\-no\-external\-facts\fR:
+.
+.IP
+Disable external facts\.
+.
+.TP
+\fB\-\-verbose\fR:
+.
+.IP
+Enable verbose (info) output\.
+.
+.TP
+\fB\-y\fR, \fB\-\-yaml\fR:
+.
+.IP
+Output in YAML format\.
+.
+.TP
+\fB\-\-strict\fR:
+.
+.IP
+Enable more aggressive error reporting\.
+.
+.TP
+\fB\-t\fR, \fB\-\-timing\fR:
+.
+.IP
+Show how much time it took to resolve each fact
+.
+.TP
+\fB\-\-sequential\fR:
+.
+.IP
+Resolve facts sequentially
+.
+.TP
+\fB\-\-http\-debug\fR:
+.
+.IP
+Whether to write HTTP request and responses to stderr\. This should never be used in production\.
+.
+.TP
+\fB\-p\fR, \fB\-\-puppet\fR:
+.
+.IP
+Load the Puppet libraries, thus allowing Facts to load Puppet\-specific facts\.
+.
+.TP
+\fB\-\-version, \-v\fR:
+.
+.IP
+Print the version
+.
+.TP
+\fB\-\-list\-block\-groups\fR:
+.
+.IP
+List block groups
+.
+.TP
+\fB\-\-list\-cache\-groups\fR:
+.
+.IP
+List cache groups
+.
+.TP
+\fB\-\-help, \-h\fR:
+.
+.IP
+Help for all arguments
+.
+.TP
+\fB\-\-man\fR:
+.
+.IP
+Display this manual\.
+.
+.SH "EXIT STATUS"
+\fBfacts\fR exits 0 on success, including queries for facts that do not exist (which print nothing)\. It exits 1 when an option is invalid, when \fB\-\-strict\fR is given and a queried fact does not exist, or on any other runtime error\.
+.
+.SH "GO PORT NOTES"
+This manual describes the Go implementation of Facter\. Behavior differences from Ruby Facter 4:
+.
+.IP "\(bu" 4
+Ruby DSL fact files (\fB\.rb\fR) are not read from any source: there is no \fB\-\-custom\-dir\fR option, no \fBFACTERLIB\fR lookup, and no Ruby evaluation\. A \fB\.rb\fR file in an external\-fact directory is skipped with a warning\. Rewrite Ruby custom facts as external facts; see \fIdocs/CUSTOM_FACT_MIGRATION\.md\fR\.
+.
+.IP "\(bu" 4
+\fB\-\-puppet\fR resolves \fBpuppetversion\fR from the installed puppet binary and searches Puppet's default plugin\-fact destination paths for external facts, but it does not load Puppet Ruby plugin custom facts; a warning is emitted instead (see \fIdocs/CUSTOM_FACT_MIGRATION\.md\fR)\.
+.
+.IP "\(bu" 4
+\fB\-\-sequential\fR is accepted for compatibility; the Go engine resolves facts deterministically\. \fB\-\-trace\fR is removed along with the Ruby DSL layer (its only function was Ruby custom\-fact backtraces) and fails as an unknown option\.
+.
+.IP "\(bu" 4
+Legacy alias facts (Ruby Facter\'s deprecated flat aliases such as \fBoperatingsystem\fR, \fBhostname\fR, \fBprocessorcount\fR, \fBsshfp_*\fR, \fBmtu_*\fR) are removed entirely: they do not resolve in any output mode or query, the \fB\-\-show\-legacy\fR and \fB\-\-no\-show\-legacy\fR options fail as unknown options, the \fBshow\-legacy\fR config key is inert, and a \fBlegacy\fR blocklist entry blocks nothing\. Use the structured facts instead (\fBos\.name\fR, \fBnetworking\.hostname\fR, \fBprocessors\.count\fR, \fBssh\.*\fR); the full alias\-to\-structured table is in \fIdocs/adr/0007\-no\-legacy\-facts\-structured\-tree\-only\.md\fR\.
+.
+.IP "\(bu" 4
+Facts that cannot resolve a value or do not apply to the platform are omitted entirely instead of appearing with empty or placeholder values: \fBaugeas\fR without an augparse binary, \fBdisks\fR and \fBpartitions\fR when no devices enumerate, \fBprocessors\.speed\fR when the speed is unknown, \fBfips_enabled\fR outside Linux and Windows, and \fBos\.selinux\fR outside Linux\. Conversely, \fBprocessors\.extensions\fR is a deliberate deviation the other way: it reports accurate instruction\-set extension data (for example on Apple Silicon Macs) even where Ruby Facter 4 has no such key\.
+.
+.IP "\(bu" 4
+Primary IPv6 selection deviates from Ruby Facter 4: \fBnetworking\.ip6\fR, \fBnetworking\.network6\fR, and \fBnetworking\.scope6\fR prefer routable addresses on the primary interface \(em global scope first, then unique\-local, then link\-local \(em where Ruby reports the first\-bound address, which on some platforms (notably macOS) is the \fBfe80::\fR link\-local\. A primary interface that carries only link\-local IPv6 still reports it, with \fBscope6\fR \fBlink\fR, matching Ruby\.
+.
+.IP "" 0
+.
+.SH "FILES"
+\fI/etc/facts/facts\.conf\fR
+.
+.P
+The facts\-native HOCON config file, consulted first\. It can be used to specify directories for external facts, set various command line options, and specify facts to block\. See example below for details, or visit the GitHub README \fIhttps://github\.com/puppetlabs/puppetlabs\-hocon#overview\fR\.
+.
+.P
+\fI/etc/puppetlabs/facter/facter\.conf\fR
+.
+.P
+The facter\-compatible config file, read only when no facts\-native config file exists\. Both files are parsed with identical semantics; \fB\-\-config\fR overrides both\. On Windows the paths are \fIC:/ProgramData/facts/facts\.conf\fR and \fIC:/ProgramData/PuppetLabs/facter/etc/facter\.conf\fR\.
+.
+.SH "EXAMPLES"
+Display all facts:
+.
+.IP "" 4
+.
+.nf
+
+$ facts
+disks => {
+  sda => {
+    model => "Virtual disk",
+    size => "8\.00 GiB",
+    size_bytes => 8589934592,
+    vendor => "ExampleVendor"
+  }
+}
+dmi => {
+  bios => {
+    release_date => "06/23/2013",
+    vendor => "Example Vendor",
+    version => "6\.00"
+  }
+}
+[\.\.\.]
+.
+.fi
+.
+.IP "" 0
+.
+.P
+Display a single structured fact:
+.
+.IP "" 4
+.
+.nf
+
+$ facts processors
+{
+  count => 2,
+  isa => "x86_64",
+  models => [
+    "Intel(R) Xeon(R) CPU E5\-2680 v2 @ 2\.80GHz",
+    "Intel(R) Xeon(R) CPU E5\-2680 v2 @ 2\.80GHz"
+  ],
+  physicalcount => 2
+}
+.
+.fi
+.
+.IP "" 0
+.
+.P
+Display a single fact nested within a structured fact:
+.
+.IP "" 4
+.
+.nf
+
+$ facts processors\.isa
+x86_64
+.
+.fi
+.
+.IP "" 0
+.
+.P
+Format facts as JSON:
+.
+.IP "" 4
+.
+.nf
+
+$ facts \-\-json os\.name os\.release\.major processors\.isa
+{
+  "os\.name": "Ubuntu",
+  "os\.release\.major": "14\.04",
+  "processors\.isa": "x86_64"
+}
+.
+.fi
+.
+.IP "" 0
+.
+.P
+An example config file\.
+.
+.IP "" 4
+.
+.nf
+
+# always loaded (CLI and as Ruby module)
+global : {
+    external\-dir : "~/external/facts",
+    no\-external\-facts : false
+}
+# loaded when running from the command line
+cli : {
+    debug     : false,
+    verbose   : false,
+    log\-level : "info"
+}
+# always loaded, fact\-specific configuration
+facts : {
+    # for valid blocklist entries, use \-\-list\-block\-groups
+    blocklist : [ "file system", "EC2" ],
+    # for valid time\-to\-live entries, use \-\-list\-cache\-groups
+    ttls : [ { "timezone" : 30 days } ]
+}
+.
+.fi
+.
+.IP "" 0
+

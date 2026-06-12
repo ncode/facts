@@ -1,0 +1,12 @@
+# No Ruby custom-fact DSL; external facts are the whole input contract
+
+The Go port shipped a regex-based static parser (~4,900 lines including tests, ~17% of `internal/facter/`) that recognized a documented subset of the Facter Ruby DSL in `.rb` fact files — never an interpreter, just pattern extraction of literal values and command strings. With the project unreleased and no known deployments, we remove that layer entirely: Facts reads no `.rb` files anywhere, and the input contract narrows to external facts (structured data files, executables, environment variables) plus `facter.conf`. This partially supersedes ADR-0001, whose input contract included the custom-fact DSL; the output contract and the rest of the input contract are unchanged.
+
+The removal is a hard break, not a soft-disable: the `--custom-dir`, `--no-ruby`, `--no-custom-facts`, and `--trace` flags and `FACTERLIB` handling are dropped from the CLI (invocations passing them get a usage error), the matching `facter.conf` keys become inert like any other unrecognized key, and `WithCustomDirs` leaves the Go API. `--trace` goes with the layer because its only function was Ruby exception backtraces from custom-fact code — with no Ruby evaluation there is nothing it could ever do, and accepted no-op flags misrepresent what the binary does. Programmatic registration (`WithFact`) is unaffected — those are "registered facts," and the term "custom fact" is retired from the project vocabulary. Operators with `.rb` facts are pointed at `docs/CUSTOM_FACT_MIGRATION.md`, which maps common `Facter.add` patterns to external-fact equivalents.
+
+## Considered Options
+
+- **Keep the regex subset** — rejected: a pattern-matcher over a foreign language is the most fragile code in the engine, serves only standalone `--custom-dir`/`FACTERLIB` users (Puppet plugin-synced facts were already out of scope), and "claims Ruby compat but rejects most real Ruby" is a liability for adoption, not an asset.
+- **Embed a real Ruby interpreter (e.g. mruby)** — rejected: heavy dependency and a vastly larger compat surface for an audience we cannot demonstrate exists.
+- **Keep flags as accepted no-ops (permanent `--no-ruby` mode)** — rejected: with zero adoption there is nobody to protect from a usage error, and zombie flags misrepresent what the binary does.
+- **Remove the DSL layer (chosen)** — breaking only on paper; the project is days old with no users, so the contract amendment is free now and expensive after the first release.

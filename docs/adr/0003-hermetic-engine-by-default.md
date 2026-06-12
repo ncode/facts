@@ -1,0 +1,5 @@
+# Library engines are hermetic by default
+
+A freshly constructed `facter.Engine` resolves core facts only: it does not read `facter.conf`, does not scan default custom/external fact directories, does not execute external-fact scripts, and does not touch the persistent cache. All of that is explicit opt-in via functional options (`WithConfigFile`, `WithCustomDirs`, `WithExternalDirs`, `WithCache`, or `WithSystemDefaults` for full CLI-equivalent behavior). This deliberately diverges from the CLI, which follows the system automatically — a library that silently executes scripts found in well-known directories on the host is a security footgun, and implicit host config makes embedding consumers' behavior (and tests) nondeterministic. The input contract is unaffected: custom facts, external facts, and `facter.conf` all work identically once opted into, and the `facter` CLI constructs its engine system-following, so CLI behavior is unchanged.
+
+Do not "fix" the library default to match the CLI — the asymmetry is the decision.

@@ -1,0 +1,949 @@
+# The Facts schema: every fact the hermetic engine can emit, as dotted paths.
+#
+# Each entry maps a fact path (or `*` pattern, where `*` matches exactly one
+# path segment: interface names, mount paths, disk names, array indices) to:
+#
+#   type:        string | integer | double | boolean | map | array
+#   description: what the fact means, one line
+#   platforms:   the platforms that can emit it (linux, darwin, windows,
+#                freebsd)
+#   conditional: true when presence depends on host state (cloud instances,
+#                swap, DMI visibility, installed tools); such entries may be
+#                absent from a discovery without it being a bug
+#
+# A `map`- or `array`-typed entry covers every deeper leaf under it, so
+# provider-shaped subtrees (ec2_metadata, gce, az_metadata, system_profiler)
+# are documented at the subtree root.
+#
+# TestFactsSchemaConformance (schema_test.go) enforces this file on every
+# platform CI gate: an undocumented fact fails the gate, and a non-conditional
+# entry that never appears on its platform fails the gate. After adding a
+# fact, run:
+#
+#   go test -run TestFactsSchemaConformance . -args -schema-report
+#
+# to list exactly what still needs an entry here.
+
+aio_agent_version:
+  type: string
+  description: The puppet-agent (AIO) package version, when one is installed.
+  platforms: [linux, darwin, windows, freebsd]
+  conditional: true
+
+augeas.version:
+  type: string
+  description: The Augeas version reported by augparse, when Augeas is installed.
+  platforms: [linux, darwin, windows, freebsd]
+  conditional: true
+
+az_metadata:
+  type: map
+  description: The Azure Instance Metadata Service tree, on Azure virtual machines.
+  platforms: [linux, windows]
+  conditional: true
+
+cloud.provider:
+  type: string
+  description: "The cloud provider hosting the machine: aws, azure, or gce."
+  platforms: [linux, windows, freebsd]
+  conditional: true
+
+disks.*:
+  type: map
+  description: A block device attached to the system, keyed by device name.
+  platforms: [linux, freebsd]
+  conditional: true
+disks.*.model:
+  type: string
+  description: The model of the disk.
+  platforms: [linux, freebsd]
+  conditional: true
+disks.*.serial:
+  type: string
+  description: The serial number of the disk.
+  platforms: [linux]
+  conditional: true
+disks.*.serial_number:
+  type: string
+  description: The serial number of the disk.
+  platforms: [freebsd]
+  conditional: true
+disks.*.size:
+  type: string
+  description: The display size of the disk, such as 1.00 GiB.
+  platforms: [linux, freebsd]
+  conditional: true
+disks.*.size_bytes:
+  type: integer
+  description: The size of the disk, in bytes.
+  platforms: [linux, freebsd]
+  conditional: true
+disks.*.type:
+  type: string
+  description: "The kind of disk: ssd or hdd."
+  platforms: [linux]
+  conditional: true
+disks.*.vendor:
+  type: string
+  description: The vendor of the disk.
+  platforms: [linux]
+  conditional: true
+disks.*.wwn:
+  type: string
+  description: The World Wide Name of the disk.
+  platforms: [linux]
+  conditional: true
+
+dmi.bios.release_date:
+  type: string
+  description: The release date of the system BIOS.
+  platforms: [linux, freebsd]
+  conditional: true
+dmi.bios.vendor:
+  type: string
+  description: The vendor of the system BIOS.
+  platforms: [linux, freebsd]
+  conditional: true
+dmi.bios.version:
+  type: string
+  description: The version of the system BIOS.
+  platforms: [linux, freebsd]
+  conditional: true
+dmi.board.asset_tag:
+  type: string
+  description: The asset tag of the motherboard.
+  platforms: [linux]
+  conditional: true
+dmi.board.manufacturer:
+  type: string
+  description: The manufacturer of the motherboard.
+  platforms: [linux]
+  conditional: true
+dmi.board.product:
+  type: string
+  description: The product name of the motherboard.
+  platforms: [linux]
+  conditional: true
+dmi.board.serial_number:
+  type: string
+  description: The serial number of the motherboard.
+  platforms: [linux]
+  conditional: true
+dmi.chassis.asset_tag:
+  type: string
+  description: The asset tag of the chassis.
+  platforms: [linux]
+  conditional: true
+dmi.chassis.type:
+  type: string
+  description: The chassis type of the system, such as Desktop or Rack Mount Chassis.
+  platforms: [linux]
+  conditional: true
+dmi.manufacturer:
+  type: string
+  description: The manufacturer of the system.
+  platforms: [linux, windows, freebsd]
+  conditional: true
+dmi.product.name:
+  type: string
+  description: The product name of the system (the hardware model on macOS).
+  platforms: [linux, darwin, windows, freebsd]
+  conditional: true
+dmi.product.serial_number:
+  type: string
+  description: The serial number of the system.
+  platforms: [linux, windows, freebsd]
+  conditional: true
+dmi.product.uuid:
+  type: string
+  description: The hardware UUID of the system.
+  platforms: [linux, windows, freebsd]
+  conditional: true
+dmi.product.version:
+  type: string
+  description: The product version of the system.
+  platforms: [linux]
+  conditional: true
+
+ec2_metadata:
+  type: map
+  description: The EC2 instance metadata tree, on AWS instances.
+  platforms: [linux, windows, freebsd]
+  conditional: true
+ec2_userdata:
+  type: string
+  description: The EC2 instance user data, on AWS instances that define it.
+  platforms: [linux, windows, freebsd]
+  conditional: true
+
+facterversion:
+  type: string
+  description: The Facter compatibility version of the Facts engine.
+  platforms: [linux, darwin, windows, freebsd]
+
+filesystems:
+  type: string
+  description: The usable filesystem types, as a comma-separated list.
+  platforms: [linux, darwin]
+
+fips_enabled:
+  type: boolean
+  description: Whether the platform enforces FIPS-validated cryptography.
+  platforms: [linux, windows]
+
+gce:
+  type: map
+  description: The Google Compute Engine metadata tree, on GCE instances.
+  platforms: [linux, windows]
+  conditional: true
+
+hypervisors.docker:
+  type: map
+  description: Docker (or containerd/Kubernetes) container details, when running inside one.
+  platforms: [linux]
+  conditional: true
+hypervisors.docker.id:
+  type: string
+  description: The container identifier from the cgroup path.
+  platforms: [linux]
+  conditional: true
+hypervisors.hyperv:
+  type: map
+  description: Hyper-V guest details, when running on Microsoft Hyper-V (including Azure).
+  platforms: [linux, windows]
+  conditional: true
+hypervisors.kvm:
+  type: map
+  description: KVM guest details, when running on a KVM hypervisor.
+  platforms: [linux, windows]
+  conditional: true
+hypervisors.kvm.google:
+  type: boolean
+  description: Whether the KVM hypervisor is Google Compute Engine.
+  platforms: [windows]
+  conditional: true
+hypervisors.kvm.openstack:
+  type: boolean
+  description: Whether the KVM hypervisor is OpenStack.
+  platforms: [windows]
+  conditional: true
+hypervisors.lxc:
+  type: map
+  description: LXC container details, when running inside an LXC container.
+  platforms: [linux]
+  conditional: true
+hypervisors.lxc-virtwhat:
+  type: map
+  description: LXC container details, when the container runtime reports itself as lxc-virtwhat.
+  platforms: [linux]
+  conditional: true
+hypervisors.lxc.name:
+  type: string
+  description: The LXC container name from the cgroup path.
+  platforms: [linux]
+  conditional: true
+hypervisors.openvz:
+  type: map
+  description: OpenVZ details, when running on an OpenVZ host or container.
+  platforms: [linux]
+  conditional: true
+hypervisors.openvz.host:
+  type: boolean
+  description: Whether this is the OpenVZ hardware node rather than a container.
+  platforms: [linux]
+  conditional: true
+hypervisors.openvz.id:
+  type: integer
+  description: The OpenVZ container environment identifier.
+  platforms: [linux]
+  conditional: true
+hypervisors.systemd_nspawn:
+  type: map
+  description: systemd-nspawn container details, when running inside one.
+  platforms: [linux]
+  conditional: true
+hypervisors.systemd_nspawn.id:
+  type: string
+  description: The machine identifier of the systemd-nspawn container.
+  platforms: [linux]
+  conditional: true
+hypervisors.virtualbox:
+  type: map
+  description: VirtualBox guest details, when running on VirtualBox.
+  platforms: [linux, windows]
+  conditional: true
+hypervisors.virtualbox.revision:
+  type: string
+  description: The revision of the VirtualBox hypervisor.
+  platforms: [linux, windows]
+  conditional: true
+hypervisors.virtualbox.version:
+  type: string
+  description: The version of the VirtualBox hypervisor.
+  platforms: [linux, windows]
+  conditional: true
+hypervisors.vmware:
+  type: map
+  description: VMware guest details, when running on VMware.
+  platforms: [linux, windows]
+  conditional: true
+hypervisors.vmware.version:
+  type: string
+  description: The version of the VMware hypervisor, such as ESXi 6.7.
+  platforms: [linux]
+  conditional: true
+hypervisors.xen:
+  type: map
+  description: Xen guest details, when running on Xen.
+  platforms: [linux, windows]
+  conditional: true
+hypervisors.xen.context:
+  type: string
+  description: "The Xen virtualization context: hvm or pv."
+  platforms: [linux, windows]
+  conditional: true
+hypervisors.xen.privileged:
+  type: boolean
+  description: Whether the machine is the privileged Xen dom0 domain.
+  platforms: [linux]
+  conditional: true
+
+identity.gid:
+  type: integer
+  description: The group identifier of the user running Facts.
+  platforms: [linux, darwin, freebsd]
+identity.group:
+  type: string
+  description: The group name of the user running Facts.
+  platforms: [linux, darwin, freebsd]
+identity.privileged:
+  type: boolean
+  description: Whether Facts is running with root (or Administrator) privileges.
+  platforms: [linux, darwin, windows, freebsd]
+identity.uid:
+  type: integer
+  description: The user identifier of the user running Facts.
+  platforms: [linux, darwin, freebsd]
+identity.user:
+  type: string
+  description: The name of the user running Facts.
+  platforms: [linux, darwin, windows, freebsd]
+
+is_virtual:
+  type: boolean
+  description: Whether the machine is a virtual machine or container.
+  platforms: [linux, darwin, windows, freebsd]
+
+kernel:
+  type: string
+  description: The kernel name, such as Linux, Darwin, windows, or FreeBSD.
+  platforms: [linux, darwin, windows, freebsd]
+kernelmajversion:
+  type: string
+  description: The two-component kernel version, such as 6.8.
+  platforms: [linux, darwin, windows, freebsd]
+kernelrelease:
+  type: string
+  description: The full kernel release reported by the system.
+  platforms: [linux, darwin, windows, freebsd]
+kernelversion:
+  type: string
+  description: The kernel version, without any release suffix.
+  platforms: [linux, darwin, windows, freebsd]
+
+load_averages.1m:
+  type: double
+  description: The 1-minute system load average (null on Windows).
+  platforms: [linux, darwin, windows, freebsd]
+load_averages.5m:
+  type: double
+  description: The 5-minute system load average (null on Windows).
+  platforms: [linux, darwin, windows, freebsd]
+load_averages.15m:
+  type: double
+  description: The 15-minute system load average (null on Windows).
+  platforms: [linux, darwin, windows, freebsd]
+
+memory.swap.available:
+  type: string
+  description: The display amount of free swap, such as 1.00 GiB.
+  platforms: [linux, darwin, freebsd]
+  conditional: true
+memory.swap.available_bytes:
+  type: integer
+  description: The free swap, in bytes.
+  platforms: [linux, darwin, freebsd]
+  conditional: true
+memory.swap.capacity:
+  type: string
+  description: The percentage of swap in use.
+  platforms: [linux, darwin, freebsd]
+  conditional: true
+memory.swap.encrypted:
+  type: boolean
+  description: Whether the swap is encrypted.
+  platforms: [linux, darwin, freebsd]
+  conditional: true
+memory.swap.total:
+  type: string
+  description: The display amount of total swap, such as 1.00 GiB.
+  platforms: [linux, darwin, freebsd]
+  conditional: true
+memory.swap.total_bytes:
+  type: integer
+  description: The total swap, in bytes.
+  platforms: [linux, darwin, freebsd]
+  conditional: true
+memory.swap.used:
+  type: string
+  description: The display amount of swap in use, such as 1.00 GiB.
+  platforms: [linux, darwin, freebsd]
+  conditional: true
+memory.swap.used_bytes:
+  type: integer
+  description: The swap in use, in bytes.
+  platforms: [linux, darwin, freebsd]
+  conditional: true
+memory.system.available:
+  type: string
+  description: The display amount of free physical memory, such as 1.00 GiB.
+  platforms: [linux, darwin, windows, freebsd]
+memory.system.available_bytes:
+  type: integer
+  description: The free physical memory, in bytes.
+  platforms: [linux, darwin, windows, freebsd]
+memory.system.capacity:
+  type: string
+  description: The percentage of physical memory in use.
+  platforms: [linux, darwin, windows, freebsd]
+memory.system.total:
+  type: string
+  description: The display amount of total physical memory, such as 16.00 GiB.
+  platforms: [linux, darwin, windows, freebsd]
+memory.system.total_bytes:
+  type: integer
+  description: The total physical memory, in bytes.
+  platforms: [linux, darwin, windows, freebsd]
+memory.system.used:
+  type: string
+  description: The display amount of physical memory in use, such as 1.00 GiB.
+  platforms: [linux, darwin, windows, freebsd]
+memory.system.used_bytes:
+  type: integer
+  description: The physical memory in use, in bytes.
+  platforms: [linux, darwin, windows, freebsd]
+
+mountpoints.*:
+  type: map
+  description: A mounted filesystem, keyed by mount path.
+  platforms: [linux, darwin, windows, freebsd]
+mountpoints.*.available:
+  type: string
+  description: The display amount of free space on the mount, such as 1.00 GiB.
+  platforms: [linux, darwin, freebsd]
+mountpoints.*.available_bytes:
+  type: integer
+  description: The free space on the mount, in bytes.
+  platforms: [linux, darwin, freebsd]
+mountpoints.*.capacity:
+  type: string
+  description: The percentage of the mount's space in use.
+  platforms: [linux, darwin, freebsd]
+mountpoints.*.device:
+  type: string
+  description: The device backing the mount.
+  platforms: [linux, darwin, freebsd]
+mountpoints.*.filesystem:
+  type: string
+  description: The filesystem type of the mount.
+  platforms: [linux, darwin, freebsd]
+mountpoints.*.options:
+  type: array
+  description: The mount options the filesystem is mounted with.
+  platforms: [linux, darwin, freebsd]
+mountpoints.*.size:
+  type: string
+  description: The display size of the mount, such as 100.00 GiB.
+  platforms: [linux, darwin, freebsd]
+mountpoints.*.size_bytes:
+  type: integer
+  description: The size of the mount, in bytes.
+  platforms: [linux, darwin, freebsd]
+mountpoints.*.used:
+  type: string
+  description: The display amount of space in use on the mount, such as 1.00 GiB.
+  platforms: [linux, darwin, freebsd]
+mountpoints.*.used_bytes:
+  type: integer
+  description: The space in use on the mount, in bytes.
+  platforms: [linux, darwin, freebsd]
+
+networking.dhcp:
+  type: string
+  description: The DHCP server of the primary interface, when known.
+  platforms: [linux, darwin, windows, freebsd]
+networking.domain:
+  type: string
+  description: The DNS domain of the host, when one is configured.
+  platforms: [linux, darwin, windows, freebsd]
+  conditional: true
+networking.fqdn:
+  type: string
+  description: The fully qualified domain name of the host.
+  platforms: [linux, darwin, windows, freebsd]
+networking.hostname:
+  type: string
+  description: The short host name of the machine.
+  platforms: [linux, darwin, windows, freebsd]
+networking.interfaces.*:
+  type: map
+  description: A network interface, keyed by interface name.
+  platforms: [linux, darwin, windows, freebsd]
+networking.interfaces.*.bindings:
+  type: array
+  description: The IPv4 bindings of the interface (address, netmask, network).
+  platforms: [linux, darwin, windows, freebsd]
+  conditional: true
+networking.interfaces.*.bindings6:
+  type: array
+  description: The IPv6 bindings of the interface (address, netmask, network, scope6, flags).
+  platforms: [linux, darwin, windows, freebsd]
+  conditional: true
+networking.interfaces.*.dhcp:
+  type: string
+  description: The DHCP server of the interface, when known (null on Windows interfaces without one).
+  platforms: [linux, darwin, windows]
+  conditional: true
+networking.interfaces.*.dns_suffix:
+  type: string
+  description: The connection-specific DNS suffix of the interface.
+  platforms: [windows]
+  conditional: true
+networking.interfaces.*.duplex:
+  type: string
+  description: "The duplex mode of the interface: full or half."
+  platforms: [linux]
+  conditional: true
+networking.interfaces.*.ip:
+  type: string
+  description: The first IPv4 address bound to the interface.
+  platforms: [linux, darwin, windows, freebsd]
+  conditional: true
+networking.interfaces.*.ip6:
+  type: string
+  description: The first IPv6 address bound to the interface.
+  platforms: [linux, darwin, windows, freebsd]
+  conditional: true
+networking.interfaces.*.mac:
+  type: string
+  description: The MAC address of the interface.
+  platforms: [linux, darwin, windows, freebsd]
+  conditional: true
+networking.interfaces.*.mtu:
+  type: integer
+  description: The maximum transmission unit of the interface.
+  platforms: [linux, darwin, windows, freebsd]
+networking.interfaces.*.netmask:
+  type: string
+  description: The IPv4 netmask of the interface's first binding.
+  platforms: [linux, darwin, windows, freebsd]
+  conditional: true
+networking.interfaces.*.netmask6:
+  type: string
+  description: The IPv6 netmask of the interface's first binding.
+  platforms: [linux, darwin, windows, freebsd]
+  conditional: true
+networking.interfaces.*.network:
+  type: string
+  description: The IPv4 network of the interface's first binding.
+  platforms: [linux, darwin, windows, freebsd]
+  conditional: true
+networking.interfaces.*.network6:
+  type: string
+  description: The IPv6 network of the interface's first binding.
+  platforms: [linux, darwin, windows, freebsd]
+  conditional: true
+networking.interfaces.*.operational_state:
+  type: string
+  description: The operational state of the interface, such as up or down.
+  platforms: [linux]
+  conditional: true
+networking.interfaces.*.physical:
+  type: boolean
+  description: Whether the interface is a physical device.
+  platforms: [linux]
+networking.interfaces.*.scope6:
+  type: string
+  description: The IPv6 scope of the interface's first binding, such as global or link.
+  platforms: [linux, darwin, windows, freebsd]
+  conditional: true
+networking.interfaces.*.speed:
+  type: integer
+  description: The negotiated speed of the interface, in Mbit/s.
+  platforms: [linux]
+  conditional: true
+networking.ip:
+  type: string
+  description: The IPv4 address of the primary interface.
+  platforms: [linux, darwin, windows, freebsd]
+networking.ip6:
+  type: string
+  description: The IPv6 address of the primary interface.
+  platforms: [linux, darwin, windows, freebsd]
+networking.mac:
+  type: string
+  description: The MAC address of the primary interface.
+  platforms: [linux, darwin, windows, freebsd]
+networking.mtu:
+  type: integer
+  description: The maximum transmission unit of the primary interface.
+  platforms: [linux, darwin, windows, freebsd]
+  conditional: true
+networking.netmask:
+  type: string
+  description: The IPv4 netmask of the primary interface.
+  platforms: [linux, darwin, windows, freebsd]
+networking.netmask6:
+  type: string
+  description: The IPv6 netmask of the primary interface.
+  platforms: [linux, darwin, windows, freebsd]
+networking.network:
+  type: string
+  description: The IPv4 network of the primary interface.
+  platforms: [linux, darwin, windows, freebsd]
+networking.network6:
+  type: string
+  description: The IPv6 network of the primary interface.
+  platforms: [linux, darwin, windows, freebsd]
+networking.primary:
+  type: string
+  description: The name of the primary interface.
+  platforms: [linux, darwin, windows, freebsd]
+networking.scope6:
+  type: string
+  description: The IPv6 scope of the primary interface, such as global or link.
+  platforms: [linux, darwin, windows, freebsd]
+
+os.architecture:
+  type: string
+  description: The operating system's hardware architecture, such as x86_64 or arm64.
+  platforms: [linux, darwin, windows, freebsd]
+os.distro.codename:
+  type: string
+  description: The codename of the distribution release, such as noble.
+  platforms: [linux]
+  conditional: true
+os.distro.description:
+  type: string
+  description: The full description of the distribution release.
+  platforms: [linux]
+os.distro.id:
+  type: string
+  description: The distributor identifier of the distribution, such as ubuntu or debian.
+  platforms: [linux]
+os.distro.release.full:
+  type: string
+  description: The full release number of the distribution.
+  platforms: [linux]
+os.distro.release.major:
+  type: string
+  description: The major release number of the distribution.
+  platforms: [linux]
+os.distro.release.minor:
+  type: string
+  description: The minor release number of the distribution, when it has one.
+  platforms: [linux]
+  conditional: true
+os.distro.specification:
+  type: string
+  description: The LSB specification version, when lsb_release is installed.
+  platforms: [linux]
+  conditional: true
+os.family:
+  type: string
+  description: The operating system family, such as Debian, RedHat, Darwin, or windows.
+  platforms: [linux, darwin, windows, freebsd]
+os.hardware:
+  type: string
+  description: The hardware model of the machine, such as x86_64.
+  platforms: [linux, darwin, windows, freebsd]
+os.macosx.build:
+  type: string
+  description: The macOS build number, such as 24F74.
+  platforms: [darwin]
+os.macosx.product:
+  type: string
+  description: The macOS product name, such as macOS.
+  platforms: [darwin]
+os.macosx.version.extra:
+  type: string
+  description: The macOS Rapid Security Response revision, when one is applied.
+  platforms: [darwin]
+  conditional: true
+os.macosx.version.full:
+  type: string
+  description: The full macOS version, such as 15.5.
+  platforms: [darwin]
+os.macosx.version.major:
+  type: string
+  description: The major macOS version, such as 15.
+  platforms: [darwin]
+os.macosx.version.minor:
+  type: string
+  description: The minor macOS version.
+  platforms: [darwin]
+os.macosx.version.patch:
+  type: string
+  description: The patch macOS version (absent on macOS 10.x).
+  platforms: [darwin]
+  conditional: true
+os.name:
+  type: string
+  description: The operating system name, such as Ubuntu, Darwin, or windows.
+  platforms: [linux, darwin, windows, freebsd]
+os.release.branch:
+  type: string
+  description: The FreeBSD release branch, such as RELEASE-p5.
+  platforms: [freebsd]
+os.release.full:
+  type: string
+  description: The full release number of the operating system.
+  platforms: [linux, darwin, windows, freebsd]
+os.release.major:
+  type: string
+  description: The major release number of the operating system.
+  platforms: [linux, darwin, windows, freebsd]
+os.release.minor:
+  type: string
+  description: The minor release number of the operating system, when it has one.
+  platforms: [linux, darwin, freebsd]
+  conditional: true
+os.release.patchlevel:
+  type: string
+  description: The FreeBSD patch level of the installed userland.
+  platforms: [freebsd]
+  conditional: true
+os.selinux.config_mode:
+  type: string
+  description: The SELinux mode set in the config file, when SELinux is enabled.
+  platforms: [linux]
+  conditional: true
+os.selinux.config_policy:
+  type: string
+  description: The SELinux policy set in the config file, when SELinux is enabled.
+  platforms: [linux]
+  conditional: true
+os.selinux.current_mode:
+  type: string
+  description: "The current SELinux mode: enforcing or permissive."
+  platforms: [linux]
+  conditional: true
+os.selinux.enabled:
+  type: boolean
+  description: Whether SELinux is enabled.
+  platforms: [linux]
+os.selinux.enforced:
+  type: boolean
+  description: Whether SELinux is enforcing, when SELinux is enabled.
+  platforms: [linux]
+  conditional: true
+os.selinux.policy_version:
+  type: string
+  description: The loaded SELinux policy version, when SELinux is enabled.
+  platforms: [linux]
+  conditional: true
+os.windows.display_version:
+  type: string
+  description: The Windows display version, such as 24H2 (Windows 10 20H2 and later).
+  platforms: [windows]
+  conditional: true
+os.windows.edition_id:
+  type: string
+  description: The Windows edition identifier, such as ServerDatacenter.
+  platforms: [windows]
+os.windows.installation_type:
+  type: string
+  description: The Windows installation type, such as Server or Client.
+  platforms: [windows]
+os.windows.product_name:
+  type: string
+  description: The Windows product name, such as Windows Server 2022 Datacenter.
+  platforms: [windows]
+os.windows.release_id:
+  type: string
+  description: The Windows release identifier (the display version when available).
+  platforms: [windows]
+os.windows.system32:
+  type: string
+  description: The native system32 directory, sysnative-aware for 32-bit processes.
+  platforms: [windows]
+
+partitions.*:
+  type: map
+  description: A disk partition (or device-mapper/loop device), keyed by device path.
+  platforms: [linux, freebsd]
+  conditional: true
+partitions.*.backing_file:
+  type: string
+  description: The file backing the loop device.
+  platforms: [linux]
+  conditional: true
+partitions.*.filesystem:
+  type: string
+  description: The filesystem type of the partition.
+  platforms: [linux]
+  conditional: true
+partitions.*.label:
+  type: string
+  description: The filesystem label of the partition.
+  platforms: [linux]
+  conditional: true
+partitions.*.mount:
+  type: string
+  description: The path the partition is mounted on.
+  platforms: [linux, freebsd]
+  conditional: true
+partitions.*.partlabel:
+  type: string
+  description: The partition label from the partition table.
+  platforms: [linux, freebsd]
+  conditional: true
+partitions.*.parttype:
+  type: string
+  description: The partition type GUID or identifier.
+  platforms: [linux]
+  conditional: true
+partitions.*.partuuid:
+  type: string
+  description: The partition UUID from the partition table.
+  platforms: [linux, freebsd]
+  conditional: true
+partitions.*.size:
+  type: string
+  description: The display size of the partition, such as 1.00 GiB.
+  platforms: [linux, freebsd]
+  conditional: true
+partitions.*.size_bytes:
+  type: integer
+  description: The size of the partition, in bytes.
+  platforms: [linux, freebsd]
+  conditional: true
+partitions.*.uuid:
+  type: string
+  description: The filesystem UUID of the partition.
+  platforms: [linux]
+  conditional: true
+
+path:
+  type: string
+  description: The PATH environment variable of the Facts process.
+  platforms: [linux, darwin, windows, freebsd]
+
+processors.cores:
+  type: integer
+  description: The number of cores per processor socket.
+  platforms: [linux, darwin, windows, freebsd]
+processors.count:
+  type: integer
+  description: The number of logical processors.
+  platforms: [linux, darwin, windows, freebsd]
+processors.extensions:
+  type: array
+  description: The instruction set architectures the processors support, including the base architecture and x86_64 microarchitecture levels.
+  platforms: [linux, darwin, windows, freebsd]
+processors.isa:
+  type: string
+  description: The processor instruction set architecture, as reported by uname -p.
+  platforms: [linux, darwin, windows, freebsd]
+processors.models:
+  type: array
+  description: The processor model strings, one entry per logical processor.
+  platforms: [linux, darwin, windows, freebsd]
+processors.physicalcount:
+  type: integer
+  description: The number of physical processor sockets.
+  platforms: [linux, darwin, windows, freebsd]
+processors.speed:
+  type: string
+  description: The display speed of the processors, such as 2.40 GHz, where the platform reports one (absent on Apple Silicon).
+  platforms: [linux, darwin, freebsd]
+  conditional: true
+processors.threads:
+  type: integer
+  description: The number of hardware threads per core.
+  platforms: [linux, darwin, windows, freebsd]
+
+ruby.platform:
+  type: string
+  description: The platform of the Ruby runtime on the PATH, when one exists.
+  platforms: [linux, darwin, windows, freebsd]
+  conditional: true
+ruby.sitedir:
+  type: string
+  description: The site library directory of the Ruby runtime on the PATH, when one exists.
+  platforms: [linux, darwin, windows, freebsd]
+  conditional: true
+ruby.version:
+  type: string
+  description: The version of the Ruby runtime on the PATH, when one exists.
+  platforms: [linux, darwin, windows, freebsd]
+  conditional: true
+
+ssh.*.fingerprints.sha1:
+  type: string
+  description: The SSHFP SHA-1 fingerprint of the SSH host key, keyed by key algorithm.
+  platforms: [linux, darwin, windows, freebsd]
+  conditional: true
+ssh.*.fingerprints.sha256:
+  type: string
+  description: The SSHFP SHA-256 fingerprint of the SSH host key, keyed by key algorithm.
+  platforms: [linux, darwin, windows, freebsd]
+  conditional: true
+ssh.*.key:
+  type: string
+  description: The public SSH host key, keyed by key algorithm.
+  platforms: [linux, darwin, windows, freebsd]
+  conditional: true
+ssh.*.type:
+  type: string
+  description: The SSH host key type, such as ssh-ed25519, keyed by key algorithm.
+  platforms: [linux, darwin, windows, freebsd]
+  conditional: true
+
+system_profiler:
+  type: map
+  description: macOS system_profiler hardware, software, and Ethernet details (provider-shaped keys, such as model_name and serial_number).
+  platforms: [darwin]
+
+system_uptime.days:
+  type: integer
+  description: The whole days the system has been up.
+  platforms: [linux, darwin, windows, freebsd]
+system_uptime.hours:
+  type: integer
+  description: The whole hours the system has been up.
+  platforms: [linux, darwin, windows, freebsd]
+system_uptime.seconds:
+  type: integer
+  description: The seconds the system has been up.
+  platforms: [linux, darwin, windows, freebsd]
+system_uptime.uptime:
+  type: string
+  description: The display form of the system uptime, such as 3 days.
+  platforms: [linux, darwin, windows, freebsd]
+
+timezone:
+  type: string
+  description: The abbreviated time zone name of the system, such as UTC.
+  platforms: [linux, darwin, windows, freebsd]
+
+virtual:
+  type: string
+  description: The hypervisor or container technology the machine runs under, or physical.
+  platforms: [linux, darwin, windows, freebsd]
+
+xen.domains:
+  type: array
+  description: The names of the running Xen guest domains, on a Xen dom0 host.
+  platforms: [linux]
+  conditional: true

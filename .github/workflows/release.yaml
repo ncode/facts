@@ -1,0 +1,59 @@
+---
+name: Release artifacts
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+env:
+  CI: true
+
+permissions:
+  contents: write
+
+jobs:
+  dist:
+    name: Build and attach dist artifacts
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout release ref
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build dist matrix
+        run: make dist
+
+      - name: Smoke linux artifact
+        run: |
+          set -e
+          version="$(sed -n 's/^const Version = "\(.*\)"$/\1/p' internal/engine/core.go)"
+          tar -xzf "dist/facts-${version}-linux-amd64.tar.gz" -C /tmp
+          got="$(/tmp/facts-${version}-linux-amd64/facts --version)"
+          test "$got" = "$version"
+
+      - name: Upload dist artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: facts-dist
+          path: |
+            dist/facts-*.tar.gz
+            dist/facts-*.zip
+            dist/SHA256SUMS
+
+      - name: Attach artifacts and checksums to release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ github.event.release.tag_name }}" \
+            dist/facts-*.tar.gz \
+            dist/facts-*.zip \
+            dist/SHA256SUMS \
+            --clobber

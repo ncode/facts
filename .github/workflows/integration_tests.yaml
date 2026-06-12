@@ -1,0 +1,219 @@
+---
+name: Go workload tests
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+env:
+  CI: true
+
+permissions:
+  contents: read
+
+jobs:
+  linux_container_tests:
+    name: Go test container (${{ matrix.image }})
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - golang:1.26-bookworm
+          - golang:1.26-alpine
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout current PR
+        uses: actions/checkout@v4
+
+      - name: Test in container
+        shell: bash
+        run: |
+          docker run --rm \
+            -e CI=true \
+            -e GOFLAGS=-buildvcs=false \
+            -v "$PWD:/workspace" \
+            -w /workspace \
+            ${{ matrix.image }} \
+            sh -c 'go test ./... && go run ./cmd/facts --json os.name kernel virtual'
+
+  linux_distro_fact_tests:
+    name: Distro facts (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Debian 12
+            image: debian:12-slim
+            expected_os_name: Debian
+            expected_os_family: Debian
+            expected_distro_id: debian
+            expected_description_prefix: Debian GNU/Linux 12
+            expected_os_release_major: "12"
+            expected_distro_release_major: "12"
+            require_release: "true"
+          - name: Ubuntu 24.04
+            image: ubuntu:24.04
+            expected_os_name: Ubuntu
+            expected_os_family: Debian
+            expected_distro_id: ubuntu
+            expected_description_prefix: Ubuntu 24.04
+            expected_os_release_major: "24.04"
+            expected_distro_release_major: "24.04"
+            require_release: "true"
+          - name: Arch Linux
+            image: archlinux:latest
+            expected_os_name: Archlinux
+            expected_os_family: Archlinux
+            expected_distro_id: arch
+            expected_description_prefix: Arch Linux
+            expected_os_release_major: ""
+            expected_distro_release_major: ""
+            require_release: "true"
+          - name: Oracle Linux 9
+            image: oraclelinux:9
+            expected_os_name: OracleLinux
+            expected_os_family: RedHat
+            expected_distro_id: ol
+            expected_description_prefix: Oracle Linux Server 9
+            expected_os_release_major: "9"
+            expected_distro_release_major: "9"
+            require_release: "true"
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout current PR
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build Linux binary
+        env:
+          CGO_ENABLED: 0
+          GOOS: linux
+          GOARCH: amd64
+        run: go build -o dist/facts-linux-amd64 ./cmd/facts
+
+      - name: Validate distro facts
+        shell: bash
+        env:
+          IMAGE: ${{ matrix.image }}
+          EXPECTED_OS_NAME: ${{ matrix.expected_os_name }}
+          EXPECTED_OS_FAMILY: ${{ matrix.expected_os_family }}
+          EXPECTED_DISTRO_ID: ${{ matrix.expected_distro_id }}
+          EXPECTED_DESCRIPTION_PREFIX: ${{ matrix.expected_description_prefix }}
+          EXPECTED_OS_RELEASE_MAJOR: ${{ matrix.expected_os_release_major }}
+          EXPECTED_DISTRO_RELEASE_MAJOR: ${{ matrix.expected_distro_release_major }}
+          REQUIRE_RELEASE: ${{ matrix.require_release }}
+        run: |
+          output="$(
+            docker run --rm --platform linux/amd64 \
+              -e CI=true \
+              -v "$PWD/dist/facts-linux-amd64:/usr/local/bin/facts:ro" \
+              "$IMAGE" \
+              /usr/local/bin/facts --json \
+                os.name \
+                os.family \
+                os.distro.id \
+                os.distro.description \
+                os.release.major \
+                os.distro.release.major \
+                kernel \
+                virtual
+          )"
+          printf '%s\n' "$output"
+
+          FACTS_JSON="$output" python3 - <<'PY'
+          import json
+          import os
+          import sys
+
+          facts = json.loads(os.environ["FACTS_JSON"])
+
+          checks = {
+              "os.name": os.environ["EXPECTED_OS_NAME"],
+              "os.family": os.environ["EXPECTED_OS_FAMILY"],
+              "os.distro.id": os.environ["EXPECTED_DISTRO_ID"],
+              "kernel": "Linux",
+          }
+          failures = []
+          for key, expected in checks.items():
+              got = facts.get(key)
+              if got != expected:
+                  failures.append(f"{key}: got {got!r}, want {expected!r}")
+
+          description = facts.get("os.distro.description")
+          expected_description = os.environ["EXPECTED_DESCRIPTION_PREFIX"]
+          if not isinstance(description, str) or not description.startswith(expected_description):
+              failures.append(
+                  "os.distro.description: "
+                  f"got {description!r}, want prefix {expected_description!r}"
+              )
+
+          release_keys = ["os.release.major", "os.distro.release.major"]
+          if os.environ["REQUIRE_RELEASE"] == "true":
+              for key in release_keys:
+                  if not facts.get(key):
+                      failures.append(f"{key}: got {facts.get(key)!r}, want non-empty release")
+
+          expected_releases = {
+              "os.release.major": os.environ["EXPECTED_OS_RELEASE_MAJOR"],
+              "os.distro.release.major": os.environ["EXPECTED_DISTRO_RELEASE_MAJOR"],
+          }
+          for key, expected in expected_releases.items():
+              if expected:
+                  got = facts.get(key)
+                  if got != expected:
+                      failures.append(f"{key}: got {got!r}, want {expected!r}")
+
+          if failures:
+              print("\n".join(failures), file=sys.stderr)
+              sys.exit(1)
+          PY
+
+  cross_compile:
+    name: Cross compile ${{ matrix.goos }}/${{ matrix.goarch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: windows
+            goarch: amd64
+          - goos: windows
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+          - goos: freebsd
+            goarch: amd64
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout current PR
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build packages
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
+        run: go build ./...

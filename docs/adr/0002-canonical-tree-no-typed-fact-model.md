@@ -1,0 +1,5 @@
+# Canonical dynamic tree is the only fact model; typing is a view
+
+The library's instance API returns the same post-precedence dynamic tree (`map[string]any` and friends) that the formatters consume — deliberately no typed struct model for facts, even though typed accessors look nicer in Go. Two reasons: custom and external facts are operator-defined and unknowable at compile time, and fact precedence (external > custom > core) lets an operator reshape *any* fact at runtime — an external `os.yaml` containing `os: "Ubuntu-ish"` legally turns `os` into a string, so a typed `OS` accessor cannot be sound. Typed ergonomics are provided instead by a generic decode (`As[T]`) that reads from the canonical tree and fails loudly on shape mismatch; predefined convenience structs for core facts may ship later as pure sugar on top of the same mechanism. Because every view reads from the one tree, the output contract cannot drift between CLI and library consumers.
+
+Do not "fix" this by adding independent typed resolvers — any typed representation that resolves facts on its own can silently disagree with the canonical tree and break the output contract.

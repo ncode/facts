@@ -1,0 +1,3 @@
+# Fixture and test data must keep committed line endings on every
+# platform; CRLF checkout corrupts byte-exact Ruby-parity fixtures.
+* -text

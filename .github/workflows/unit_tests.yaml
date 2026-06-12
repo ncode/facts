@@ -1,0 +1,104 @@
+---
+name: Go tests
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+env:
+  CI: true
+
+permissions:
+  contents: read
+
+jobs:
+  go_tests:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x64
+            os: ubuntu-latest
+          - name: Linux arm64
+            os: ubuntu-24.04-arm
+          - name: macOS arm64
+            os: macos-latest
+          - name: macOS x64
+            os: macos-15-intel
+          - name: Windows Server 2022
+            os: windows-2022
+          - name: Windows Server 2025
+            os: windows-2025
+    runs-on: ${{ matrix.os }}
+    # The race-detector step multiplies test runtime and the Windows Server
+    # 2025 runner is the slowest in the matrix; 30 minutes was cancelling its
+    # race step mid-run.
+    timeout-minutes: 45
+    steps:
+      - name: Checkout current PR
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Test packages
+        run: go test ./...
+
+      # Per-engine session state and context threading are concurrency-
+      # sensitive; keep the restructured packages under the race detector.
+      - name: Race detector
+        run: go test -race . ./internal/engine ./internal/app
+
+      - name: Build command
+        run: go build ./cmd/facts
+
+      - name: Smoke command
+        run: go run ./cmd/facts --version
+
+      # Blocking release gate: verifies the Windows release-gate fact set
+      # through the built CLI binary; a non-zero exit fails this job.
+      - name: Windows release gate (blocking)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          ./tools/windows-release-gate.ps1 -FactsPath ./facts.exe
+          exit $LASTEXITCODE
+
+  freebsd_tests:
+    name: FreeBSD 14 (VM)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout current PR
+        uses: actions/checkout@v4
+
+      # Blocking release gate: GitHub Actions has no native FreeBSD runner, so
+      # this boots a FreeBSD VM on the Linux runner, runs the root package
+      # (library contract plus the docs/schema/facts.yaml conformance test)
+      # and the platform-sensitive Go packages, and executes the FreeBSD
+      # release-gate fact-set smoke (tools/freebsd-release-gate.sh, shared
+      # with `make lima-freebsd-smoke`). Fallback if the VM action proves
+      # flaky: a scheduled Cirrus CI job whose latest status this workflow
+      # asserts (see CONTRIBUTING.md).
+      - name: Test and smoke in FreeBSD VM
+        uses: vmactions/freebsd-vm@v1
+        with:
+          release: "14.3"
+          usesh: true
+          prepare: |
+            pkg install -y go git
+          run: |
+            set -e
+            export GOFLAGS=-buildvcs=false
+            go version
+            go test . ./internal/engine ./internal/app ./tests/acceptance
+            go build -o /tmp/facts ./cmd/facts
+            sh tools/freebsd-release-gate.sh /tmp/facts
