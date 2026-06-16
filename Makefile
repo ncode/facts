@@ -32,7 +32,10 @@ LIMA_CROSS_TARGETS ?= linux/amd64 linux/arm64 windows/amd64 windows/arm64 darwin
 LIMA_LINUX_BINARY ?= dist/facts-linux-$(LIMA_GOARCH)
 LIMA_FREEBSD_BINARY ?= dist/facts-freebsd-$(LIMA_GOARCH)
 
-VERSION := $(shell sed -n 's/^const Version = "\(.*\)"$$/\1/p' internal/engine/core.go)
+# VERSION is the exact git tag at HEAD (release builds); dev builds with no tag
+# at HEAD fall back to dev-<short-commit>. Override with `make VERSION=...`.
+VERSION ?= $(shell git describe --tags --exact-match 2>/dev/null || echo "dev-$$(git rev-parse --short HEAD 2>/dev/null || echo unknown)")
+LDFLAGS ?= -X github.com/ncode/facts/internal/engine.Version=$(VERSION)
 PREFIX ?= /usr/local
 DESTDIR ?=
 DIST_DIR ?= dist
@@ -59,7 +62,7 @@ bench-stable:
 	$(GO) test -run '^$$' -bench '$(BENCH)' -benchtime $(BENCHTIME) -count $(COUNT) -benchmem $(PACKAGES)
 
 build:
-	$(GO) build -o facts ./cmd/facts
+	$(GO) build -ldflags '$(LDFLAGS)' -o facts ./cmd/facts
 
 # dist builds checksummed release archives facts-$(VERSION)-<os>-<arch> for
 # every supported os/arch pair. The version is embedded in the binary
@@ -76,7 +79,7 @@ dist:
 		rm -rf "$$staging"; \
 		mkdir -p "$$staging"; \
 		echo "building $$name"; \
-		CGO_ENABLED=0 GOOS=$$goos GOARCH=$$goarch $(GO) build -trimpath -o "$$staging/$$bin" ./cmd/facts; \
+		CGO_ENABLED=0 GOOS=$$goos GOARCH=$$goarch $(GO) build -trimpath -ldflags '$(LDFLAGS)' -o "$$staging/$$bin" ./cmd/facts; \
 		if [ "$$goos" = windows ]; then \
 			rm -f "$(DIST_DIR)/$$name.zip"; \
 			(cd $(DIST_DIR) && zip -q -r "$$name.zip" "$$name"); \
