@@ -27,7 +27,10 @@ import (
 	"golang.org/x/text/transform"
 )
 
-const Version = "4.11.0"
+// Version is overridden at release time via
+// -ldflags "-X github.com/ncode/facts/internal/engine.Version=<git tag>".
+// The literal below is the dev-build fallback when no tag is injected.
+var Version = "dev" // ponytail: var, not const, so the build pipeline can inject the git tag
 
 type freeBSDVersions struct {
 	InstalledKernel   string

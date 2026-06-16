@@ -27,13 +27,23 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Resolve version from release tag
+        id: version
+        run: |
+          set -e
+          version="${{ github.event.release.tag_name }}"
+          if [ -z "$version" ]; then
+            version="$(git describe --tags --exact-match 2>/dev/null || git rev-parse --short HEAD)"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
       - name: Build dist matrix
-        run: make dist
+        run: make dist VERSION="${{ steps.version.outputs.version }}"
 
       - name: Smoke linux artifact
         run: |
           set -e
-          version="$(sed -n 's/^const Version = "\(.*\)"$/\1/p' internal/engine/core.go)"
+          version="${{ steps.version.outputs.version }}"
           tar -xzf "dist/facts-${version}-linux-amd64.tar.gz" -C /tmp
           got="$(/tmp/facts-${version}-linux-amd64/facts --version)"
           test "$got" = "$version"
