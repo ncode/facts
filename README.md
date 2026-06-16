@@ -90,9 +90,12 @@ Errors are honest: missing facts are `ErrFactNotFound`, a registered fact that l
 
 ## The CLI. Every fact, one command.
 
-The shipped binary is `facts` (ADR-0008 — no `facter` alias), and it keeps Ruby Facter's output contract — formatting, exit statuses, stderr diagnostics (with the program token rebranded to `Facts`), `facter.conf` semantics. Existing facter inputs keep working as the compat tier: `facter.conf` default paths, `FACTER_*` environment facts, and the puppetlabs fact directories are all still read, with the facts-native names winning when both are present. One deliberate break: Ruby Facter's deprecated legacy alias facts (`operatingsystem`, `hostname`, `processorcount`, …) and `--show-legacy` are gone — the structured tree (`os.name`, `networking.hostname`, `processors.count`) is the only fact surface. The alias-to-structured table lives in [ADR-0007](docs/adr/0007-no-legacy-facts-structured-tree-only.md).
+The shipped binary is `facts`, and it keeps Ruby Facter's output contract — formatting, exit statuses, stderr diagnostics (with the program token rebranded to `Facts`), `facter.conf` semantics. Existing facter inputs keep working as the compat tier: `facter.conf` default paths, `FACTER_*` environment facts, and the puppetlabs fact directories are all still read, with the facts-native names winning when both are present.
+
 
 ```console
+$ brew install ncode/tap/facts
+
 $ facts os.name
 Darwin
 
@@ -104,10 +107,6 @@ $ facts --json os.family kernelversion
 
 $ facts --external-dir ./facts.d site_role
 web
-```
-
-```sh
-brew install ncode/tap/facts
 ```
 
 ```sh
