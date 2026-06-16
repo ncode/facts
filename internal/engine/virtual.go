@@ -290,21 +290,21 @@ func currentLinuxVirtualizationInput(s *Session) linuxVirtualizationInput {
 
 func currentLinuxVirtualizationInputWithCommands(s *Session, run commandRunner) linuxVirtualizationInput {
 	return linuxVirtualizationInput{
-		CGroup:        readLinuxCGroup(),
-		DockerEnv:     fileExists("/.dockerenv"),
-		ContainerEnv:  fileExists("/run/.containerenv"),
-		ProcVZ:        dirExists("/proc/vz"),
-		LVEList:       fileExists("/proc/lve/list"),
+		CGroup:        readLinuxCGroup(s.readFile),
+		DockerEnv:     fileExistsWithHost(s.host, "/.dockerenv"),
+		ContainerEnv:  fileExistsWithHost(s.host, "/run/.containerenv"),
+		ProcVZ:        dirExistsWithHost(s.host, "/proc/vz"),
+		LVEList:       fileExistsWithHost(s.host, "/proc/lve/list"),
 		ProcVZEntries: procVZEntryCount("/proc/vz"),
-		ProcStatus:    readText("/proc/self/status"),
+		ProcStatus:    readText("/proc/self/status", s.readFile),
 		ContainerRuntime: containerRuntimeFromEnviron(
-			readText("/proc/1/environ"),
+			readText("/proc/1/environ", s.readFile),
 		),
 		KernelVersion:  s.cachedKernelRelease(),
-		MachineID:      strings.TrimSpace(readText("/etc/machine-id")),
-		DMIBIOSVendor:  readDMIString("/sys/class/dmi/id", "bios_vendor"),
-		DMIProductName: readDMIString("/sys/class/dmi/id", "product_name"),
-		DMISysVendor:   readDMIString("/sys/class/dmi/id", "sys_vendor"),
+		MachineID:      strings.TrimSpace(readText("/etc/machine-id", s.readFile)),
+		DMIBIOSVendor:  readDMIString("/sys/class/dmi/id", "bios_vendor", s.readFile),
+		DMIProductName: readDMIString("/sys/class/dmi/id", "product_name", s.readFile),
+		DMISysVendor:   readDMIString("/sys/class/dmi/id", "sys_vendor", s.readFile),
 		DMIDecodeInfo:  parseDMIDecodeHypervisorInfo(run("dmidecode")),
 		VirtWhatOutput: run("virt-what"),
 		VMwareCommand:  run("vmware", "-v"),
@@ -473,8 +473,12 @@ func openVZEnvID(input linuxVirtualizationInput) (int, bool) {
 	return 0, false
 }
 
-func readLinuxCGroup() string {
-	data, err := os.ReadFile("/proc/1/cgroup")
+func readLinuxCGroup(readFiles ...fileReader) string {
+	readFile := osHost{}.readFile
+	if len(readFiles) > 0 && readFiles[0] != nil {
+		readFile = readFiles[0]
+	}
+	data, err := readFile("/proc/1/cgroup")
 	if err != nil {
 		return ""
 	}
@@ -482,12 +486,20 @@ func readLinuxCGroup() string {
 }
 
 func fileExists(path string) bool {
-	_, err := os.Stat(path)
+	return fileExistsWithHost(osHost{}, path)
+}
+
+func fileExistsWithHost(host hostOS, path string) bool {
+	_, err := host.stat(path)
 	return err == nil
 }
 
 func dirExists(path string) bool {
-	info, err := os.Stat(path)
+	return dirExistsWithHost(osHost{}, path)
+}
+
+func dirExistsWithHost(host hostOS, path string) bool {
+	info, err := host.stat(path)
 	return err == nil && info.IsDir()
 }
 

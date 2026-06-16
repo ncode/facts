@@ -32,6 +32,103 @@ func TestBuildFormatterMatchesRubyFormatterFactory(t *testing.T) {
 	}
 }
 
+func TestBuildFormatterWiresDottedAndColorOptions(t *testing.T) {
+	facts := []ResolvedFact{
+		{Name: "os.name", Value: "Darwin"},
+		{Name: "site.role", Value: "web", Type: "external"},
+	}
+	tests := []struct {
+		name string
+		opts FormatOptions
+		want func([]ResolvedFact) (string, error)
+	}{
+		{
+			name: "json dotted",
+			opts: FormatOptions{JSON: true, IncludeTypedDotted: true},
+			want: func(facts []ResolvedFact) (string, error) {
+				return FormatJSONWithDottedFacts(facts, true)
+			},
+		},
+		{
+			name: "yaml dotted",
+			opts: FormatOptions{YAML: true, IncludeTypedDotted: true},
+			want: func(facts []ResolvedFact) (string, error) {
+				return FormatYAMLWithDottedFacts(facts, true), nil
+			},
+		},
+		{
+			name: "hocon dotted",
+			opts: FormatOptions{HOCON: true, IncludeTypedDotted: true},
+			want: func(facts []ResolvedFact) (string, error) {
+				return FormatHOCONWithDottedFacts(facts, true), nil
+			},
+		},
+		{
+			name: "legacy dotted color",
+			opts: FormatOptions{IncludeTypedDotted: true, Colorize: true},
+			want: func(facts []ResolvedFact) (string, error) {
+				return FormatLegacyColored(facts, true, true), nil
+			},
+		},
+		{
+			name: "legacy plain",
+			opts: FormatOptions{},
+			want: func(facts []ResolvedFact) (string, error) {
+				return FormatLegacyColored(facts, false, false), nil
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := BuildFormatter(tt.opts).Format(facts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want, err := tt.want(facts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != want {
+				t.Fatalf("BuildFormatter(%#v).Format() = %q, want %q", tt.opts, got, want)
+			}
+		})
+	}
+}
+
+func TestBuildFormatterMachineFormatsIgnoreColorize(t *testing.T) {
+	facts := []ResolvedFact{
+		{Name: "os.name", Value: "Darwin"},
+		{Name: "site.role", Value: "web", Type: "external"},
+	}
+	tests := []struct {
+		name string
+		opts FormatOptions
+	}{
+		{name: "json", opts: FormatOptions{JSON: true, IncludeTypedDotted: true}},
+		{name: "yaml", opts: FormatOptions{YAML: true, IncludeTypedDotted: true}},
+		{name: "hocon", opts: FormatOptions{HOCON: true, IncludeTypedDotted: true}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			plain, err := BuildFormatter(tt.opts).Format(facts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			colorizedOpts := tt.opts
+			colorizedOpts.Colorize = true
+			colorized, err := BuildFormatter(colorizedOpts).Format(facts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if colorized != plain {
+				t.Fatalf("BuildFormatter(%#v).Format() = %q, want byte-identical %q", colorizedOpts, colorized, plain)
+			}
+		})
+	}
+}
+
 func TestFormatJSON_noUserQueryBuildsStructuredFacts(t *testing.T) {
 	facts := []ResolvedFact{
 		{Name: "os.name", Value: "Darwin"},

@@ -8,7 +8,55 @@ import (
 	"testing"
 )
 
-func TestConfigFileOptions_collectsRepeatedDirectoryEntries(t *testing.T) {
+func TestParseConfig_returnsAllConfiguredSections(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "facter.conf")
+	content := `facts : {
+  blocklist : [ "EC2", "networking" ],
+  ttls : [
+    { "timezone" : "30 days" },
+  ],
+}
+global : {
+  external-dir : [ "/opt/facts" ],
+  no-external-facts : true,
+  force-dot-resolution : true,
+  sequential : true,
+}
+cli : {
+  debug : true,
+  verbose : true,
+  log-level : "info",
+}
+fact-groups : {
+  hardware : [ "dmi" ],
+}`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := ParseConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := Config{
+		Blocklist:          []string{"ec2", "networking"},
+		ExternalDirs:       []string{"/opt/facts"},
+		Debug:              true,
+		Verbose:            true,
+		LogLevel:           "info",
+		NoExternalFacts:    true,
+		ForceDotResolution: true,
+		Sequential:         true,
+		SequentialSet:      true,
+		TTLs:               []FactTTL{{Fact: "timezone", TTL: "30 days"}},
+		FactGroups:         []FactGroup{{Name: "hardware", Facts: []string{"dmi"}}},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("ParseConfig() = %#v, want %#v", got, want)
+	}
+}
+
+func TestParseConfig_collectsRepeatedDirectoryEntries(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "facter.conf")
 	content := `global : {
   external-dir : [ "/first/external" ],
@@ -20,7 +68,7 @@ cli : {
 		t.Fatal(err)
 	}
 
-	got, err := ConfigFileOptions(path)
+	got, err := ParseConfig(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,7 +77,7 @@ cli : {
 	}
 }
 
-func TestConfigFileOptions_ignoresRetiredCustomFactKeys(t *testing.T) {
+func TestParseConfig_ignoresRetiredCustomFactKeys(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "facter.conf")
 	content := `global : {
   external-dir : [ "/kept/external" ],
@@ -44,13 +92,13 @@ func TestConfigFileOptions_ignoresRetiredCustomFactKeys(t *testing.T) {
 	SetWarningHandler(func(message string) { warnings = append(warnings, message) })
 	t.Cleanup(func() { SetWarningHandler(nil) })
 
-	got, err := ConfigFileOptions(path)
+	got, err := ParseConfig(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := ConfigOptions{ExternalDirs: []string{"/kept/external"}}
+	want := Config{ExternalDirs: []string{"/kept/external"}}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("ConfigFileOptions() = %#v, want retired keys inert: %#v", got, want)
+		t.Fatalf("ParseConfig() = %#v, want retired keys inert: %#v", got, want)
 	}
 	if len(warnings) != 0 {
 		t.Fatalf("warnings = %#v, want retired keys silently ignored", warnings)
@@ -213,11 +261,11 @@ func TestPlatformNativeDefaultConfigPath(t *testing.T) {
 	}
 }
 
-// TestConfigFileOptions_nativeDefaultConfigDiscovery pins the default-config
+// TestParseConfig_nativeDefaultConfigDiscovery pins the default-config
 // precedence of the facts-native input surface: with no explicit path, the
 // facts-native facts.conf is consulted first, the facter-compatible
 // facter.conf second, and the first existing file wins.
-func TestConfigFileOptions_nativeDefaultConfigDiscovery(t *testing.T) {
+func TestParseConfig_nativeDefaultConfigDiscovery(t *testing.T) {
 	dir := t.TempDir()
 	nativePath := filepath.Join(dir, "facts.conf")
 	compatPath := filepath.Join(dir, "facter.conf")
@@ -263,7 +311,7 @@ func TestConfigFileOptions_nativeDefaultConfigDiscovery(t *testing.T) {
 				DefaultConfigPath = oldCompat
 			})
 
-			got, err := ConfigFileOptions("")
+			got, err := ParseConfig("")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -274,7 +322,7 @@ func TestConfigFileOptions_nativeDefaultConfigDiscovery(t *testing.T) {
 	}
 }
 
-func TestConfigFileOptions_acceptsBareDirectoryPaths(t *testing.T) {
+func TestParseConfig_acceptsBareDirectoryPaths(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "facter.conf")
 	content := `global : {
   external-dir : [ /first/external, /second/external ],
@@ -283,7 +331,7 @@ func TestConfigFileOptions_acceptsBareDirectoryPaths(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := ConfigFileOptions(path)
+	got, err := ParseConfig(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -292,7 +340,7 @@ func TestConfigFileOptions_acceptsBareDirectoryPaths(t *testing.T) {
 	}
 }
 
-func TestConfigFileOptions_warnsAndIgnoresUnreadableConfig(t *testing.T) {
+func TestParseConfig_warnsAndIgnoresUnreadableConfig(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "missing.conf")
 	warnings := []string{}
 	SetWarningHandler(func(message string) {
@@ -300,12 +348,12 @@ func TestConfigFileOptions_warnsAndIgnoresUnreadableConfig(t *testing.T) {
 	})
 	t.Cleanup(func() { SetWarningHandler(nil) })
 
-	got, err := ConfigFileOptions(path)
+	got, err := ParseConfig(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(got, ConfigOptions{}) {
-		t.Fatalf("ConfigFileOptions() = %#v, want empty options", got)
+	if !reflect.DeepEqual(got, Config{}) {
+		t.Fatalf("ParseConfig() = %#v, want empty options", got)
 	}
 	if len(warnings) != 1 {
 		t.Fatalf("warnings = %#v, want one warning", warnings)
@@ -315,7 +363,7 @@ func TestConfigFileOptions_warnsAndIgnoresUnreadableConfig(t *testing.T) {
 	}
 }
 
-func TestConfigFileOptions_warnsAndIgnoresInvalidConfig(t *testing.T) {
+func TestParseConfig_warnsAndIgnoresInvalidConfig(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "facter.conf")
 	if err := os.WriteFile(path, []byte("some corrupt information"), 0o600); err != nil {
 		t.Fatal(err)
@@ -326,12 +374,12 @@ func TestConfigFileOptions_warnsAndIgnoresInvalidConfig(t *testing.T) {
 	})
 	t.Cleanup(func() { SetWarningHandler(nil) })
 
-	got, err := ConfigFileOptions(path)
+	got, err := ParseConfig(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(got, ConfigOptions{}) {
-		t.Fatalf("ConfigFileOptions() = %#v, want empty options", got)
+	if !reflect.DeepEqual(got, Config{}) {
+		t.Fatalf("ParseConfig() = %#v, want empty options", got)
 	}
 	if len(warnings) != 1 {
 		t.Fatalf("warnings = %#v, want one warning", warnings)
@@ -341,7 +389,7 @@ func TestConfigFileOptions_warnsAndIgnoresInvalidConfig(t *testing.T) {
 	}
 }
 
-func TestConfigFileOptions_emptyReadableConfigReturnsEmptySections(t *testing.T) {
+func TestParseConfig_emptyReadableConfigReturnsEmptySections(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "facter.conf")
 	if err := os.WriteFile(path, nil, 0o600); err != nil {
 		t.Fatal(err)
@@ -352,36 +400,26 @@ func TestConfigFileOptions_emptyReadableConfigReturnsEmptySections(t *testing.T)
 	})
 	t.Cleanup(func() { SetWarningHandler(nil) })
 
-	options, err := ConfigFileOptions(path)
+	options, err := ParseConfig(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(options, ConfigOptions{}) {
-		t.Fatalf("ConfigFileOptions() = %#v, want empty options", options)
+	if !reflect.DeepEqual(options, Config{}) {
+		t.Fatalf("ParseConfig() = %#v, want empty options", options)
 	}
 
-	blocklist, err := ConfigBlocklist(path)
+	config, err := ParseConfig(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if blocklist != nil {
-		t.Fatalf("ConfigBlocklist() = %#v, want nil", blocklist)
+	if config.Blocklist != nil {
+		t.Fatalf("Config.Blocklist = %#v, want nil", config.Blocklist)
 	}
-
-	ttls, err := ConfigTTLs(path)
-	if err != nil {
-		t.Fatal(err)
+	if config.TTLs != nil {
+		t.Fatalf("Config.TTLs = %#v, want nil", config.TTLs)
 	}
-	if ttls != nil {
-		t.Fatalf("ConfigTTLs() = %#v, want nil", ttls)
-	}
-
-	groups, err := ConfigFactGroups(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if groups != nil {
-		t.Fatalf("ConfigFactGroups() = %#v, want nil", groups)
+	if config.FactGroups != nil {
+		t.Fatalf("Config.FactGroups = %#v, want nil", config.FactGroups)
 	}
 
 	if len(warnings) != 0 {
@@ -389,7 +427,7 @@ func TestConfigFileOptions_emptyReadableConfigReturnsEmptySections(t *testing.T)
 	}
 }
 
-func TestConfigFileOptions_collectsRepeatedBooleanOptions(t *testing.T) {
+func TestParseConfig_collectsRepeatedBooleanOptions(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "facter.conf")
 	content := `global : {
 	no-external-facts : false,
@@ -403,7 +441,7 @@ cli : {
 		t.Fatal(err)
 	}
 
-	got, err := ConfigFileOptions(path)
+	got, err := ParseConfig(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -415,7 +453,7 @@ cli : {
 	}
 }
 
-func TestConfigFileOptions_retiredShowLegacyKeyIsInert(t *testing.T) {
+func TestParseConfig_retiredShowLegacyKeyIsInert(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "facter.conf")
 	content := `global : {
 	show-legacy : true,
@@ -428,19 +466,19 @@ func TestConfigFileOptions_retiredShowLegacyKeyIsInert(t *testing.T) {
 	SetWarningHandler(func(message string) { warnings = append(warnings, message) })
 	t.Cleanup(func() { SetWarningHandler(nil) })
 
-	got, err := ConfigFileOptions(path)
+	got, err := ParseConfig(path)
 	if err != nil {
-		t.Fatalf("ConfigFileOptions() error = %v, want nil for retired show-legacy key", err)
+		t.Fatalf("ParseConfig() error = %v, want nil for retired show-legacy key", err)
 	}
-	if !reflect.DeepEqual(got, ConfigOptions{}) {
-		t.Fatalf("ConfigFileOptions() = %#v, want zero options: show-legacy is retired and inert", got)
+	if !reflect.DeepEqual(got, Config{}) {
+		t.Fatalf("ParseConfig() = %#v, want zero options: show-legacy is retired and inert", got)
 	}
 	if len(warnings) != 0 {
 		t.Fatalf("warnings = %#v, want none for retired show-legacy key", warnings)
 	}
 }
 
-func TestConfigFileOptions_readsConfiguredSequentialLikeRubyOptionStore(t *testing.T) {
+func TestParseConfig_readsConfiguredSequentialLikeRubyOptionStore(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "facter.conf")
 	content := `global : {
 	sequential : false,
@@ -449,7 +487,7 @@ func TestConfigFileOptions_readsConfiguredSequentialLikeRubyOptionStore(t *testi
 		t.Fatal(err)
 	}
 
-	got, err := ConfigFileOptions(path)
+	got, err := ParseConfig(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -461,7 +499,7 @@ func TestConfigFileOptions_readsConfiguredSequentialLikeRubyOptionStore(t *testi
 	}
 }
 
-func TestConfigBlocklist_collectsRepeatedEntries(t *testing.T) {
+func TestParseConfig_collectsRepeatedEntries(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "facter.conf")
 	content := `facts : {
   blocklist : [ "ec2", "os" ],
@@ -473,16 +511,17 @@ cli : {
 		t.Fatal(err)
 	}
 
-	got, err := ConfigBlocklist(path)
+	config, err := ParseConfig(path)
 	if err != nil {
 		t.Fatal(err)
 	}
+	got := config.Blocklist
 	if want := []string{"ec2", "os", "networking"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("ConfigBlocklist() = %#v, want %#v", got, want)
+		t.Fatalf("Config.Blocklist = %#v, want %#v", got, want)
 	}
 }
 
-func TestConfigBlocklist_acceptsBareEntries(t *testing.T) {
+func TestParseConfig_acceptsBareEntries(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "facter.conf")
 	content := `facts : {
   blocklist : [ ec2, os.name ],
@@ -491,17 +530,18 @@ func TestConfigBlocklist_acceptsBareEntries(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := ConfigBlocklist(path)
+	config, err := ParseConfig(path)
 	if err != nil {
 		t.Fatal(err)
 	}
+	got := config.Blocklist
 	want := []string{"ec2", "os.name"}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("ConfigBlocklist() = %#v, want %#v", got, want)
+		t.Fatalf("Config.Blocklist = %#v, want %#v", got, want)
 	}
 }
 
-func TestConfigFileOptions_ignoresCommentedEntries(t *testing.T) {
+func TestParseConfig_ignoresCommentedEntries(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "facter.conf")
 	content := `global : {
   # external-dir : [ "/commented/external" ],
@@ -517,7 +557,7 @@ facts : {
 		t.Fatal(err)
 	}
 
-	options, err := ConfigFileOptions(path)
+	options, err := ParseConfig(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -528,16 +568,17 @@ facts : {
 		t.Fatal("NoExternalFacts = true, want commented true value ignored")
 	}
 
-	blocklist, err := ConfigBlocklist(path)
+	config, err := ParseConfig(path)
 	if err != nil {
 		t.Fatal(err)
 	}
+	blocklist := config.Blocklist
 	if want := []string{"os"}; !reflect.DeepEqual(blocklist, want) {
-		t.Fatalf("ConfigBlocklist() = %#v, want %#v", blocklist, want)
+		t.Fatalf("Config.Blocklist = %#v, want %#v", blocklist, want)
 	}
 }
 
-func TestConfigTTLs_returnsConfiguredFactTTLs(t *testing.T) {
+func TestParseConfig_returnsConfiguredFactTTLs(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "facter.conf")
 	content := `facts : {
   ttls : [
@@ -550,21 +591,22 @@ func TestConfigTTLs_returnsConfiguredFactTTLs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := ConfigTTLs(path)
+	config, err := ParseConfig(path)
 	if err != nil {
 		t.Fatal(err)
 	}
+	got := config.TTLs
 	want := []FactTTL{
 		{Fact: "timezone", TTL: "30 days"},
 		{Fact: "networking", TTL: "1 hour"},
 		{Fact: "operating system", TTL: "30 minutes"},
 	}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("ConfigTTLs() = %#v, want %#v", got, want)
+		t.Fatalf("Config.TTLs = %#v, want %#v", got, want)
 	}
 }
 
-func TestConfigTTLs_acceptsBareFactNamesAndValues(t *testing.T) {
+func TestParseConfig_acceptsBareFactNamesAndValues(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "facter.conf")
 	content := `facts : {
   ttls : [
@@ -576,16 +618,17 @@ func TestConfigTTLs_acceptsBareFactNamesAndValues(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := ConfigTTLs(path)
+	config, err := ParseConfig(path)
 	if err != nil {
 		t.Fatal(err)
 	}
+	got := config.TTLs
 	want := []FactTTL{
 		{Fact: "memory", TTL: "10000"},
 		{Fact: "hostname", TTL: "30 h"},
 	}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("ConfigTTLs() = %#v, want %#v", got, want)
+		t.Fatalf("Config.TTLs = %#v, want %#v", got, want)
 	}
 }
 
@@ -728,7 +771,7 @@ func TestFilterBlockedFacts_blocksExactNameAndRoot(t *testing.T) {
 	}
 }
 
-func TestConfigFactGroups_returnsConfiguredFactGroups(t *testing.T) {
+func TestParseConfig_returnsConfiguredFactGroups(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "facter.conf")
 	content := `fact-groups : {
   cached-custom-facts : [ "site_role", "site_location" ],
@@ -738,20 +781,21 @@ func TestConfigFactGroups_returnsConfiguredFactGroups(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := ConfigFactGroups(path)
+	config, err := ParseConfig(path)
 	if err != nil {
 		t.Fatal(err)
 	}
+	got := config.FactGroups
 	want := []FactGroup{
 		{Name: "cached-custom-facts", Facts: []string{"site_role", "site_location"}},
 		{Name: "hardware", Facts: []string{"dmi"}},
 	}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("ConfigFactGroups() = %#v, want %#v", got, want)
+		t.Fatalf("Config.FactGroups = %#v, want %#v", got, want)
 	}
 }
 
-func TestConfigFactGroups_acceptsQuotedGroupNamesWithSpaces(t *testing.T) {
+func TestParseConfig_acceptsQuotedGroupNamesWithSpaces(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "facter.conf")
 	content := `fact-groups : {
   "operating system" : [ "os", "os.name" ],
@@ -760,17 +804,18 @@ func TestConfigFactGroups_acceptsQuotedGroupNamesWithSpaces(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := ConfigFactGroups(path)
+	config, err := ParseConfig(path)
 	if err != nil {
 		t.Fatal(err)
 	}
+	got := config.FactGroups
 	want := []FactGroup{{Name: "operating system", Facts: []string{"os", "os.name"}}}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("ConfigFactGroups() = %#v, want %#v", got, want)
+		t.Fatalf("Config.FactGroups = %#v, want %#v", got, want)
 	}
 }
 
-func TestConfigFactGroups_acceptsBareFactNames(t *testing.T) {
+func TestParseConfig_acceptsBareFactNames(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "facter.conf")
 	content := `fact-groups : {
   cached-custom-facts : [ site_role, site_location ],
@@ -779,17 +824,18 @@ func TestConfigFactGroups_acceptsBareFactNames(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := ConfigFactGroups(path)
+	config, err := ParseConfig(path)
 	if err != nil {
 		t.Fatal(err)
 	}
+	got := config.FactGroups
 	want := []FactGroup{{Name: "cached-custom-facts", Facts: []string{"site_role", "site_location"}}}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("ConfigFactGroups() = %#v, want %#v", got, want)
+		t.Fatalf("Config.FactGroups = %#v, want %#v", got, want)
 	}
 }
 
-func TestConfigFactGroups_acceptsScalarFactGroupValue(t *testing.T) {
+func TestParseConfig_acceptsScalarFactGroupValue(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "facter.conf")
 	content := `fact-groups : {
   kernel : kernelversion,
@@ -798,13 +844,14 @@ func TestConfigFactGroups_acceptsScalarFactGroupValue(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := ConfigFactGroups(path)
+	config, err := ParseConfig(path)
 	if err != nil {
 		t.Fatal(err)
 	}
+	got := config.FactGroups
 	want := []FactGroup{{Name: "kernel", Facts: []string{"kernelversion"}}}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("ConfigFactGroups() = %#v, want %#v", got, want)
+		t.Fatalf("Config.FactGroups = %#v, want %#v", got, want)
 	}
 }
 
@@ -826,7 +873,7 @@ func TestConfigParser_pinnedSubsetBoundary(t *testing.T) {
 		path := writeConfig(t, `global = {
   external-dir = [ "/json/external" ]
 }`)
-		got, err := ConfigFileOptions(path)
+		got, err := ParseConfig(path)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -839,7 +886,7 @@ func TestConfigParser_pinnedSubsetBoundary(t *testing.T) {
 		path := writeConfig(t, `cli : {
   log-level : 'trace',
 }`)
-		got, err := ConfigFileOptions(path)
+		got, err := ParseConfig(path)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -853,7 +900,7 @@ func TestConfigParser_pinnedSubsetBoundary(t *testing.T) {
 global : {
   external-dir : [ "${base-dir}" ],
 }`)
-		got, err := ConfigFileOptions(path)
+		got, err := ParseConfig(path)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -876,7 +923,7 @@ global : {
 			t.Fatal(err)
 		}
 
-		got, err := ConfigFileOptions(path)
+		got, err := ParseConfig(path)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -891,12 +938,12 @@ global : {
 		SetWarningHandler(func(message string) { warnings = append(warnings, message) })
 		t.Cleanup(func() { SetWarningHandler(nil) })
 
-		got, err := ConfigFileOptions(path)
+		got, err := ParseConfig(path)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !reflect.DeepEqual(got, ConfigOptions{}) {
-			t.Fatalf("ConfigFileOptions() = %#v, want empty options", got)
+		if !reflect.DeepEqual(got, Config{}) {
+			t.Fatalf("ParseConfig() = %#v, want empty options", got)
 		}
 		if len(warnings) != 1 || !strings.Contains(warnings[0], "invalid config") {
 			t.Fatalf("warnings = %#v, want one invalid config warning", warnings)
@@ -908,7 +955,7 @@ global : {
   external-dir : [ "/kept" ], # comment with , and : inside
   no-external-facts : true // trailing comment
 }`)
-		got, err := ConfigFileOptions(path)
+		got, err := ParseConfig(path)
 		if err != nil {
 			t.Fatal(err)
 		}

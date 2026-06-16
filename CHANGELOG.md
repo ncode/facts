@@ -33,7 +33,7 @@
   facter/puppetlabs ones. The default cache path's facter-named segment is
   renamed (`/opt/puppetlabs/facts/cache/cached_facts`); caches regenerate
   with no compat read. Fact names (`facterversion`, `os.*`, …), output
-  formats, `facter.conf` semantics, and `--puppet` are unchanged; hosts with
+  formats, and `facter.conf` semantics are unchanged; hosts with
   existing facter configuration keep working through the compat reads. See
   `docs/FACTER_CONF_COMPATIBILITY.md`.
 - **BREAKING**: Removed legacy alias facts entirely (ADR-0007). The canonical
@@ -61,6 +61,11 @@
   (data files, executables, `FACTER_*` environment variables) and
   programmatic `facts.WithFact` registration are the input contract; see
   `docs/CUSTOM_FACT_MIGRATION.md` for the pattern mapping.
+- **BREAKING**: Removed Ruby runtime and Puppet package-version built-in facts.
+  Core discovery no longer emits `ruby` or `aio_agent_version`, and
+  `facts --puppet` no longer resolves `puppetversion` by executing Puppet.
+  `--puppet` remains for Puppet plugin `facts.d` external facts and the
+  synced Ruby plugin-fact migration warning.
 - **BREAKING (Go API only)**: Removed the Ruby-compatible Go API — the ~58
   package-level exports (`Value`, `ToHash`, `Resolve`, `Add`, `Flush`,
   `Search`, message and option toggles, …) and all package-global mutable
@@ -78,8 +83,8 @@
   `partitions` are absent when no devices enumerate (e.g. macOS),
   `processors.speed` is absent when the speed is unknown (e.g. Apple
   Silicon), `fips_enabled` resolves only on Linux and Windows, `os.selinux`
-  resolves only on Linux, and `dmi`, `filesystems`, and `ruby` are absent
-  when their probes resolve nothing. `processors.extensions` is kept as
+  resolves only on Linux, and `dmi` and `filesystems` are absent when their
+  probes resolve nothing. `processors.extensions` is kept as
   accurate additional data and documented as a deliberate deviation in the
   man page GO PORT NOTES. Operator-supplied external facts with empty values
   are unaffected — the change is in the core resolvers, not the formatter.

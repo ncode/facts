@@ -31,16 +31,7 @@ fact-groups : {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
-		if _, err := ConfigBlocklist(path); err != nil {
-			b.Fatal(err)
-		}
-		if _, err := ConfigFileOptions(path); err != nil {
-			b.Fatal(err)
-		}
-		if _, err := ConfigTTLs(path); err != nil {
-			b.Fatal(err)
-		}
-		if _, err := ConfigFactGroups(path); err != nil {
+		if _, err := ParseConfig(path); err != nil {
 			b.Fatal(err)
 		}
 	}

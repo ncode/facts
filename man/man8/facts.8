@@ -126,7 +126,7 @@ Whether to write HTTP request and responses to stderr\. This should never be use
 \fB\-p\fR, \fB\-\-puppet\fR:
 .
 .IP
-Load the Puppet libraries, thus allowing Facts to load Puppet\-specific facts\.
+Search Puppet plugin fact destinations for external facts\.
 .
 .TP
 \fB\-\-version, \-v\fR:
@@ -168,7 +168,7 @@ This manual describes the Go implementation of Facter\. Behavior differences fro
 Ruby DSL fact files (\fB\.rb\fR) are not read from any source: there is no \fB\-\-custom\-dir\fR option, no \fBFACTERLIB\fR lookup, and no Ruby evaluation\. A \fB\.rb\fR file in an external\-fact directory is skipped with a warning\. Rewrite Ruby custom facts as external facts; see \fIdocs/CUSTOM_FACT_MIGRATION\.md\fR\.
 .
 .IP "\(bu" 4
-\fB\-\-puppet\fR resolves \fBpuppetversion\fR from the installed puppet binary and searches Puppet's default plugin\-fact destination paths for external facts, but it does not load Puppet Ruby plugin custom facts; a warning is emitted instead (see \fIdocs/CUSTOM_FACT_MIGRATION\.md\fR)\.
+\fB\-\-puppet\fR searches Puppet's default plugin\-fact destination paths for external facts, but it does not resolve Puppet package versions or load Puppet Ruby plugin custom facts; a warning is emitted for synced Ruby plugin facts instead (see \fIdocs/CUSTOM_FACT_MIGRATION\.md\fR)\.
 .
 .IP "\(bu" 4
 \fB\-\-sequential\fR is accepted for compatibility; the Go engine resolves facts deterministically\. \fB\-\-trace\fR is removed along with the Ruby DSL layer (its only function was Ruby custom\-fact backtraces) and fails as an unknown option\.
@@ -308,4 +308,3 @@ facts : {
 .fi
 .
 .IP "" 0
-

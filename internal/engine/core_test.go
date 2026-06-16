@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"errors"
 	"net"
 	"os"
@@ -46,7 +47,7 @@ func TestFIPSEnabledFacts_omittedOutsideLinuxAndWindows(t *testing.T) {
 		return ""
 	}
 	for _, goos := range []string{"darwin", "freebsd", "openbsd", "netbsd", "solaris", "aix"} {
-		if got := fipsEnabledFacts(goos, "/proc/sys/crypto/fips_enabled", run); got != nil {
+		if got := fipsEnabledFacts(goos, "/proc/sys/crypto/fips_enabled", run, os.ReadFile); got != nil {
 			t.Fatalf("fipsEnabledFacts(%s) = %#v, want nil", goos, got)
 		}
 	}
@@ -60,7 +61,7 @@ func TestFIPSEnabledFacts_resolveOnLinuxAndWindows(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []ResolvedFact{{Name: "fips_enabled", Value: true}}
-	if got := fipsEnabledFacts("linux", path, nil); !reflect.DeepEqual(got, want) {
+	if got := fipsEnabledFacts("linux", path, nil, os.ReadFile); !reflect.DeepEqual(got, want) {
 		t.Fatalf("fipsEnabledFacts(linux) = %#v, want %#v", got, want)
 	}
 
@@ -71,7 +72,7 @@ func TestFIPSEnabledFacts_resolveOnLinuxAndWindows(t *testing.T) {
 		}, "\n")
 	}
 	want = []ResolvedFact{{Name: "fips_enabled", Value: false}}
-	if got := fipsEnabledFacts("windows", "", run); !reflect.DeepEqual(got, want) {
+	if got := fipsEnabledFacts("windows", "", run, os.ReadFile); !reflect.DeepEqual(got, want) {
 		t.Fatalf("fipsEnabledFacts(windows) = %#v, want %#v", got, want)
 	}
 }
@@ -79,7 +80,7 @@ func TestFIPSEnabledFacts_resolveOnLinuxAndWindows(t *testing.T) {
 func TestCoreFacts_includePathFromEnvironment(t *testing.T) {
 	path := "/usr/bin:/etc:/usr/sbin:/usr/ucb:/usr/bin/X11:/sbin:/usr/java6/jre/bin:/usr/java6/bin"
 	t.Setenv("PATH", path)
-	collection := Collection(CoreFactsWithRuby(NewSession(), false))
+	collection := Collection(CoreFacts(NewSession()))
 
 	if got := collection["path"]; got != path {
 		t.Fatalf("path = %#v, want %#v", got, path)
@@ -87,10 +88,28 @@ func TestCoreFacts_includePathFromEnvironment(t *testing.T) {
 }
 
 func TestCoreFacts_includeFacterVersion(t *testing.T) {
-	collection := Collection(CoreFactsWithRuby(testSession, false))
+	collection := Collection(CoreFacts(testSession))
 
 	if got := collection["facterversion"]; got != Version {
 		t.Fatalf("facterversion = %#v, want %#v", got, Version)
+	}
+}
+
+func TestCoreFacts_omitsRubyAndPuppetPackageVersionFacts(t *testing.T) {
+	host := &fakeHostOS{
+		runOutput: "3.3.0\narm64-darwin23\n/ignored\n/opt/puppetlabs/puppet/lib/ruby/site_ruby/3.3.0\n",
+		files: map[string][]byte{
+			"/opt/puppetlabs/puppet/VERSION": []byte("8.10.0\n"),
+		},
+	}
+	s := NewSessionContext(context.Background())
+	s.host = host
+
+	collection := Collection(CoreFacts(s))
+	for _, name := range []string{"ruby", "aio_agent_version"} {
+		if got, ok := collection[name]; ok {
+			t.Fatalf("CoreFacts() %s = %#v, want absent", name, got)
+		}
 	}
 }
 
@@ -107,7 +126,7 @@ func TestCurrentFIPSEnabledReadsWindowsRegistry(t *testing.T) {
 		}, "\n")
 	}
 
-	if !currentFIPSEnabled("windows", "", run) {
+	if !currentFIPSEnabled("windows", "", run, os.ReadFile) {
 		t.Fatal("currentFIPSEnabled(windows) = false, want true")
 	}
 }
@@ -1938,7 +1957,7 @@ func TestFIPSEnabledReadsProcFlag(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			if got := fipsEnabled(path); got != tt.want {
+			if got := fipsEnabled(path, os.ReadFile); got != tt.want {
 				t.Fatalf("fipsEnabled() = %t, want %t", got, tt.want)
 			}
 		})
@@ -1948,7 +1967,7 @@ func TestFIPSEnabledReadsProcFlag(t *testing.T) {
 func TestFIPSEnabledMissingFileIsFalse(t *testing.T) {
 	t.Parallel()
 
-	if got := fipsEnabled(filepath.Join(t.TempDir(), "missing")); got {
+	if got := fipsEnabled(filepath.Join(t.TempDir(), "missing"), os.ReadFile); got {
 		t.Fatalf("fipsEnabled() = %t, want false", got)
 	}
 }
@@ -2001,185 +2020,6 @@ func TestKernelVersionFactMatchesRubyPlatformBehavior(t *testing.T) {
 	}
 }
 
-func TestAioAgentVersionReadsLeadingVersion(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name    string
-		content string
-		want    string
-	}{
-		{name: "three segments", content: "7.0.1\n", want: "7.0.1"},
-		{name: "four segments", content: "7.0.1.8\n", want: "7.0.1.8"},
-		{name: "dev build", content: "7.0.1.8.g12345678\n", want: "7.0.1.8"},
-		{name: "numeric dev build suffix", content: "7.0.1.8.42 build metadata\n", want: "7.0.1.8"},
-		{name: "suffix", content: "7.0.1-rc1\n", want: "7.0.1"},
-		{name: "invalid", content: "puppet-agent 7.0.1\n", want: ""},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			path := filepath.Join(t.TempDir(), "VERSION")
-			if err := os.WriteFile(path, []byte(tt.content), 0o600); err != nil {
-				t.Fatal(err)
-			}
-
-			if got := aioAgentVersion(path); got != tt.want {
-				t.Fatalf("aioAgentVersion() = %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestAioAgentVersionMissingFileIsEmpty(t *testing.T) {
-	t.Parallel()
-
-	if got := aioAgentVersion(filepath.Join(t.TempDir(), "missing")); got != "" {
-		t.Fatalf("aioAgentVersion() = %q, want empty", got)
-	}
-}
-
-func TestCurrentAioAgentVersionWindowsUsesRegistryInstallDir(t *testing.T) {
-	t.Parallel()
-
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "VERSION"), []byte("7.0.1.8.g12345678\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	run := func(name string, args ...string) string {
-		if name != "reg" || len(args) != 4 || args[0] != "query" || args[1] != `HKLM\SOFTWARE\Puppet Labs\Puppet` || args[2] != "/v" {
-			t.Fatalf("unexpected command: %s %v", name, args)
-		}
-		switch args[3] {
-		case "RememberedInstallDir64":
-			return "    RememberedInstallDir64    REG_SZ    " + dir + "\n"
-		case "RememberedInstallDir":
-			t.Fatal("did not expect 32-bit fallback when 64-bit path exists")
-		}
-		return ""
-	}
-
-	if got := currentAioAgentVersion("windows", run); got != "7.0.1.8" {
-		t.Fatalf("currentAioAgentVersion() = %q, want %q", got, "7.0.1.8")
-	}
-}
-
-func TestCurrentAioAgentVersionWindowsFallsBackTo32BitRegistry(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "VERSION"), []byte("7.0.1\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	run := func(name string, args ...string) string {
-		if args[3] == "RememberedInstallDir" {
-			return "    RememberedInstallDir    REG_SZ    " + dir + "\n"
-		}
-		return ""
-	}
-
-	var messages []string
-	SetDebugHandler(func(message string) {
-		messages = append(messages, message)
-	})
-	t.Cleanup(func() { SetDebugHandler(nil) })
-
-	if got := currentAioAgentVersion("windows", run); got != "7.0.1" {
-		t.Fatalf("currentAioAgentVersion() = %q, want %q", got, "7.0.1")
-	}
-
-	wantMessages := []string{"Could not read Puppet AIO path from 64 bit registry"}
-	if !reflect.DeepEqual(messages, wantMessages) {
-		t.Fatalf("debug messages = %#v, want %#v", messages, wantMessages)
-	}
-}
-
-func TestCurrentAioAgentVersionWindowsEmpty64BitRegistryDoesNotFallBack(t *testing.T) {
-	t.Parallel()
-
-	run := func(name string, args ...string) string {
-		if args[3] == "RememberedInstallDir64" {
-			return "    RememberedInstallDir64    REG_SZ    \n"
-		}
-		t.Fatal("did not expect 32-bit fallback when 64-bit path is present but empty")
-		return ""
-	}
-
-	if got := currentAioAgentVersion("windows", run); got != "" {
-		t.Fatalf("currentAioAgentVersion() = %q, want empty", got)
-	}
-}
-
-func TestCurrentAioAgentVersionWindowsLogsMissing32BitRegistryLikeRubyResolver(t *testing.T) {
-	run := func(string, ...string) string {
-		return ""
-	}
-
-	var messages []string
-	SetDebugHandler(func(message string) {
-		messages = append(messages, message)
-	})
-	t.Cleanup(func() { SetDebugHandler(nil) })
-
-	if got := currentAioAgentVersion("windows", run); got != "" {
-		t.Fatalf("currentAioAgentVersion() = %q, want empty", got)
-	}
-
-	wantMessages := []string{
-		"Could not read Puppet AIO path from 64 bit registry",
-		"Could not read Puppet AIO path from 32 bit registry",
-	}
-	if !reflect.DeepEqual(messages, wantMessages) {
-		t.Fatalf("debug messages = %#v, want %#v", messages, wantMessages)
-	}
-}
-
-func TestRubyFactsIncludeStructuredRuntimeFacts(t *testing.T) {
-	t.Parallel()
-
-	core := rubyFacts(rubyInfo{
-		Version:  "3.3.0",
-		Platform: "arm64-darwin23",
-		Sitedir:  "/opt/puppetlabs/puppet/lib/ruby/site_ruby/3.3.0",
-	})
-
-	collection := Collection(core)
-	ruby, ok := collection["ruby"].(map[string]any)
-	if !ok {
-		t.Fatalf("ruby fact = %#v, want structured ruby fact", collection["ruby"])
-	}
-	for _, tt := range []struct {
-		name string
-		want string
-	}{
-		{name: "version", want: "3.3.0"},
-		{name: "platform", want: "arm64-darwin23"},
-		{name: "sitedir", want: "/opt/puppetlabs/puppet/lib/ruby/site_ruby/3.3.0"},
-	} {
-		if got := ruby[tt.name]; got != tt.want {
-			t.Fatalf("ruby.%s = %#v, want %#v", tt.name, got, tt.want)
-		}
-	}
-}
-
-func TestParseRubyInfoRequiresRubySitedirGuard(t *testing.T) {
-	t.Parallel()
-
-	info := parseRubyInfo("3.3.0\narm64-darwin23\n\n/opt/puppetlabs/puppet/lib/ruby/site_ruby/3.3.0\n")
-
-	if info.Version != "3.3.0" {
-		t.Fatalf("Version = %q, want %q", info.Version, "3.3.0")
-	}
-	if info.Platform != "arm64-darwin23" {
-		t.Fatalf("Platform = %q, want %q", info.Platform, "arm64-darwin23")
-	}
-	if info.Sitedir != "" {
-		t.Fatalf("Sitedir = %q, want empty when Ruby sitedir guard is missing", info.Sitedir)
-	}
-}
-
 func TestSELinuxFactsReadsConfigAndMountpoint(t *testing.T) {
 	t.Parallel()
 
@@ -2193,7 +2033,7 @@ func TestSELinuxFactsReadsConfigAndMountpoint(t *testing.T) {
 	writeFile(t, filepath.Join(mountpoint, "enforce"), "1")
 	writeFile(t, filepath.Join(mountpoint, "policyvers"), "33")
 
-	core := selinuxFacts(filepath.Join(dir, "mounts"), filepath.Join(dir, "config"))
+	core := selinuxFacts(filepath.Join(dir, "mounts"), filepath.Join(dir, "config"), os.ReadFile)
 	collection := Collection(core)
 	if got, want := collection["os"].(map[string]any)["selinux"], map[string]any{
 		"config_mode":    "enforcing",
@@ -2214,13 +2054,13 @@ func TestSELinuxFactsDisabledWithoutMountpointOrConfig(t *testing.T) {
 	writeFile(t, filepath.Join(dir, "mounts"), "rootfs / rootfs rw 0 0\n")
 	writeFile(t, filepath.Join(dir, "config"), "SELINUX=enforcing\n")
 
-	core := selinuxFacts(filepath.Join(dir, "mounts"), filepath.Join(dir, "config"))
+	core := selinuxFacts(filepath.Join(dir, "mounts"), filepath.Join(dir, "config"), os.ReadFile)
 	if got := Collection(core)["os"].(map[string]any)["selinux"].(map[string]any)["enabled"]; got != false {
 		t.Fatalf("os.selinux.enabled = %#v, want false", got)
 	}
 
 	writeFile(t, filepath.Join(dir, "mounts"), "none /sys/fs/selinux selinuxfs rw 0 0\n")
-	core = selinuxFacts(filepath.Join(dir, "mounts"), filepath.Join(dir, "missing-config"))
+	core = selinuxFacts(filepath.Join(dir, "mounts"), filepath.Join(dir, "missing-config"), os.ReadFile)
 	if got := Collection(core)["os"].(map[string]any)["selinux"].(map[string]any)["enabled"]; got != false {
 		t.Fatalf("os.selinux.enabled = %#v, want false without config", got)
 	}
@@ -2234,7 +2074,7 @@ func TestSELinuxFactsForPlatform_omittedOutsideLinux(t *testing.T) {
 	writeFile(t, filepath.Join(dir, "config"), "SELINUX=enforcing\nSELINUXTYPE=targeted\n")
 
 	for _, goos := range []string{"darwin", "freebsd", "openbsd", "windows"} {
-		if got := selinuxFactsForPlatform(goos, filepath.Join(dir, "mounts"), filepath.Join(dir, "config")); got != nil {
+		if got := selinuxFactsForPlatform(goos, filepath.Join(dir, "mounts"), filepath.Join(dir, "config"), os.ReadFile); got != nil {
 			t.Fatalf("selinuxFactsForPlatform(%s) = %#v, want nil", goos, got)
 		}
 	}
@@ -2247,7 +2087,7 @@ func TestSELinuxFactsForPlatform_resolvesOnLinux(t *testing.T) {
 	writeFile(t, filepath.Join(dir, "mounts"), "rootfs / rootfs rw 0 0\n")
 	writeFile(t, filepath.Join(dir, "config"), "SELINUX=enforcing\n")
 
-	core := selinuxFactsForPlatform("linux", filepath.Join(dir, "mounts"), filepath.Join(dir, "config"))
+	core := selinuxFactsForPlatform("linux", filepath.Join(dir, "mounts"), filepath.Join(dir, "config"), os.ReadFile)
 	if got := Collection(core)["os"].(map[string]any)["selinux"].(map[string]any)["enabled"]; got != false {
 		t.Fatalf("os.selinux.enabled = %#v, want false on Linux without selinuxfs", got)
 	}
@@ -2262,7 +2102,7 @@ func TestSELinuxFactsKeepsMissingPolicyVersionNil(t *testing.T) {
 	writeFile(t, filepath.Join(dir, "config"), "SELINUX=enabled\nSELINUXTYPE=targeted\n")
 	writeFile(t, filepath.Join(mountpoint, "enforce"), "")
 
-	core := selinuxFacts(filepath.Join(dir, "mounts"), filepath.Join(dir, "config"))
+	core := selinuxFacts(filepath.Join(dir, "mounts"), filepath.Join(dir, "config"), os.ReadFile)
 
 	if got := Collection(core)["os"].(map[string]any)["selinux"].(map[string]any)["policy_version"]; got != nil {
 		t.Fatalf("os.selinux.policy_version = %#v, want nil", got)
@@ -3235,7 +3075,7 @@ func TestDarwinFQDNAndDomainFallsBackToResolvConfDomainLikeRubyHostnameResolver(
 		t.Fatal(err)
 	}
 
-	gotFQDN, gotDomain := currentHostnameFQDNAndDomain("darwin", "foo", "foo", resolvConfPath)
+	gotFQDN, gotDomain := currentHostnameFQDNAndDomain("darwin", "foo", "foo", resolvConfPath, os.ReadFile)
 	if gotFQDN != "foo.baz" || gotDomain != "baz" {
 		t.Fatalf("currentHostnameFQDNAndDomain(darwin) = %q, %q; want foo.baz, baz", gotFQDN, gotDomain)
 	}
@@ -3786,14 +3626,6 @@ func TestDMIFacts_omittedWhenNoDataResolves(t *testing.T) {
 	want := []ResolvedFact{{Name: "dmi", Value: dmi}}
 	if got := dmiFacts(dmi); !reflect.DeepEqual(got, want) {
 		t.Fatalf("dmiFacts() = %#v, want %#v", got, want)
-	}
-}
-
-func TestRubyFacts_omittedWithoutRubyRuntime(t *testing.T) {
-	t.Parallel()
-
-	if got := rubyFacts(rubyInfo{}); got != nil {
-		t.Fatalf("rubyFacts(zero) = %#v, want nil", got)
 	}
 }
 
@@ -5196,7 +5028,7 @@ func TestCoreFacts_includeMacOSReleaseKernelHardwareAndIdentity(t *testing.T) {
 	if runtime.GOOS != "darwin" {
 		t.Skipf("macOS host fact integration runs only on darwin, not %s", runtime.GOOS)
 	}
-	collection := Collection(CoreFactsWithRuby(NewSession(), false))
+	collection := Collection(CoreFacts(NewSession()))
 	osFact, ok := collection["os"].(map[string]any)
 	if !ok {
 		t.Fatalf("os = %#v, want map", collection["os"])

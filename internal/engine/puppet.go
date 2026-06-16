@@ -2,28 +2,10 @@ package engine
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 )
-
-// PuppetFacts returns facts discovered from an installed Puppet executable.
-func PuppetFacts() []ResolvedFact {
-	path, err := exec.LookPath("puppet")
-	if err != nil {
-		return nil
-	}
-	out, err := exec.Command(path, "--version").Output()
-	if err != nil {
-		return nil
-	}
-	version := strings.TrimSpace(string(out))
-	if version == "" {
-		return nil
-	}
-	return []ResolvedFact{{Name: "puppetversion", Value: version}}
-}
 
 var (
 	puppetGOOS       = runtime.GOOS

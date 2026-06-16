@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -136,34 +135,20 @@ func (e *Engine) Discover(ctx context.Context, queries ...string) (*Snapshot, er
 
 	if e.cfg.ConfigFile != "" || e.cfg.SystemDefaults {
 		configFile := e.cfg.ConfigFile
-		options, err := ConfigFileOptions(configFile)
+		config, err := ParseConfig(configFile)
 		if err != nil {
 			failures = append(failures, err)
 		} else {
 			if len(externalDirs) == 0 {
-				externalDirs = options.ExternalDirs
+				externalDirs = config.ExternalDirs
 			}
-			noExternalFacts = noExternalFacts || options.NoExternalFacts
-		}
-		blocklist, err := ConfigBlocklist(configFile)
-		if err != nil {
-			failures = append(failures, err)
-		}
-		groups, err := ConfigFactGroups(configFile)
-		if err != nil {
-			failures = append(failures, err)
-		} else {
-			cacheGroups = groups
+			noExternalFacts = noExternalFacts || config.NoExternalFacts
+			cacheGroups = config.FactGroups
 			if e.cfg.BlockedFacts == nil {
-				blocked = BlocklistedFactsForFiltering(blocklist, groups)
+				blocked = BlocklistedFactsForFiltering(config.Blocklist, config.FactGroups)
 			}
-		}
-		if e.cfg.UseCache {
-			configTTLs, err := ConfigTTLs(configFile)
-			if err != nil {
-				failures = append(failures, err)
-			} else {
-				ttls = configTTLs
+			if e.cfg.UseCache {
+				ttls = config.TTLs
 			}
 		}
 	}
@@ -184,28 +169,27 @@ func (e *Engine) Discover(ctx context.Context, queries ...string) (*Snapshot, er
 		if len(dirs) > 0 && ExternalFactResolutionRunning() {
 			e.warnOnce("Recursion detected while resolving external facts; executable external facts will be skipped")
 		}
+		loader := externalFactLoader{
+			s:       s,
+			dirs:    dirs,
+			blocked: blocked,
+		}
 		if e.cfg.CLICompat {
-			loaded, err := LoadExternalFactsWithBlocklist(s, dirs, blocked)
+			loader.mode = externalFactLoaderCLI
+			loader.includeEnv = true
+			loaded, err := loader.load()
 			if err != nil {
 				return newSnapshot(nil), err
 			}
 			externalFacts = loaded
 		} else {
-			if len(dirs) > 0 {
-				loaded, err := LoadExternalFactsFromDirs(s, dirs, blocked)
-				if err != nil {
-					failures = append(failures, err)
-				}
-				externalFacts = loaded
+			loader.mode = externalFactLoaderLibrary
+			loader.includeEnv = e.cfg.SystemDefaults
+			loaded, err := loader.load()
+			if err != nil {
+				failures = append(failures, err)
 			}
-			if e.cfg.SystemDefaults {
-				envFacts, err := loadExternalEnvFacts(os.Environ())
-				if err != nil {
-					failures = append(failures, err)
-				} else {
-					externalFacts = append(externalFacts, envFacts...)
-				}
-			}
+			externalFacts = loaded
 		}
 	}
 	if ctx.Err() != nil {
@@ -239,9 +223,6 @@ func (e *Engine) Discover(ctx context.Context, queries ...string) (*Snapshot, er
 	}
 
 	facts = CoreFacts(s)
-	if e.cfg.Puppet {
-		facts = append(facts, PuppetFacts()...)
-	}
 	facts = append(facts, registeredFacts...)
 	facts = append(facts, externalFacts...)
 	facts = FilterBlockedFacts(facts, blocked)

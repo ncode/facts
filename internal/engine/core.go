@@ -64,7 +64,6 @@ type freeBSDGeomConfig struct {
 	RawUUID string `xml:"rawuuid"`
 }
 
-var aioAgentVersionPattern = regexp.MustCompile(`^\d+\.\d+\.\d+(\.\d+)?`)
 var linuxSystemdDHCPServerPattern = regexp.MustCompile(`(?m)^SERVER_ADDRESS=(\S+)`)
 var linuxDHClientServerPattern = regexp.MustCompile(`dhcp-server-identifier\s+([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)`)
 var linuxDHCPCDServerPattern = regexp.MustCompile(`(?m)^dhcp_server_identifier='([^']+)'`)
@@ -107,26 +106,18 @@ type freeBSDMemoryInfo struct {
 
 // CoreFacts returns the small cross-platform fact set used by the initial Go CLI.
 func CoreFacts(s *Session) []ResolvedFact {
-	return CoreFactsWithRuby(s, true)
-}
-
-// CoreFactsWithRuby returns core facts, optionally omitting facts that require Ruby.
-func CoreFactsWithRuby(s *Session, includeRuby bool) []ResolvedFact {
 	s.coreFacts.mu.Lock()
 	defer s.coreFacts.mu.Unlock()
 	if s.coreFacts.facts == nil {
-		s.coreFacts.facts = make(map[bool][]ResolvedFact, 2)
+		s.coreFacts.facts = buildCoreFacts(s)
 	}
-	if s.coreFacts.facts[includeRuby] == nil {
-		s.coreFacts.facts[includeRuby] = buildCoreFacts(s, includeRuby)
-	}
-	return append([]ResolvedFact(nil), s.coreFacts.facts[includeRuby]...)
+	return append([]ResolvedFact(nil), s.coreFacts.facts...)
 }
 
-func buildCoreFacts(s *Session, includeRuby bool) []ResolvedFact {
-	nodeName, nodeNameValue := hostName()
+func buildCoreFacts(s *Session) []ResolvedFact {
+	nodeName, nodeNameValue := hostName(s)
 	resolvedFQDN := fqdn(nodeName)
-	hostname, fqdn, domain := currentHostnameFacts(runtime.GOOS, nodeName, resolvedFQDN, "/etc/resolv.conf")
+	hostname, fqdn, domain := currentHostnameFacts(runtime.GOOS, nodeName, resolvedFQDN, "/etc/resolv.conf", s.readFile)
 	var hostnameValue any
 	if nodeNameValue != nil {
 		hostnameValue = hostname
@@ -134,7 +125,7 @@ func buildCoreFacts(s *Session, includeRuby bool) []ResolvedFact {
 	fqdnValue, domainValue := hostnameFactValues(hostnameValue, fqdn, domain)
 	ipv4 := primaryIPv4()
 	interfaces := networkingInterfaces(s)
-	configuredPrimary, interfaces := currentNetworkingData(runtime.GOOS, interfaces, s.commandOutput)
+	configuredPrimary, interfaces := currentNetworkingData(runtime.GOOS, interfaces, s.commandOutput, s.readFile)
 	if runtime.GOOS == "windows" {
 		domain = currentWindowsNetworkingDomain(interfaces, s.commandOutput)
 		fqdn = windowsFQDN(hostname, domain)
@@ -184,7 +175,6 @@ func buildCoreFacts(s *Session, includeRuby bool) []ResolvedFact {
 			}
 		}
 	}
-	aioVersion := currentAioAgentVersion(runtime.GOOS, s.commandOutput)
 	memoryTotalBytes := s.cachedTotalPhysicalMemoryBytes()
 	memoryAvailableBytes := s.cachedAvailablePhysicalMemoryBytes()
 	memoryUsedBytes := max(0, memoryTotalBytes-memoryAvailableBytes)
@@ -201,7 +191,7 @@ func buildCoreFacts(s *Session, includeRuby bool) []ResolvedFact {
 		platformProcessors = s.cachedPlatformProcessorInfo()
 	}
 	if runtime.GOOS == "linux" {
-		platformProcessors.PhysicalCount = currentLinuxProcessorPhysicalCount("/proc/cpuinfo", "/sys/devices/system/cpu")
+		platformProcessors.PhysicalCount = currentLinuxProcessorPhysicalCount("/proc/cpuinfo", "/sys/devices/system/cpu", s.readFile)
 	}
 	processorCount := runtime.NumCPU()
 	if platformProcessors.LogicalCount > 0 {
@@ -219,8 +209,8 @@ func buildCoreFacts(s *Session, includeRuby bool) []ResolvedFact {
 	uptime := s.cachedUptime()
 	virtualization := detectVirtualization(s)
 	virtualFact, isVirtualFact := virtualizationFactValues(virtualization)
-	disks := currentDisks(runtime.GOOS, s.commandOutput)
-	dmi := dmiFact("/sys/class/dmi/id")
+	disks := currentDisks(runtime.GOOS, s.commandOutput, s.host)
+	dmi := dmiFact("/sys/class/dmi/id", s.readFile)
 	var mountEntries []mountEntry
 	if runtime.GOOS == "linux" {
 		mountEntries = currentMountEntries(s)
@@ -291,17 +281,11 @@ func buildCoreFacts(s *Session, includeRuby bool) []ResolvedFact {
 	facts = append(facts, disksFacts(disks)...)
 	facts = append(facts, dmiFacts(dmi)...)
 	facts = append(facts, filesystemsFacts(s.cachedFilesystems())...)
-	facts = append(facts, fipsEnabledFacts(runtime.GOOS, "/proc/sys/crypto/fips_enabled", s.commandOutput)...)
+	facts = append(facts, fipsEnabledFacts(runtime.GOOS, "/proc/sys/crypto/fips_enabled", s.commandOutput, s.readFile)...)
 	facts = append(facts, partitionsFacts(partitionsFactWithMountEntries(currentPartitions(s), mountEntries, mountpoints))...)
 	facts = append(facts, processorSpeedFacts(processorSpeed)...)
 	facts = append(facts, currentLinuxHypervisorFacts(s)...)
-	if includeRuby {
-		facts = append(facts, rubyFacts(resolveRubyInfo())...)
-	}
-	if aioVersion != "" {
-		facts = append(facts, ResolvedFact{Name: "aio_agent_version", Value: aioVersion})
-	}
-	facts = append(facts, selinuxFactsForPlatform(runtime.GOOS, "/proc/self/mounts", "/etc/selinux/config")...)
+	facts = append(facts, selinuxFactsForPlatform(runtime.GOOS, "/proc/self/mounts", "/etc/selinux/config", s.readFile)...)
 	facts = append(facts, linuxDistroFacts(linuxDistro)...)
 	macOSInfo := s.cachedMacOSInfo()
 	facts = append(facts, macOSVersionFacts(macOSInfo.ProductVersion, macOSInfo.ProductVersionExtra)...)
@@ -315,10 +299,12 @@ func buildCoreFacts(s *Session, includeRuby bool) []ResolvedFact {
 	facts = append(facts, windowsProductReleaseFacts(currentWindowsProductRelease(runtime.GOOS, s.commandOutput))...)
 	facts = append(facts, windowsDMIFacts(currentWindowsDMI(runtime.GOOS, s.commandOutput))...)
 	facts = append(facts, currentWindowsHypervisorFacts(s)...)
-	facts = append(facts, sshFactsForPlatformWithPrivilege(runtime.GOOS, identityPrivileged(identity), discoverSSHHostKeys)...)
+	facts = append(facts, sshFactsForPlatformWithPrivilege(runtime.GOOS, identityPrivileged(identity), func() []sshHostKey {
+		return discoverSSHHostKeys(s.readFile)
+	})...)
 	facts = append(facts, currentFreeBSDDMIFacts(s)...)
 	facts = append(facts, currentOpenBSDDMIFacts(s)...)
-	facts = append(facts, currentXenFacts()...)
+	facts = append(facts, currentXenFacts(s)...)
 	facts = append(facts, azureFacts(s.Context(), newAzureClient(azureMetadataBaseURL, nil), virtualization)...)
 	facts = append(facts, ec2Facts(s, newEC2Client(ec2MetadataBaseURL, nil), virtualization)...)
 	facts = append(facts, platformGCEFacts(s.Context(), runtime.GOOS, virtualization, dmiBIOSVendor(dmi), newGCEClient(gceMetadataBaseURL, nil))...)
@@ -332,29 +318,29 @@ func virtualizationFactValues(v virtualization) (any, any) {
 	return v.Name, v.IsVirtual
 }
 
-func fipsEnabled(path string) bool {
-	data, err := os.ReadFile(path)
+func fipsEnabled(path string, readFile fileReader) bool {
+	data, err := readFile(path)
 	if err != nil {
 		return false
 	}
 	return strings.TrimSpace(string(data)) == "1"
 }
 
-func currentFIPSEnabled(goos, linuxPath string, run commandRunner) bool {
+func currentFIPSEnabled(goos, linuxPath string, run commandRunner, readFile fileReader) bool {
 	if goos == "windows" {
 		return parseWindowsFIPSEnabled(run("reg", "query", `HKLM\System\CurrentControlSet\Control\Lsa\FipsAlgorithmPolicy`, "/v", "Enabled"))
 	}
-	return fipsEnabled(linuxPath)
+	return fipsEnabled(linuxPath, readFile)
 }
 
 // fipsEnabledFacts resolves fips_enabled only on Linux and Windows, the
 // platforms where Ruby Facter emits the fact; elsewhere the fact is absent
 // instead of a placeholder false.
-func fipsEnabledFacts(goos, linuxPath string, run commandRunner) []ResolvedFact {
+func fipsEnabledFacts(goos, linuxPath string, run commandRunner, readFile fileReader) []ResolvedFact {
 	if goos != "linux" && goos != "windows" {
 		return nil
 	}
-	return []ResolvedFact{{Name: "fips_enabled", Value: currentFIPSEnabled(goos, linuxPath, run)}}
+	return []ResolvedFact{{Name: "fips_enabled", Value: currentFIPSEnabled(goos, linuxPath, run, readFile)}}
 }
 
 func parseWindowsFIPSEnabled(input string) bool {
@@ -369,103 +355,26 @@ func parseWindowsFIPSEnabled(input string) bool {
 	return false
 }
 
-func aioAgentVersion(path string) string {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return ""
-	}
-	return aioAgentVersionPattern.FindString(strings.TrimSpace(string(data)))
-}
-
-func currentAioAgentVersion(goos string, run commandRunner) string {
-	if goos != "windows" {
-		return aioAgentVersion("/opt/puppetlabs/puppet/VERSION")
-	}
-
-	const registryPath = `HKLM\SOFTWARE\Puppet Labs\Puppet`
-	installDir, ok := parseWindowsRegistryStringValue(run("reg", "query", registryPath, "/v", "RememberedInstallDir64"), "RememberedInstallDir64")
-	if !ok {
-		debug("Could not read Puppet AIO path from 64 bit registry")
-		installDir, ok = parseWindowsRegistryStringValue(run("reg", "query", registryPath, "/v", "RememberedInstallDir"), "RememberedInstallDir")
-		if !ok {
-			debug("Could not read Puppet AIO path from 32 bit registry")
-		}
-	}
-	if !ok || installDir == "" {
-		return ""
-	}
-	return aioAgentVersion(filepath.Join(installDir, "VERSION"))
-}
-
-type rubyInfo struct {
-	Version  string
-	Platform string
-	Sitedir  string
-}
-
-func resolveRubyInfo() rubyInfo {
-	cmd := exec.Command("ruby", "-rrbconfig", "-e", `puts RUBY_VERSION; puts RUBY_PLATFORM; puts RbConfig::CONFIG["sitedir"]; puts RbConfig::CONFIG["sitelibdir"]`)
-	data, err := cmd.Output()
-	if err != nil {
-		return rubyInfo{}
-	}
-	return parseRubyInfo(string(data))
-}
-
-func parseRubyInfo(output string) rubyInfo {
-	lines := strings.Split(strings.TrimRight(output, "\r\n"), "\n")
-	if len(lines) < 4 {
-		return rubyInfo{}
-	}
-	sitedir := strings.TrimSpace(lines[2])
-	sitelibdir := strings.TrimSpace(lines[3])
-	if sitedir == "" {
-		sitelibdir = ""
-	}
-	return rubyInfo{
-		Version:  strings.TrimSpace(lines[0]),
-		Platform: strings.TrimSpace(lines[1]),
-		Sitedir:  sitelibdir,
-	}
-}
-
-func rubyFacts(info rubyInfo) []ResolvedFact {
-	ruby := make(map[string]any, 3)
-	if info.Version != "" {
-		ruby["version"] = info.Version
-	}
-	if info.Platform != "" {
-		ruby["platform"] = info.Platform
-	}
-	if info.Sitedir != "" {
-		ruby["sitedir"] = info.Sitedir
-	}
-	if len(ruby) == 0 {
-		return nil
-	}
-	return []ResolvedFact{{Name: "ruby", Value: ruby}}
-}
-
 // selinuxFactsForPlatform resolves os.selinux only on Linux, the only
 // platform where Ruby Facter emits SELinux data; elsewhere the fact is
 // absent.
-func selinuxFactsForPlatform(goos, mountsPath, configPath string) []ResolvedFact {
+func selinuxFactsForPlatform(goos, mountsPath, configPath string, readFile fileReader) []ResolvedFact {
 	if goos != "linux" {
 		return nil
 	}
-	return selinuxFacts(mountsPath, configPath)
+	return selinuxFacts(mountsPath, configPath, readFile)
 }
 
-func selinuxFacts(mountsPath, configPath string) []ResolvedFact {
-	mountpoint := selinuxMountpoint(mountsPath)
-	configMode, configPolicy, hasConfig := readSELinuxConfig(configPath)
+func selinuxFacts(mountsPath, configPath string, readFile fileReader) []ResolvedFact {
+	mountpoint := selinuxMountpoint(mountsPath, readFile)
+	configMode, configPolicy, hasConfig := readSELinuxConfig(configPath, readFile)
 	enabled := mountpoint != "" && hasConfig
 	values := map[string]any{"enabled": enabled}
 	if enabled {
 		values["config_mode"] = configMode
 		values["config_policy"] = configPolicy
-		values["policy_version"] = readOptionalText(filepath.Join(mountpoint, "policyvers"))
-		enforced := strings.TrimSpace(readText(filepath.Join(mountpoint, "enforce"))) == "1"
+		values["policy_version"] = readOptionalText(filepath.Join(mountpoint, "policyvers"), readFile)
+		enforced := strings.TrimSpace(readText(filepath.Join(mountpoint, "enforce"), readFile)) == "1"
 		values["enforced"] = enforced
 		if enforced {
 			values["current_mode"] = "enforcing"
@@ -494,8 +403,8 @@ func selinuxFacts(mountsPath, configPath string) []ResolvedFact {
 	return core
 }
 
-func selinuxMountpoint(path string) string {
-	for line := range strings.SplitSeq(readText(path), "\n") {
+func selinuxMountpoint(path string, readFile fileReader) string {
+	for line := range strings.SplitSeq(readText(path, readFile), "\n") {
 		fields := strings.Fields(line)
 		if len(fields) >= 3 && fields[2] == "selinuxfs" {
 			return fields[1]
@@ -504,8 +413,8 @@ func selinuxMountpoint(path string) string {
 	return ""
 }
 
-func readSELinuxConfig(path string) (mode, policy string, ok bool) {
-	data, err := os.ReadFile(path)
+func readSELinuxConfig(path string, readFile fileReader) (mode, policy string, ok bool) {
+	data, err := readFile(path)
 	if err != nil || len(data) == 0 {
 		return "", "", false
 	}
@@ -520,16 +429,16 @@ func readSELinuxConfig(path string) (mode, policy string, ok bool) {
 	return mode, policy, true
 }
 
-func readText(path string) string {
-	data, err := os.ReadFile(path)
+func readText(path string, readFile fileReader) string {
+	data, err := readFile(path)
 	if err != nil {
 		return ""
 	}
 	return string(data)
 }
 
-func readOptionalText(path string) any {
-	data, err := os.ReadFile(path)
+func readOptionalText(path string, readFile fileReader) any {
+	data, err := readFile(path)
 	if err != nil {
 		return nil
 	}
@@ -544,8 +453,8 @@ type sshHostKey struct {
 	SHA256 string
 }
 
-func discoverSSHHostKeys() []sshHostKey {
-	return discoverSSHHostKeysForPlatform(runtime.GOOS, os.Getenv("programdata"), os.ReadFile)
+func discoverSSHHostKeys(readFile fileReader) []sshHostKey {
+	return discoverSSHHostKeysForPlatform(runtime.GOOS, os.Getenv("programdata"), readFile)
 }
 
 func discoverSSHHostKeysForPlatform(goos, programData string, readFile fileReader) []sshHostKey {
@@ -768,28 +677,32 @@ func networkingDHCPFact(interfaces map[string]any, primaryIP string) string {
 	return primaryDHCP
 }
 
-func dmiFact(root string) map[string]any {
+func dmiFact(root string, readFiles ...fileReader) map[string]any {
+	readFile := osHost{}.readFile
+	if len(readFiles) > 0 && readFiles[0] != nil {
+		readFile = readFiles[0]
+	}
 	bios := mapFromDMI(root, map[string]string{
 		"vendor":       "bios_vendor",
 		"version":      "bios_version",
 		"release_date": "bios_date",
-	})
+	}, readFile)
 	board := mapFromDMI(root, map[string]string{
 		"manufacturer":  "board_vendor",
 		"product":       "board_name",
 		"serial_number": "board_serial",
 		"asset_tag":     "board_asset_tag",
-	})
+	}, readFile)
 	chassis := mapFromDMI(root, map[string]string{
 		"type":      "chassis_type",
 		"asset_tag": "chassis_asset_tag",
-	})
+	}, readFile)
 	product := mapFromDMI(root, map[string]string{
 		"name":          "product_name",
 		"version":       "product_version",
 		"serial_number": "product_serial",
 		"uuid":          "product_uuid",
-	})
+	}, readFile)
 
 	dmi := make(map[string]any, 5)
 	if len(bios) > 0 {
@@ -804,7 +717,7 @@ func dmiFact(root string) map[string]any {
 	if len(product) > 0 {
 		dmi["product"] = product
 	}
-	if manufacturer := readDMIString(root, "sys_vendor"); manufacturer != "" {
+	if manufacturer := readDMIString(root, "sys_vendor", readFile); manufacturer != "" {
 		dmi["manufacturer"] = manufacturer
 	}
 	return dmi
@@ -922,7 +835,11 @@ func openBSDDMIFacts(values map[string]string) []ResolvedFact {
 	return []ResolvedFact{{Name: "dmi", Value: dmi}}
 }
 
-func disksFact(root string) map[string]any {
+func disksFact(root string, hosts ...hostOS) map[string]any {
+	var host hostOS = osHost{}
+	if len(hosts) > 0 {
+		host = hosts[0]
+	}
 	entries, err := os.ReadDir(root)
 	if err != nil {
 		return nil
@@ -932,26 +849,26 @@ func disksFact(root string) map[string]any {
 	for _, entry := range entries {
 		name := entry.Name()
 		deviceDir := filepath.Join(root, name, "device")
-		info, err := os.Stat(deviceDir)
+		info, err := host.stat(deviceDir)
 		if err != nil || !info.IsDir() {
 			continue
 		}
 
 		disk := make(map[string]any, 5)
-		if model := readSysfsString(root, name, "device/model"); model != "" {
+		if model := readSysfsString(root, name, "device/model", host.readFile); model != "" {
 			disk["model"] = model
 		}
-		if vendor := readSysfsString(root, name, "device/vendor"); vendor != "" {
+		if vendor := readSysfsString(root, name, "device/vendor", host.readFile); vendor != "" {
 			disk["vendor"] = vendor
 		}
-		if rotational := readSysfsString(root, name, "queue/rotational"); rotational != "" {
+		if rotational := readSysfsString(root, name, "queue/rotational", host.readFile); rotational != "" {
 			if rotational == "0" {
 				disk["type"] = "ssd"
 			} else {
 				disk["type"] = "hdd"
 			}
 		}
-		if sectors, err := strconv.Atoi(readSysfsString(root, name, "size")); err == nil && sectors > 0 {
+		if sectors, err := strconv.Atoi(readSysfsString(root, name, "size", host.readFile)); err == nil && sectors > 0 {
 			sizeBytes := sectors * 512
 			disk["size_bytes"] = sizeBytes
 			disk["size"] = bytesToHumanReadable(sizeBytes)
@@ -976,19 +893,27 @@ func disksFacts(disks map[string]any) []ResolvedFact {
 	return []ResolvedFact{{Name: "disks", Value: disks}}
 }
 
-func currentDisks(goos string, run commandRunner) map[string]any {
+func currentDisks(goos string, run commandRunner, hosts ...hostOS) map[string]any {
+	var host hostOS = osHost{}
+	if len(hosts) > 0 {
+		host = hosts[0]
+	}
 	switch goos {
 	case "freebsd":
 		return parseFreeBSDGeomDisks(run("sysctl", "-n", "kern.geom.confxml"))
 	case "linux":
-		return currentLinuxDisks("/sys/block", run)
+		return currentLinuxDisks("/sys/block", run, host)
 	default:
-		return disksFact("/sys/block")
+		return disksFact("/sys/block", host)
 	}
 }
 
-func currentLinuxDisks(root string, run commandRunner) map[string]any {
-	disks := disksFact(root)
+func currentLinuxDisks(root string, run commandRunner, hosts ...hostOS) map[string]any {
+	var host hostOS = osHost{}
+	if len(hosts) > 0 {
+		host = hosts[0]
+	}
+	disks := disksFact(root, host)
 	if len(disks) == 0 || run == nil {
 		return disks
 	}
@@ -1038,13 +963,7 @@ func parseFreeBSDGeomDisks(input string) map[string]any {
 var augeasVersionPattern = regexp.MustCompile(`\b(\d+\.\d+(?:\.\d+)?)\b`)
 
 func probeAugeasVersion(s *Session) string {
-	return currentAugeasVersion(fileExists, func(name string, args ...string) string {
-		out, err := exec.Command(name, args...).CombinedOutput()
-		if err != nil {
-			return ""
-		}
-		return string(out)
-	})
+	return currentAugeasVersion(fileExists, s.commandOutput)
 }
 
 func currentAugeasVersion(exists func(string) bool, run commandRunner) string {
@@ -1075,11 +994,11 @@ func augeasVersionFacts(version string) []ResolvedFact {
 	}
 }
 
-func currentXenFacts() []ResolvedFact {
-	vm := detectXenVM()
+func currentXenFacts(s *Session) []ResolvedFact {
+	vm := detectXenVM(s)
 	var domains []string
 	if vm == "xen0" {
-		domains = detectXenDomains()
+		domains = detectXenDomains(s)
 	}
 	return xenFacts(vm, domains)
 }
@@ -1096,14 +1015,14 @@ func xenFacts(vm string, domains []string) []ResolvedFact {
 	}
 }
 
-func detectXenVM() string {
+func detectXenVM(s *Session) string {
 	if runtime.GOOS != "linux" {
 		return ""
 	}
-	if strings.Contains(readFileString("/proc/xen/capabilities"), "control_d") {
+	if strings.Contains(readFileString("/proc/xen/capabilities", s.readFile), "control_d") {
 		return "xen0"
 	}
-	return detectXenVMFromSignals(fileExists("/dev/xen/evtchn"), dirExists("/proc/xen"), fileExists("/dev/xvda1"), isSymlink("/dev/xvda1"))
+	return detectXenVMFromSignals(fileExistsWithHost(s.host, "/dev/xen/evtchn"), dirExistsWithHost(s.host, "/proc/xen"), fileExistsWithHost(s.host, "/dev/xvda1"), isSymlink("/dev/xvda1", s.lstat))
 }
 
 func detectXenVMFromSignals(evtchn, procXen, xvda1, xvda1Symlink bool) string {
@@ -1116,16 +1035,16 @@ func detectXenVMFromSignals(evtchn, procXen, xvda1, xvda1Symlink bool) string {
 	return ""
 }
 
-func detectXenDomains() []string {
+func detectXenDomains(s *Session) []string {
 	bin := selectXenCommand(fileExists)
 	if bin == "" {
 		return nil
 	}
-	out, err := exec.Command(bin, "list").Output()
-	if err != nil {
+	out := s.commandOutput(bin, "list")
+	if out == "" {
 		return nil
 	}
-	return parseXenDomains(string(out))
+	return parseXenDomains(out)
 }
 
 func selectXenCommand(exists func(string) bool) string {
@@ -1161,16 +1080,24 @@ func parseXenDomains(out string) []string {
 	return domains
 }
 
-func readFileString(path string) string {
-	data, err := os.ReadFile(path)
+func readFileString(path string, readFiles ...fileReader) string {
+	readFile := osHost{}.readFile
+	if len(readFiles) > 0 && readFiles[0] != nil {
+		readFile = readFiles[0]
+	}
+	data, err := readFile(path)
 	if err != nil {
 		return ""
 	}
 	return string(data)
 }
 
-func isSymlink(path string) bool {
-	info, err := os.Lstat(path)
+func isSymlink(path string, lstats ...func(string) (os.FileInfo, error)) bool {
+	lstat := osHost{}.lstat
+	if len(lstats) > 0 && lstats[0] != nil {
+		lstat = lstats[0]
+	}
+	info, err := lstat(path)
 	if err != nil {
 		return false
 	}
@@ -1182,14 +1109,18 @@ func currentPartitions(s *Session) map[string]any {
 	case "freebsd":
 		return parseFreeBSDGeomPartitions(s.commandOutput("sysctl", "-n", "kern.geom.confxml"))
 	case "linux":
-		return currentLinuxPartitions("/sys/class/block", s.commandOutput)
+		return currentLinuxPartitions("/sys/class/block", s.commandOutput, s.host)
 	default:
 		return nil
 	}
 }
 
-func currentLinuxPartitions(root string, run commandRunner) map[string]any {
-	partitions := discoverPartitions(root)
+func currentLinuxPartitions(root string, run commandRunner, hosts ...hostOS) map[string]any {
+	host := hostOS(osHost{})
+	if len(hosts) > 0 && hosts[0] != nil {
+		host = hosts[0]
+	}
+	partitions := discoverPartitions(root, host)
 	if len(partitions) == 0 || run == nil {
 		return partitions
 	}
@@ -1214,7 +1145,11 @@ func currentLinuxPartitions(root string, run commandRunner) map[string]any {
 	return partitions
 }
 
-func discoverPartitions(root string) map[string]any {
+func discoverPartitions(root string, hosts ...hostOS) map[string]any {
+	host := hostOS(osHost{})
+	if len(hosts) > 0 && hosts[0] != nil {
+		host = hosts[0]
+	}
 	entries, err := os.ReadDir(root)
 	if err != nil {
 		return nil
@@ -1223,23 +1158,23 @@ func discoverPartitions(root string) map[string]any {
 	partitions := make(map[string]any, len(entries))
 	for _, entry := range entries {
 		name := entry.Name()
-		if _, err := os.Stat(filepath.Join(root, name, "partition")); err != nil {
-			if _, err := os.Stat(filepath.Join(root, name, "dm")); err == nil {
+		if _, err := host.stat(filepath.Join(root, name, "partition")); err != nil {
+			if _, err := host.stat(filepath.Join(root, name, "dm")); err == nil {
 				device := "/dev/" + name
-				if mapName := readSysfsString(root, filepath.Join(name, "dm"), "name"); mapName != "" {
+				if mapName := readSysfsString(root, filepath.Join(name, "dm"), "name", host.readFile); mapName != "" {
 					device = "/dev/mapper/" + mapName
 				}
 				partition := make(map[string]any, 2)
-				addLinuxPartitionSize(partition, root, name)
+				addLinuxPartitionSize(partition, root, name, host.readFile)
 				partitions[device] = partition
 				continue
 			}
-			if _, err := os.Stat(filepath.Join(root, name, "loop")); err == nil {
+			if _, err := host.stat(filepath.Join(root, name, "loop")); err == nil {
 				partition := make(map[string]any, 3)
-				if backingFile := readSysfsString(root, filepath.Join(name, "loop"), "backing_file"); backingFile != "" {
+				if backingFile := readSysfsString(root, filepath.Join(name, "loop"), "backing_file", host.readFile); backingFile != "" {
 					partition["backing_file"] = backingFile
 				}
-				addLinuxPartitionSize(partition, root, name)
+				addLinuxPartitionSize(partition, root, name, host.readFile)
 				partitions["/dev/"+name] = partition
 				continue
 			}
@@ -1247,7 +1182,7 @@ func discoverPartitions(root string) map[string]any {
 		}
 
 		partition := make(map[string]any, 2)
-		addLinuxPartitionSize(partition, root, name)
+		addLinuxPartitionSize(partition, root, name, host.readFile)
 		partitions["/dev/"+name] = partition
 	}
 	if len(partitions) == 0 {
@@ -1256,8 +1191,12 @@ func discoverPartitions(root string) map[string]any {
 	return partitions
 }
 
-func addLinuxPartitionSize(partition map[string]any, root, name string) {
-	sectors, err := strconv.Atoi(readSysfsString(root, name, "size"))
+func addLinuxPartitionSize(partition map[string]any, root, name string, readFiles ...fileReader) {
+	readFile := osHost{}.readFile
+	if len(readFiles) > 0 && readFiles[0] != nil {
+		readFile = readFiles[0]
+	}
+	sectors, err := strconv.Atoi(readSysfsString(root, name, "size", readFile))
 	if err != nil || sectors < 0 {
 		sectors = 0
 	}
@@ -1488,18 +1427,26 @@ func addPartitionMount(partitions map[string]any, path string, mountpoint map[st
 	partition["mount"] = path
 }
 
-func readSysfsString(root, device, name string) string {
-	data, err := os.ReadFile(filepath.Join(root, device, name))
+func readSysfsString(root, device, name string, readFiles ...fileReader) string {
+	readFile := osHost{}.readFile
+	if len(readFiles) > 0 && readFiles[0] != nil {
+		readFile = readFiles[0]
+	}
+	data, err := readFile(filepath.Join(root, device, name))
 	if err != nil {
 		return ""
 	}
 	return strings.TrimSpace(string(data))
 }
 
-func mapFromDMI(root string, names map[string]string) map[string]any {
+func mapFromDMI(root string, names map[string]string, readFiles ...fileReader) map[string]any {
+	readFile := osHost{}.readFile
+	if len(readFiles) > 0 && readFiles[0] != nil {
+		readFile = readFiles[0]
+	}
 	values := make(map[string]any, len(names))
 	for key, filename := range names {
-		if value := readDMIString(root, filename); value != "" {
+		if value := readDMIString(root, filename, readFile); value != "" {
 			if filename == "chassis_type" {
 				value = dmiChassisTypeName(value)
 			}
@@ -1535,8 +1482,12 @@ func dmiChassisTypeName(value string) string {
 	return types[n-1]
 }
 
-func readDMIString(root, name string) string {
-	data, err := os.ReadFile(filepath.Join(root, name))
+func readDMIString(root, name string, readFiles ...fileReader) string {
+	readFile := osHost{}.readFile
+	if len(readFiles) > 0 && readFiles[0] != nil {
+		readFile = readFiles[0]
+	}
+	data, err := readFile(filepath.Join(root, name))
 	if err != nil {
 		return ""
 	}
@@ -1581,10 +1532,10 @@ func networkingInterfacesForPlatform(s *Session, goos string, snapshotProvider f
 	values := networkingInterfacesFromSnapshots(snapshots, goos)
 	if goos == "linux" {
 		addLinuxDHCPServersFromSnapshots(s, values, snapshots)
-		addLinuxRouteSourceBindings(values)
-		addLinuxIfInet6Flags(values, parseLinuxIfInet6Flags(readText("/proc/net/if_inet6")))
-		addLinuxBondingSlaveMACsFromRoot("/", values)
-		addLinuxInterfaceMetadataFromRoot("/", values)
+		addLinuxRouteSourceBindings(s, values)
+		addLinuxIfInet6Flags(values, parseLinuxIfInet6Flags(readText("/proc/net/if_inet6", s.readFile)))
+		addLinuxBondingSlaveMACsFromRootWithReader("/", values, s.readFile)
+		addLinuxInterfaceMetadataFromRootWithHost("/", values, s.host)
 	}
 	return values
 }
@@ -1672,7 +1623,11 @@ func formatInterfaceMAC(goos string, hw net.HardwareAddr) string {
 
 type commandRunner func(name string, args ...string) string
 
-func currentNetworkingData(goos string, interfaces map[string]any, run commandRunner) (string, map[string]any) {
+func currentNetworkingData(goos string, interfaces map[string]any, run commandRunner, readFiles ...fileReader) (string, map[string]any) {
+	readFile := missingFileReader
+	if len(readFiles) > 0 && readFiles[0] != nil {
+		readFile = readFiles[0]
+	}
 	switch goos {
 	case "darwin":
 		addDarwinDHCPServers(interfaces, run)
@@ -1701,10 +1656,14 @@ func currentNetworkingData(goos string, interfaces map[string]any, run commandRu
 		expandInterfaceBindings(interfaces)
 		return windowsPrimaryInterface(interfaces), interfaces
 	case "linux":
-		return linuxPrimaryInterface(readText("/proc/net/route"), interfaces, run), interfaces
+		return linuxPrimaryInterface(readText("/proc/net/route", readFile), interfaces, run), interfaces
 	default:
 		return "", interfaces
 	}
+}
+
+func missingFileReader(string) ([]byte, error) {
+	return nil, os.ErrNotExist
 }
 
 func addDarwinDHCPServers(interfaces map[string]any, run commandRunner) {
@@ -1989,15 +1948,15 @@ func expandFirstInterfaceBinding(iface map[string]any, bindingKey string, factKe
 	}
 }
 
-func addLinuxRouteSourceBindings(interfaces map[string]any) {
+func addLinuxRouteSourceBindings(s *Session, interfaces map[string]any) {
 	if len(interfaces) == 0 {
 		return
 	}
-	if output, err := exec.Command("ip", "route", "show").Output(); err == nil {
-		addRouteSourceBindings(interfaces, "bindings", linuxRouteSourceBindings(string(output)))
+	if output := s.commandOutput("ip", "route", "show"); output != "" {
+		addRouteSourceBindings(interfaces, "bindings", linuxRouteSourceBindings(output))
 	}
-	if output, err := exec.Command("ip", "-6", "route", "show").Output(); err == nil {
-		addRouteSourceBindings(interfaces, "bindings6", linuxRouteSourceBindings(string(output)))
+	if output := s.commandOutput("ip", "-6", "route", "show"); output != "" {
+		addRouteSourceBindings(interfaces, "bindings6", linuxRouteSourceBindings(output))
 	}
 }
 
@@ -2123,27 +2082,35 @@ func addLinuxIfInet6Flags(interfaces map[string]any, flags map[string]map[string
 }
 
 func addLinuxInterfaceMetadataFromRoot(root string, interfaces map[string]any) {
+	addLinuxInterfaceMetadataFromRootWithHost(root, interfaces, osHost{})
+}
+
+func addLinuxInterfaceMetadataFromRootWithHost(root string, interfaces map[string]any, host hostOS) {
 	for name, raw := range interfaces {
 		iface, ok := raw.(map[string]any)
 		if !ok {
 			continue
 		}
 		ifaceRoot := rootedPath(root, filepath.Join("sys/class/net", name))
-		if state := strings.TrimSpace(readText(filepath.Join(ifaceRoot, "operstate"))); state != "" {
+		if state := strings.TrimSpace(readText(filepath.Join(ifaceRoot, "operstate"), host.readFile)); state != "" {
 			iface["operational_state"] = state
 		}
-		_, err := os.Stat(filepath.Join(ifaceRoot, "device"))
+		_, err := host.stat(filepath.Join(ifaceRoot, "device"))
 		iface["physical"] = err == nil
-		if speed, err := strconv.Atoi(strings.TrimSpace(readText(filepath.Join(ifaceRoot, "speed")))); err == nil {
+		if speed, err := strconv.Atoi(strings.TrimSpace(readText(filepath.Join(ifaceRoot, "speed"), host.readFile))); err == nil {
 			iface["speed"] = speed
 		}
-		if duplex := strings.TrimSpace(readText(filepath.Join(ifaceRoot, "duplex"))); duplex != "" {
+		if duplex := strings.TrimSpace(readText(filepath.Join(ifaceRoot, "duplex"), host.readFile)); duplex != "" {
 			iface["duplex"] = duplex
 		}
 	}
 }
 
 func addLinuxBondingSlaveMACsFromRoot(root string, interfaces map[string]any) {
+	addLinuxBondingSlaveMACsFromRootWithReader(root, interfaces, osHost{}.readFile)
+}
+
+func addLinuxBondingSlaveMACsFromRootWithReader(root string, interfaces map[string]any, readFile fileReader) {
 	entries, err := os.ReadDir(rootedPath(root, "proc/net/bonding"))
 	if err != nil {
 		return
@@ -2152,7 +2119,7 @@ func addLinuxBondingSlaveMACsFromRoot(root string, interfaces map[string]any) {
 		if entry.IsDir() {
 			continue
 		}
-		for slave, mac := range parseLinuxBondingSlaveMACs(readText(rootedPath(root, filepath.Join("proc/net/bonding", entry.Name())))) {
+		for slave, mac := range parseLinuxBondingSlaveMACs(readText(rootedPath(root, filepath.Join("proc/net/bonding", entry.Name())), readFile)) {
 			iface, ok := interfaces[slave].(map[string]any)
 			if ok {
 				iface["mac"] = mac
@@ -2184,18 +2151,22 @@ func linuxDHCPServer(s *Session, interfaceName string, interfaceIndex int) strin
 }
 
 func linuxDHCPServerFromRoot(s *Session, root, interfaceName string, interfaceIndex int) string {
-	return linuxDHCPServerFromRootWithRunner(root, interfaceName, interfaceIndex, s.commandOutput)
+	return linuxDHCPServerFromRootWithHost(root, interfaceName, interfaceIndex, s.commandOutput, s.host)
 }
 
 func linuxDHCPServerFromRootWithRunner(root, interfaceName string, interfaceIndex int, run commandRunner) string {
+	return linuxDHCPServerFromRootWithHost(root, interfaceName, interfaceIndex, run, osHost{})
+}
+
+func linuxDHCPServerFromRootWithHost(root, interfaceName string, interfaceIndex int, run commandRunner, host hostOS) string {
 	if interfaceIndex > 0 {
 		leasePath := rootedPath(root, filepath.Join("run/systemd/netif/leases", strconv.Itoa(interfaceIndex)))
-		if server := linuxSystemdDHCPServer(readText(leasePath)); server != "" {
+		if server := linuxSystemdDHCPServer(readText(leasePath, host.readFile)); server != "" {
 			return server
 		}
 	}
 	for _, dir := range []string{"var/lib/dhclient", "var/lib/dhcp", "var/lib/dhcp3", "var/lib/NetworkManager", "var/db"} {
-		server := linuxDHCPServerFromLeaseDir(rootedPath(root, dir), interfaceName)
+		server := linuxDHCPServerFromLeaseDirWithReader(rootedPath(root, dir), interfaceName, host.readFile)
 		if server != "" {
 			return server
 		}
@@ -2207,6 +2178,10 @@ func linuxDHCPServerFromRootWithRunner(root, interfaceName string, interfaceInde
 }
 
 func linuxDHCPServerFromLeaseDir(dir, interfaceName string) string {
+	return linuxDHCPServerFromLeaseDirWithReader(dir, interfaceName, osHost{}.readFile)
+}
+
+func linuxDHCPServerFromLeaseDirWithReader(dir, interfaceName string, readFile fileReader) string {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return ""
@@ -2216,7 +2191,7 @@ func linuxDHCPServerFromLeaseDir(dir, interfaceName string) string {
 		if entry.IsDir() || !strings.Contains(name, "lease") {
 			continue
 		}
-		content := readText(filepath.Join(dir, name))
+		content := readText(filepath.Join(dir, name), readFile)
 		if !leaseMatchesInterface(name, content, interfaceName) {
 			continue
 		}
@@ -2409,7 +2384,7 @@ type mountStat struct {
 
 func rootMountpoint(s *Session) map[string]any {
 	if runtime.GOOS == "openbsd" {
-		return currentOpenBSDMountpoints()
+		return currentOpenBSDMountpoints(s)
 	}
 
 	entries := currentMountEntries(s)
@@ -2422,35 +2397,35 @@ func rootMountpoint(s *Session) map[string]any {
 	return mountpointsFact(entries, statMountpoint)
 }
 
-func currentOpenBSDMountpoints() map[string]any {
-	mountOutput, err := exec.Command("mount").Output()
-	if err != nil {
+func currentOpenBSDMountpoints(s *Session) map[string]any {
+	mountOutput := s.commandOutput("mount")
+	if mountOutput == "" {
 		return mountpointsFact([]mountEntry{{Path: "/"}}, statMountpoint)
 	}
-	dfOutput, _ := exec.Command("df", "-P").Output()
-	return openBSDMountpointsFact(string(mountOutput), string(dfOutput))
+	dfOutput := s.commandOutput("df", "-P")
+	return openBSDMountpointsFact(mountOutput, dfOutput)
 }
 
 func currentMountEntries(s *Session) []mountEntry {
 	switch runtime.GOOS {
 	case "darwin":
-		out, err := exec.Command("mount").Output()
-		if err != nil {
+		out := s.commandOutput("mount")
+		if out == "" {
 			return nil
 		}
-		return parseDarwinMountEntries(string(out))
+		return parseDarwinMountEntries(out)
 	case "freebsd":
-		out, err := exec.Command("mount").Output()
-		if err != nil {
+		out := s.commandOutput("mount")
+		if out == "" {
 			return nil
 		}
-		return parseFreeBSDMountEntries(string(out))
+		return parseFreeBSDMountEntries(out)
 	case "linux":
-		data, err := os.ReadFile("/proc/self/mounts")
+		data, err := s.readFile("/proc/self/mounts")
 		if err != nil {
 			return nil
 		}
-		return linuxMountEntriesWithRootDevice(parseLinuxMountEntries(string(data)), os.ReadFile, s.commandOutput)
+		return linuxMountEntriesWithRootDevice(parseLinuxMountEntries(string(data)), s.readFile, s.commandOutput)
 	default:
 		return []mountEntry{{Path: "/"}}
 	}
@@ -2862,11 +2837,7 @@ func kernelMajorVersionFact(goos, kernelRelease string, osRelease any) string {
 }
 
 func (s *Session) commandOutput(name string, args ...string) string {
-	data, err := exec.CommandContext(s.ctx, name, args...).Output()
-	if err != nil {
-		return ""
-	}
-	return string(data)
+	return s.host.run(s.ctx, name, args...)
 }
 
 type uptimeInfo struct {
@@ -3125,22 +3096,18 @@ func currentProcessorISA(s *Session, goos, fallback string, run commandRunner) s
 }
 
 func probeKernelRelease(s *Session) string {
-	out, err := exec.Command("uname", "-r").Output()
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(out))
+	return strings.TrimSpace(s.commandOutput("uname", "-r"))
 }
 
 func probeHardwareModel(s *Session) string {
 	if runtime.GOOS == "windows" {
 		return windowsHardwareFromGoArch(runtime.GOARCH)
 	}
-	out, err := exec.Command("uname", "-m").Output()
-	if err != nil {
+	out := s.commandOutput("uname", "-m")
+	if out == "" {
 		return runtime.GOARCH
 	}
-	return strings.TrimSpace(string(out))
+	return strings.TrimSpace(out)
 }
 
 func probeMacOSModel(s *Session) string {
@@ -3158,7 +3125,7 @@ func probeOSRelease(s *Session) any {
 	if runtime.GOOS == "windows" {
 		return currentWindowsOSRelease(s.cachedWindowsOSVersionInput())
 	}
-	return currentOSRelease(s, runtime.GOOS, os.ReadFile, s.commandOutput)
+	return currentOSRelease(s, runtime.GOOS, s.readFile, s.commandOutput)
 }
 
 func probeWindowsOSVersionInput(s *Session) string {
@@ -3734,22 +3701,22 @@ func probeMacOSSystemProfilerHardware(s *Session) macOSSystemProfilerHardware {
 	if runtime.GOOS != "darwin" {
 		return macOSSystemProfilerHardware{}
 	}
-	out, err := exec.Command("system_profiler", "SPHardwareDataType").Output()
-	if err != nil {
+	out := s.commandOutput("system_profiler", "SPHardwareDataType")
+	if out == "" {
 		return macOSSystemProfilerHardware{}
 	}
-	return parseMacOSSystemProfilerHardware(string(out))
+	return parseMacOSSystemProfilerHardware(out)
 }
 
 func probeMacOSSystemProfilerSoftware(s *Session) macOSSystemProfilerSoftware {
 	if runtime.GOOS != "darwin" {
 		return macOSSystemProfilerSoftware{}
 	}
-	out, err := exec.Command("system_profiler", "SPSoftwareDataType").Output()
-	if err != nil {
+	out := s.commandOutput("system_profiler", "SPSoftwareDataType")
+	if out == "" {
 		return macOSSystemProfilerSoftware{}
 	}
-	return parseMacOSSystemProfilerSoftware(string(out))
+	return parseMacOSSystemProfilerSoftware(out)
 }
 
 func probeMacOSSystemProfilerEthernet(s *Session) macOSSystemProfilerEthernet {
@@ -4390,7 +4357,7 @@ type linuxDistro struct {
 }
 
 func probeLinuxDistro(s *Session) linuxDistro {
-	return currentLinuxDistro(runtime.GOOS, exec.LookPath, s.commandOutput, os.ReadFile)
+	return currentLinuxDistro(runtime.GOOS, exec.LookPath, s.commandOutput, s.readFile)
 }
 
 func currentLinuxDistro(goos string, lookPath func(string) (string, error), run commandRunner, readFile fileReader) linuxDistro {
@@ -4868,11 +4835,11 @@ func linuxDistroFacts(distro linuxDistro) []ResolvedFact {
 func probeTotalPhysicalMemoryBytes(s *Session) int {
 	switch runtime.GOOS {
 	case "darwin":
-		out, err := exec.Command("sysctl", "-n", "hw.memsize").Output()
-		if err != nil {
+		out := s.commandOutput("sysctl", "-n", "hw.memsize")
+		if out == "" {
 			return 0
 		}
-		value, err := strconv.ParseInt(strings.TrimSpace(string(out)), 10, 0)
+		value, err := strconv.ParseInt(strings.TrimSpace(out), 10, 0)
 		if err != nil {
 			return 0
 		}
@@ -4890,11 +4857,11 @@ func probeTotalPhysicalMemoryBytes(s *Session) int {
 func probeAvailablePhysicalMemoryBytes(s *Session) int {
 	switch runtime.GOOS {
 	case "darwin":
-		out, err := exec.Command("vm_stat").Output()
-		if err != nil {
+		out := s.commandOutput("vm_stat")
+		if out == "" {
 			return 0
 		}
-		return parseDarwinVMStatAvailableBytes(string(out))
+		return parseDarwinVMStatAvailableBytes(out)
 	case "freebsd":
 		return freeBSDMemoryValue(s.cachedFreeBSDMemoryInfo().System, "available_bytes")
 	case "linux":
@@ -5066,7 +5033,7 @@ func currentDarwinSwapUsage(goos string, run commandRunner) darwinSwapUsage {
 }
 
 func probeLinuxMeminfo(s *Session) string {
-	data, err := os.ReadFile("/proc/meminfo")
+	data, err := s.readFile("/proc/meminfo")
 	if err != nil {
 		return ""
 	}
@@ -5189,7 +5156,7 @@ func probeProcessorSpeed(s *Session) string {
 			return hertzToHumanReadable(int64(speed))
 		}
 	case "linux":
-		data, err := os.ReadFile("/proc/cpuinfo")
+		data, err := s.readFile("/proc/cpuinfo")
 		if err != nil {
 			return ""
 		}
@@ -5209,7 +5176,7 @@ func probeProcessorModels(s *Session) []string {
 			return append([]string(nil), models...)
 		}
 	case "linux":
-		data, err := os.ReadFile("/proc/cpuinfo")
+		data, err := s.readFile("/proc/cpuinfo")
 		if err == nil {
 			models := parseLinuxProcessorModels(string(data))
 			if len(models) > 0 {
@@ -5237,7 +5204,7 @@ func probeProcessorTopology(s *Session) (int, int) {
 			return processors.CoresPerSocket, processors.ThreadsPerCore
 		}
 	case "linux":
-		data, err := os.ReadFile("/proc/cpuinfo")
+		data, err := s.readFile("/proc/cpuinfo")
 		if err == nil {
 			cores, threads := parseLinuxProcessorTopology(string(data))
 			if cores > 0 && threads > 0 {
@@ -5350,7 +5317,7 @@ func probeProcessorExtensions(s *Session) []string {
 	if runtime.GOOS != "linux" {
 		return sortedProcessorExtensions(map[string]bool{architecture: true})
 	}
-	data, err := os.ReadFile("/proc/cpuinfo")
+	data, err := s.readFile("/proc/cpuinfo")
 	if err != nil {
 		return sortedProcessorExtensions(map[string]bool{architecture: true})
 	}
@@ -5384,15 +5351,19 @@ func parseLinuxProcessorTopology(input string) (int, int) {
 	return 0, 0
 }
 
-func currentLinuxProcessorPhysicalCount(cpuinfoPath, sysCPUPath string) int {
-	data, err := os.ReadFile(cpuinfoPath)
+func currentLinuxProcessorPhysicalCount(cpuinfoPath, sysCPUPath string, readFile fileReader) int {
+	data, err := readFile(cpuinfoPath)
 	if err != nil || len(data) == 0 {
 		return 0
 	}
-	return linuxProcessorPhysicalCount(string(data), sysCPUPath)
+	return linuxProcessorPhysicalCount(string(data), sysCPUPath, readFile)
 }
 
-func linuxProcessorPhysicalCount(cpuinfo, sysCPUPath string) int {
+func linuxProcessorPhysicalCount(cpuinfo, sysCPUPath string, readFiles ...fileReader) int {
+	readFile := osHost{}.readFile
+	if len(readFiles) > 0 && readFiles[0] != nil {
+		readFile = readFiles[0]
+	}
 	physicalIDs := make(map[string]struct{})
 	for line := range strings.SplitSeq(cpuinfo, "\n") {
 		key, value, ok := strings.Cut(line, ":")
@@ -5417,7 +5388,7 @@ func linuxProcessorPhysicalCount(cpuinfo, sysCPUPath string) int {
 		if !linuxCPUEntryName(name) {
 			continue
 		}
-		data, err := os.ReadFile(filepath.Join(sysCPUPath, name, "topology", "physical_package_id"))
+		data, err := readFile(filepath.Join(sysCPUPath, name, "topology", "physical_package_id"))
 		if err != nil {
 			continue
 		}
@@ -5547,7 +5518,7 @@ func hertzToHumanReadable(hz any) string {
 }
 
 func probeUptime(s *Session) uptimeInfo {
-	return currentUptimeInfo(s, runtime.GOOS, os.ReadFile, s.commandOutput, time.Now)
+	return currentUptimeInfo(s, runtime.GOOS, s.readFile, s.commandOutput, time.Now)
 }
 
 func currentUptime(s *Session, goos string, readFile fileReader, run commandRunner, now func() time.Time) time.Duration {
@@ -5803,7 +5774,7 @@ func parseUptimeHoursMinutes(input string) (int, int, bool) {
 }
 
 func probeLoadAverages(s *Session) map[string]any {
-	return currentLoadAverages(runtime.GOOS, os.ReadFile, s.commandOutput)
+	return currentLoadAverages(runtime.GOOS, s.readFile, s.commandOutput)
 }
 
 type fileReader func(string) ([]byte, error)
@@ -5828,7 +5799,7 @@ func currentLoadAverages(goos string, readFile fileReader, run commandRunner) ma
 }
 
 func probeFilesystems(s *Session) any {
-	return currentFilesystems(runtime.GOOS, os.ReadFile, s.commandOutput)
+	return currentFilesystems(runtime.GOOS, s.readFile, s.commandOutput)
 }
 
 // filesystemsFacts returns the filesystems fact, or nothing when the
@@ -5922,8 +5893,10 @@ func emptyLoadAverages() map[string]any {
 	return map[string]any{"1m": nil, "5m": nil, "15m": nil}
 }
 
-func hostName() (string, any) {
-	return hostNameForPlatform(runtime.GOOS, os.Hostname, readLinuxKernelHostname)
+func hostName(s *Session) (string, any) {
+	return hostNameForPlatform(runtime.GOOS, os.Hostname, func() string {
+		return readLinuxKernelHostname(s.readFile)
+	})
 }
 
 func hostNameForPlatform(goos string, lookup func() (string, error), linuxFallback func() string) (string, any) {
@@ -5952,8 +5925,12 @@ func linuxHostnameUsable(hostname string) bool {
 	return hostname != "" && !strings.Contains(hostname, "0.0.0.0")
 }
 
-func readLinuxKernelHostname() string {
-	data, err := os.ReadFile("/proc/sys/kernel/hostname")
+func readLinuxKernelHostname(readFiles ...fileReader) string {
+	readFile := osHost{}.readFile
+	if len(readFiles) > 0 && readFiles[0] != nil {
+		readFile = readFiles[0]
+	}
+	data, err := readFile("/proc/sys/kernel/hostname")
 	if err != nil {
 		return ""
 	}
@@ -5985,9 +5962,13 @@ func fqdn(hostname string) string {
 // resolver search/domain configuration when the node name is undotted), and
 // fqdn is hostname + "." + domain when a domain exists, else the bare
 // hostname.
-func currentHostnameFacts(goos, nodeName, resolvedFQDN, resolvConfPath string) (string, string, string) {
+func currentHostnameFacts(goos, nodeName, resolvedFQDN, resolvConfPath string, readFiles ...fileReader) (string, string, string) {
+	readFile := osHost{}.readFile
+	if len(readFiles) > 0 && readFiles[0] != nil {
+		readFile = readFiles[0]
+	}
 	hostname := hostnameFromNodeName(nodeName)
-	fqdnName, domain := currentHostnameFQDNAndDomain(goos, hostname, resolvedFQDN, resolvConfPath)
+	fqdnName, domain := currentHostnameFQDNAndDomain(goos, hostname, resolvedFQDN, resolvConfPath, readFile)
 	return hostname, fqdnName, domain
 }
 
@@ -5998,17 +5979,17 @@ func hostnameFromNodeName(nodeName string) string {
 	return hostname
 }
 
-func currentHostnameFQDNAndDomain(goos, hostname, resolvedFQDN, resolvConfPath string) (string, string) {
+func currentHostnameFQDNAndDomain(goos, hostname, resolvedFQDN, resolvConfPath string, readFile fileReader) (string, string) {
 	switch goos {
 	case "linux", "darwin":
-		return currentResolvConfFQDNAndDomain(hostname, resolvedFQDN, resolvConfPath)
+		return currentResolvConfFQDNAndDomain(hostname, resolvedFQDN, resolvConfPath, readFile)
 	default:
 		return resolvedFQDN, domainFromFQDN(hostname, resolvedFQDN)
 	}
 }
 
-func currentResolvConfFQDNAndDomain(hostname, resolvedFQDN, resolvConfPath string) (string, string) {
-	content, err := os.ReadFile(resolvConfPath)
+func currentResolvConfFQDNAndDomain(hostname, resolvedFQDN, resolvConfPath string, readFile fileReader) (string, string) {
+	content, err := readFile(resolvConfPath)
 	if err != nil {
 		return linuxFQDNAndDomain(hostname, resolvedFQDN, "")
 	}
