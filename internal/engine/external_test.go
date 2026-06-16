@@ -82,12 +82,12 @@ func TestExternalFactLoader_cliModeIncludesEnvironmentAndSkipsExecutableFailures
 	if err := os.WriteFile(filepath.Join(dir, "site.txt"), []byte("site=lab\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "broken_fact"), []byte("ignored=true\n"), 0o700); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "broken_fact.exe"), []byte("ignored=true\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
 	host := &fakeExternalFactLoaderHost{
-		goosValue: "linux",
+		goosValue: "windows",
 		env:       []string{"FACTS_from_env=yes"},
 		runCommandFunc: func(context.Context, string, ...string) ([]byte, []byte, error) {
 			return nil, nil, errors.New("boom")
@@ -120,12 +120,12 @@ func TestExternalFactLoader_libraryModeReturnsPartialFailuresAndControlsEnvironm
 	if err := os.WriteFile(filepath.Join(dir, "site.txt"), []byte("site=lab\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "broken_fact"), []byte("ignored=true\n"), 0o700); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "broken_fact.exe"), []byte("ignored=true\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
 	host := &fakeExternalFactLoaderHost{
-		goosValue: "linux",
+		goosValue: "windows",
 		env:       []string{"FACTS_from_env=yes"},
 		runCommandFunc: func(context.Context, string, ...string) ([]byte, []byte, error) {
 			return nil, nil, errors.New("boom")
