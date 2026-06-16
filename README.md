@@ -107,6 +107,10 @@ web
 ```
 
 ```sh
+brew install ncode/tap/facts
+```
+
+```sh
 make build   # builds ./facts from the project root
 ```
 
