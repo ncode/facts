@@ -120,13 +120,6 @@ func CoreFactsWithRuby(s *Session, includeRuby bool) []ResolvedFact {
 	return append([]ResolvedFact(nil), s.coreFacts.facts[includeRuby]...)
 }
 
-// ClearCoreFacts invalidates the session core fact cache.
-func (s *Session) ClearCoreFacts() {
-	s.coreFacts.mu.Lock()
-	defer s.coreFacts.mu.Unlock()
-	s.coreFacts.facts = nil
-}
-
 func buildCoreFacts(s *Session, includeRuby bool) []ResolvedFact {
 	nodeName, nodeNameValue := hostName()
 	resolvedFQDN := fqdn(nodeName)
@@ -924,16 +917,6 @@ func openBSDDMIFacts(values map[string]string) []ResolvedFact {
 		return nil
 	}
 	return []ResolvedFact{{Name: "dmi", Value: dmi}}
-}
-
-func mapFromLineValues(output string, fields map[string]string) map[string]any {
-	values := make(map[string]any, len(fields))
-	for name, prefix := range fields {
-		if value := firstLineValue(output, prefix); value != "" {
-			values[name] = value
-		}
-	}
-	return values
 }
 
 func disksFact(root string) map[string]any {
@@ -1761,17 +1744,6 @@ func addWindowsDHCPServers(interfaces map[string]any, run commandRunner) {
 type windowsIPConfigAdapter struct {
 	DHCPServer string
 	DNSSuffix  string
-}
-
-func windowsDHCPServers(output string) map[string]string {
-	adapters := windowsIPConfigAdapters(output)
-	servers := make(map[string]string, len(adapters))
-	for name, adapter := range adapters {
-		if adapter.DHCPServer != "" {
-			servers[name] = adapter.DHCPServer
-		}
-	}
-	return servers
 }
 
 func windowsIPConfigAdapters(output string) map[string]windowsIPConfigAdapter {
@@ -2664,13 +2636,6 @@ func parseOpenBSDMountEntries(input string) []mountEntry {
 	return entries
 }
 
-func splitMountOptions(value string) []string {
-	if value == "" {
-		return nil
-	}
-	return strings.Split(value, ",")
-}
-
 func parseDFP512Stats(input string) map[string]mountStat {
 	stats := make(map[string]mountStat)
 	for line := range strings.SplitSeq(input, "\n") {
@@ -2761,18 +2726,6 @@ func mountpointsFactWithSkip(entries []mountEntry, stat func(string) (mountStat,
 		return nil
 	}
 	return mountpoints
-}
-
-func underAnyMountPath(path string, mountPaths []string) bool {
-	for _, mountPath := range mountPaths {
-		if mountPath == "" || path == mountPath {
-			continue
-		}
-		if strings.HasPrefix(path, mountPath+"/") {
-			return true
-		}
-	}
-	return false
 }
 
 func skipMountEntry(entry mountEntry) bool {
@@ -2911,17 +2864,6 @@ func (s *Session) commandOutput(name string, args ...string) string {
 		return ""
 	}
 	return string(data)
-}
-
-func rubyBool(value string) any {
-	switch value {
-	case "true":
-		return true
-	case "false":
-		return false
-	default:
-		return value
-	}
 }
 
 type uptimeInfo struct {
@@ -5412,18 +5354,6 @@ func probeProcessorExtensions(s *Session) []string {
 	return parseLinuxProcessorExtensions(string(data), architecture)
 }
 
-func sysctlInt(name string) int {
-	out, err := exec.Command("sysctl", "-n", name).Output()
-	if err != nil {
-		return 0
-	}
-	value, err := strconv.Atoi(strings.TrimSpace(string(out)))
-	if err != nil {
-		return 0
-	}
-	return value
-}
-
 func parseLinuxProcessorTopology(input string) (int, int) {
 	cores := 0
 	siblings := 0
@@ -6045,10 +5975,6 @@ func fqdn(hostname string) string {
 		return hostname
 	}
 	return strings.TrimSuffix(addrs[0], ".")
-}
-
-func currentLinuxFQDNAndDomain(hostname, resolvedFQDN, resolvConfPath string) (string, string) {
-	return currentResolvConfFQDNAndDomain(hostname, resolvedFQDN, resolvConfPath)
 }
 
 // currentHostnameFacts splits the node name like Ruby Facter: hostname is the

@@ -2,7 +2,6 @@ package engine
 
 import (
 	"os"
-	"os/exec"
 	"regexp"
 	"runtime"
 	"strconv"
@@ -403,30 +402,6 @@ func parseVMwareCommand(output string) string {
 	return strings.ToLower(parts[0]) + "_" + strings.ToLower(parts[1])
 }
 
-func firstLineValue(output, prefix string) string {
-	for line := range strings.SplitSeq(output, "\n") {
-		value, ok := strings.CutPrefix(strings.TrimSpace(line), prefix)
-		if ok {
-			return strings.TrimSpace(value)
-		}
-	}
-	return ""
-}
-
-func currentXenVM() string {
-	if fileExists("/dev/xen/evtchn") {
-		return "xen0"
-	}
-	if dirExists("/proc/xen") {
-		return "xenu"
-	}
-	info, err := os.Lstat("/dev/xvda1")
-	if err == nil && info.Mode()&os.ModeSymlink == 0 {
-		return "xenu"
-	}
-	return ""
-}
-
 func lspciHypervisor(output string) string {
 	for line := range strings.SplitSeq(output, "\n") {
 		lower := strings.ToLower(line)
@@ -504,14 +479,6 @@ func readLinuxCGroup() string {
 		return ""
 	}
 	return string(data)
-}
-
-func currentLspciOutput() string {
-	out, err := exec.Command("lspci").Output()
-	if err != nil {
-		return ""
-	}
-	return string(out)
 }
 
 func fileExists(path string) bool {

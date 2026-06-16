@@ -116,11 +116,6 @@ func FormatLegacy(facts []ResolvedFact) string {
 	return FormatLegacyColored(facts, false, false)
 }
 
-// FormatLegacyWithDottedFacts renders legacy text and optionally merges dotted custom and external facts.
-func FormatLegacyWithDottedFacts(facts []ResolvedFact, includeTypedDotted bool) string {
-	return FormatLegacyColored(facts, includeTypedDotted, false)
-}
-
 // FormatLegacyColored renders legacy text and, when colorize is set, wraps each
 // key in an ANSI color chosen by its nesting depth. The rendering replicates
 // Ruby Facter's LegacyFactFormatter byte for byte: pretty-printed JSON rewritten
