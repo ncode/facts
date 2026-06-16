@@ -168,11 +168,6 @@ func ttlUnitScale(unit string) (multiplier, divisor int64, ok bool) {
 	return 0, 0, false
 }
 
-// BlocklistedFacts expands config blocklist entries into concrete fact names.
-func BlocklistedFacts(entries []string) map[string]bool {
-	return BlocklistedFactsWithGroups(entries, nil)
-}
-
 // BlocklistedFactsWithGroups expands config blocklist entries into concrete fact
 // names using the built-in group catalog plus any configured groups.
 func BlocklistedFactsWithGroups(entries []string, configured []FactGroup) map[string]bool {

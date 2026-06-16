@@ -13,7 +13,6 @@ const (
 	gceMetadataBaseURL = "http://metadata.google.internal/computeMetadata/v1"
 	gceRequestTimeout  = 100 * time.Millisecond
 	gceMaxBodyBytes    = 1 << 20
-	gceMaxDepth        = 16
 )
 
 type gceClient struct {

@@ -600,9 +600,3 @@ func logLevelEnablesDebug(level string) bool {
 		return false
 	}
 }
-
-var errUsage = errors.New("usage")
-
-func IsUsage(err error) bool {
-	return errors.Is(err, errUsage)
-}
