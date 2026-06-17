@@ -34,7 +34,7 @@ An Engine SHALL be immutable after construction, with all fact registrations and
 - **THEN** each Snapshot reflects only its own Engine's configuration, with no cross-engine interference and no data races
 
 ### Requirement: Canonical tree queries and generic decode
-A Snapshot SHALL expose the canonical tree — the same fact names, nesting, and value normalization the output contract pins — through pure query operations using Facter dot-notation, and a generic decode (`facts.As[T]`) SHALL convert any queried subtree into a caller-supplied type. Decode MUST read from the resolved canonical tree and MUST NOT resolve facts independently.
+A Snapshot SHALL expose the canonical tree — the same fact names, nesting, and value normalization the output contract pins — through pure query operations using Facter dot-notation, and a generic decode (`facts.As[T]`) SHALL convert any queried subtree into a caller-supplied type. Decode MUST read from the resolved canonical tree and MUST NOT resolve facts independently. Snapshot value lookup SHALL use the same internal projection semantics as CLI query projection where their contracts overlap, while preserving the library distinction between missing facts and resolved nil registered/external facts.
 
 #### Scenario: Dotted query resolution
 - **WHEN** a consumer queries `snapshot.Value("os.release.major")`
@@ -73,3 +73,4 @@ Engine diagnostics SHALL flow through `log/slog` with the contract-pinned messag
 #### Scenario: Diagnostics routed to the consumer's logger
 - **WHEN** an Engine is constructed with `WithLogger` and a once-only diagnostic condition occurs repeatedly within and across discoveries on that Engine
 - **THEN** the diagnostic is emitted to the supplied logger with contract-equivalent message text and severity, exactly once per Engine
+
