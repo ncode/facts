@@ -140,10 +140,12 @@ jobs:
           release: "10.1"
           usesh: true
           prepare: |
-            /usr/sbin/pkg_add -u go git
+            # pkgsrc Go is versioned (go126 = 1.26.x); the meta "go" leaves no
+            # plain `go` on PATH. Pin to match go.mod's go directive; bump both together.
+            /usr/sbin/pkg_add go126 git
           run: |
             set -e
-            export PATH=/usr/pkg/bin:/usr/pkg/sbin:/usr/sbin:/sbin:/usr/bin:/bin
+            export PATH=/usr/pkg/go126/bin:/usr/pkg/bin:/usr/pkg/sbin:/usr/sbin:/sbin:/usr/bin:/bin
             export GOFLAGS=-buildvcs=false
             go version
             go test . ./internal/engine ./internal/app ./tests/acceptance
