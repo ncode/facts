@@ -43,7 +43,7 @@ _Avoid_: failed fact, missing fact (that means "no such fact name")
 The externally observable shape of resolved facts — fact names, nesting, value normalization, and formatter output (JSON, YAML, HOCON, legacy text) — which must remain compatible with Ruby Facter. Binding; not negotiable in the library work.
 
 **Input contract**:
-The accepted sources and semantics of operator-supplied facts — external fact files/executables/env vars, and the config file (facts-native `facts.conf` first, `facter.conf` as the compat read) — which must keep working unchanged. Binding; not negotiable in the library work. The Ruby custom-fact DSL is deliberately outside the contract: `.rb` fact files are not read anywhere.
+The accepted sources and semantics of operator-supplied facts — external fact files/executables/env vars, and the config file (facts-native `facts.conf` first, `facter.conf` as the compat read) — which must keep working unchanged. Binding; not negotiable in the library work. The Ruby custom-fact DSL is deliberately outside the contract: `.rb` fact files are not read anywhere. Puppet's *runtime* surface is outside it too: Facter's own external-fact directories (including the `puppetlabs/facter/facts.d` defaults) are in, but Puppet's agent cache (`puppet/cache/facts.d` pluginfactdest), pluginsync, and `.rb` plugin loading are not — Puppet's cache, like any directory, is reachable only through the explicit external-fact directory inputs.
 
 ### Library surfaces
 
