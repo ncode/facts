@@ -166,8 +166,9 @@ func TestRun_warnsAndIgnoresUnreadableConfig(t *testing.T) {
 	if strings.TrimSpace(stdout.String()) != engine.Version {
 		t.Fatalf("stdout = %q, want facterversion", stdout.String())
 	}
-	if !strings.Contains(stderr.String(), "WARN Facts - Facts failed to read config file") {
-		t.Fatalf("stderr = %q, want config read warning", stderr.String())
+	warningCount := strings.Count(stderr.String(), "WARN Facts - Facts failed to read config file")
+	if warningCount != 1 {
+		t.Fatalf("stderr = %q, want one config read warning, got %d", stderr.String(), warningCount)
 	}
 }
 
@@ -611,7 +612,7 @@ func TestRun_acceptsNoPuppetCompatibilityFlag(t *testing.T) {
 	}
 }
 
-func TestRun_puppetLoadsPuppetVersionFact(t *testing.T) {
+func TestRun_puppetDoesNotLoadPuppetVersionFact(t *testing.T) {
 	dir := t.TempDir()
 	puppet := filepath.Join(dir, "puppet")
 	content := "#!/bin/sh\nprintf '8.10.0\\n'\n"
@@ -628,7 +629,7 @@ func TestRun_puppetLoadsPuppetVersionFact(t *testing.T) {
 	if err := Run(&stdout, &stderr, []string{"--puppet", "puppetversion"}); err != nil {
 		t.Fatal(err)
 	}
-	if got, want := stdout.String(), "8.10.0\n"; got != want {
+	if got, want := stdout.String(), ""; got != want {
 		t.Fatalf("stdout = %q, want %q", got, want)
 	}
 	if stderr.Len() != 0 {
@@ -1232,7 +1233,7 @@ func runtimeOSName() string {
 	case "darwin":
 		return "Darwin"
 	case "linux":
-		collection := engine.Collection(engine.CoreFactsWithRuby(engine.NewSession(), false))
+		collection := engine.Collection(engine.CoreFacts(engine.NewSession()))
 		osFact, _ := collection["os"].(map[string]any)
 		if name, ok := osFact["name"].(string); ok && name != "" {
 			return name

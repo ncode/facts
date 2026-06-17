@@ -4,14 +4,192 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 )
+
+type fakeExternalFactLoaderHost struct {
+	externalFactOSHost
+
+	goosValue         string
+	env               []string
+	recursive         bool
+	openFunc          func(string) (io.ReadCloser, error)
+	fileReadableFunc  func(string) bool
+	runCommandFunc    func(context.Context, string, ...string) ([]byte, []byte, error)
+	readDirFunc       func(string) ([]os.DirEntry, error)
+	runCommandNames   []string
+	runCommandArgsets [][]string
+}
+
+func (h *fakeExternalFactLoaderHost) goos() string {
+	if h.goosValue != "" {
+		return h.goosValue
+	}
+	return h.externalFactOSHost.goos()
+}
+
+func (h *fakeExternalFactLoaderHost) environ() []string {
+	if h.env != nil {
+		return slices.Clone(h.env)
+	}
+	return h.externalFactOSHost.environ()
+}
+
+func (h *fakeExternalFactLoaderHost) externalFactResolutionRunning() bool {
+	return h.recursive
+}
+
+func (h *fakeExternalFactLoaderHost) open(path string) (io.ReadCloser, error) {
+	if h.openFunc != nil {
+		return h.openFunc(path)
+	}
+	return h.externalFactOSHost.open(path)
+}
+
+func (h *fakeExternalFactLoaderHost) fileReadable(path string) bool {
+	if h.fileReadableFunc != nil {
+		return h.fileReadableFunc(path)
+	}
+	return h.externalFactOSHost.fileReadable(path)
+}
+
+func (h *fakeExternalFactLoaderHost) runCommand(ctx context.Context, name string, args ...string) ([]byte, []byte, error) {
+	h.runCommandNames = append(h.runCommandNames, name)
+	h.runCommandArgsets = append(h.runCommandArgsets, slices.Clone(args))
+	if h.runCommandFunc != nil {
+		return h.runCommandFunc(ctx, name, args...)
+	}
+	return h.externalFactOSHost.runCommand(ctx, name, args...)
+}
+
+func (h *fakeExternalFactLoaderHost) readDir(dir string) ([]os.DirEntry, error) {
+	if h.readDirFunc != nil {
+		return h.readDirFunc(dir)
+	}
+	return h.externalFactOSHost.readDir(dir)
+}
+
+func TestExternalFactLoader_cliModeIncludesEnvironmentAndSkipsExecutableFailures(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "site.txt"), []byte("site=lab\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "broken_fact.exe"), []byte("ignored=true\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	host := &fakeExternalFactLoaderHost{
+		goosValue: "windows",
+		env:       []string{"FACTS_from_env=yes"},
+		runCommandFunc: func(context.Context, string, ...string) ([]byte, []byte, error) {
+			return nil, nil, errors.New("boom")
+		},
+	}
+	got, err := externalFactLoader{
+		s:          testSession,
+		mode:       externalFactLoaderCLI,
+		dirs:       []string{dir},
+		host:       host,
+		includeEnv: true,
+	}.load()
+	if err != nil {
+		t.Fatalf("externalFactLoader.load() err = %v, want nil", err)
+	}
+	want := []ResolvedFact{
+		{Name: "site", Value: "lab", Type: "external"},
+		{Name: "from_env", Value: "yes", Type: "external"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("externalFactLoader.load() = %#v, want %#v", got, want)
+	}
+	if len(host.runCommandNames) != 1 {
+		t.Fatalf("runCommand calls = %#v, want one failed executable call", host.runCommandNames)
+	}
+}
+
+func TestExternalFactLoader_libraryModeReturnsPartialFailuresAndControlsEnvironment(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "site.txt"), []byte("site=lab\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "broken_fact.exe"), []byte("ignored=true\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	host := &fakeExternalFactLoaderHost{
+		goosValue: "windows",
+		env:       []string{"FACTS_from_env=yes"},
+		runCommandFunc: func(context.Context, string, ...string) ([]byte, []byte, error) {
+			return nil, nil, errors.New("boom")
+		},
+	}
+	got, err := externalFactLoader{
+		s:          testSession,
+		mode:       externalFactLoaderLibrary,
+		dirs:       []string{dir},
+		host:       host,
+		includeEnv: false,
+	}.load()
+	if !errors.Is(err, errExternalFactExec) {
+		t.Fatalf("externalFactLoader.load() err = %v, want errExternalFactExec", err)
+	}
+	want := []ResolvedFact{{Name: "site", Value: "lab", Type: "external"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("externalFactLoader.load() = %#v, want %#v", got, want)
+	}
+
+	host.runCommandNames = nil
+	got, err = externalFactLoader{
+		s:          testSession,
+		mode:       externalFactLoaderLibrary,
+		host:       host,
+		includeEnv: true,
+	}.load()
+	if err != nil {
+		t.Fatalf("externalFactLoader.load() env-only err = %v, want nil", err)
+	}
+	want = []ResolvedFact{{Name: "from_env", Value: "yes", Type: "external"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("externalFactLoader.load() env-only = %#v, want %#v", got, want)
+	}
+}
+
+func TestExternalFactLoader_cliModeSkipsCancelledExecutableFailures(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "cancelled_fact"), []byte("ignored=true\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	s := NewSessionContext(ctx)
+	host := &fakeExternalFactLoaderHost{
+		goosValue: "linux",
+		runCommandFunc: func(ctx context.Context, _ string, _ ...string) ([]byte, []byte, error) {
+			return nil, nil, ctx.Err()
+		},
+	}
+
+	got, err := externalFactLoader{
+		s:    s,
+		mode: externalFactLoaderCLI,
+		dirs: []string{dir},
+		host: host,
+	}.load()
+	if err != nil {
+		t.Fatalf("externalFactLoader.load() err = %v, want nil", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("externalFactLoader.load() = %#v, want no facts", got)
+	}
+}
 
 func TestLoadExternalFacts_txtFacts(t *testing.T) {
 	dir := t.TempDir()
@@ -513,16 +691,23 @@ func TestLoadExternalFacts_ignoresUnreadableStaticFactFiles(t *testing.T) {
 		}
 	}
 
-	oldOpen := externalFactOpen
-	externalFactOpen = func(path string) (*os.File, error) {
-		if strings.HasPrefix(filepath.Base(path), "unreadable.") {
-			return nil, os.ErrPermission
-		}
-		return oldOpen(path)
+	host := &fakeExternalFactLoaderHost{
+		env: []string{},
+		openFunc: func(path string) (io.ReadCloser, error) {
+			if strings.HasPrefix(filepath.Base(path), "unreadable.") {
+				return nil, os.ErrPermission
+			}
+			return externalFactOSHost{}.open(path)
+		},
 	}
-	t.Cleanup(func() { externalFactOpen = oldOpen })
 
-	got, err := LoadExternalFacts(testSession, []string{dir})
+	got, err := externalFactLoader{
+		s:          testSession,
+		mode:       externalFactLoaderCLI,
+		dirs:       []string{dir},
+		host:       host,
+		includeEnv: true,
+	}.load()
 	if err != nil {
 		t.Fatalf("LoadExternalFacts(testSession) err = %v, want nil", err)
 	}
@@ -711,19 +896,24 @@ func TestLoadExternalFacts_executableScriptPathWithSpacesMatchesRubyParser(t *te
 		t.Fatal(err)
 	}
 
-	oldRun := externalFactRunCommand
-	t.Cleanup(func() { externalFactRunCommand = oldRun })
-
-	var gotName string
-	externalFactRunCommand = func(_ context.Context, name string, args ...string) ([]byte, []byte, error) {
-		gotName = name
-		if len(args) != 0 {
-			t.Fatalf("script args = %#v, want none", args)
-		}
-		return []byte("script_fact=loaded\n"), nil, nil
+	host := &fakeExternalFactLoaderHost{
+		goosValue: "linux",
+		env:       []string{},
+		runCommandFunc: func(_ context.Context, _ string, args ...string) ([]byte, []byte, error) {
+			if len(args) != 0 {
+				t.Fatalf("script args = %#v, want none", args)
+			}
+			return []byte("script_fact=loaded\n"), nil, nil
+		},
 	}
 
-	got, err := LoadExternalFacts(testSession, []string{dir})
+	got, err := externalFactLoader{
+		s:          testSession,
+		mode:       externalFactLoaderCLI,
+		dirs:       []string{dir},
+		host:       host,
+		includeEnv: true,
+	}.load()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -732,7 +922,7 @@ func TestLoadExternalFacts_executableScriptPathWithSpacesMatchesRubyParser(t *te
 		t.Fatalf("LoadExternalFacts(testSession) = %#v, want %#v", got, want)
 	}
 	wantName := `"` + path + `"`
-	if gotName != wantName {
+	if gotName := host.runCommandNames[0]; gotName != wantName {
 		t.Fatalf("script command = %q, want %q", gotName, wantName)
 	}
 }
@@ -766,24 +956,24 @@ func TestLoadExternalFacts_windowsScriptExtensionsDoNotRequireUnixExecutableBit(
 		t.Fatal(err)
 	}
 
-	oldGOOS := externalFactGOOS
-	oldRun := externalFactRunCommand
-	externalFactGOOS = "windows"
-	t.Cleanup(func() {
-		externalFactGOOS = oldGOOS
-		externalFactRunCommand = oldRun
-	})
-
-	var gotName string
-	externalFactRunCommand = func(_ context.Context, name string, args ...string) ([]byte, []byte, error) {
-		gotName = name
-		if len(args) != 0 {
-			t.Fatalf("script args = %#v, want none", args)
-		}
-		return []byte("win_fact=loaded\n"), nil, nil
+	host := &fakeExternalFactLoaderHost{
+		goosValue: "windows",
+		env:       []string{},
+		runCommandFunc: func(_ context.Context, _ string, args ...string) ([]byte, []byte, error) {
+			if len(args) != 0 {
+				t.Fatalf("script args = %#v, want none", args)
+			}
+			return []byte("win_fact=loaded\n"), nil, nil
+		},
 	}
 
-	got, err := LoadExternalFacts(testSession, []string{dir})
+	got, err := externalFactLoader{
+		s:          testSession,
+		mode:       externalFactLoaderCLI,
+		dirs:       []string{dir},
+		host:       host,
+		includeEnv: true,
+	}.load()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -791,7 +981,7 @@ func TestLoadExternalFacts_windowsScriptExtensionsDoNotRequireUnixExecutableBit(
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("LoadExternalFacts(testSession) = %#v, want %#v", got, want)
 	}
-	if gotName != path {
+	if gotName := host.runCommandNames[0]; gotName != path {
 		t.Fatalf("script command = %q, want %q", gotName, path)
 	}
 }
@@ -803,27 +993,22 @@ func TestLoadExternalFacts_windowsPowerShellFacts(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	oldGOOS := externalFactGOOS
-	oldRun := externalFactRunCommand
-	oldReadable := externalFactFileReadable
-	externalFactGOOS = "windows"
-	externalFactFileReadable = func(string) bool { return false }
-	t.Setenv("SYSTEMROOT", `C:\Windows`)
-	t.Cleanup(func() {
-		externalFactGOOS = oldGOOS
-		externalFactRunCommand = oldRun
-		externalFactFileReadable = oldReadable
-	})
-
-	var gotName string
-	var gotArgs []string
-	externalFactRunCommand = func(_ context.Context, name string, args ...string) ([]byte, []byte, error) {
-		gotName = name
-		gotArgs = append([]string(nil), args...)
-		return []byte("ps_fact=loaded\n"), nil, nil
+	host := &fakeExternalFactLoaderHost{
+		goosValue:        "windows",
+		env:              []string{`SYSTEMROOT=C:\Windows`},
+		fileReadableFunc: func(string) bool { return false },
+		runCommandFunc: func(_ context.Context, _ string, _ ...string) ([]byte, []byte, error) {
+			return []byte("ps_fact=loaded\n"), nil, nil
+		},
 	}
 
-	got, err := LoadExternalFacts(testSession, []string{dir})
+	got, err := externalFactLoader{
+		s:          testSession,
+		mode:       externalFactLoaderCLI,
+		dirs:       []string{dir},
+		host:       host,
+		includeEnv: true,
+	}.load()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -831,11 +1016,11 @@ func TestLoadExternalFacts_windowsPowerShellFacts(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("LoadExternalFacts(testSession) = %#v, want %#v", got, want)
 	}
-	if gotName != "powershell.exe" {
+	if gotName := host.runCommandNames[0]; gotName != "powershell.exe" {
 		t.Fatalf("PowerShell command = %q, want powershell.exe", gotName)
 	}
 	wantArgs := []string{"-NoProfile", "-NonInteractive", "-NoLogo", "-ExecutionPolicy", "Bypass", "-File", path}
-	if !reflect.DeepEqual(gotArgs, wantArgs) {
+	if gotArgs := host.runCommandArgsets[0]; !reflect.DeepEqual(gotArgs, wantArgs) {
 		t.Fatalf("PowerShell args = %#v, want %#v", gotArgs, wantArgs)
 	}
 }
@@ -847,28 +1032,22 @@ func TestLoadExternalFacts_windowsPowerShellExtensionIsCaseInsensitiveLikeRubyPa
 		t.Fatal(err)
 	}
 
-	oldGOOS := externalFactGOOS
-	oldRun := externalFactRunCommand
-	oldReadable := externalFactFileReadable
-	externalFactGOOS = "windows"
-	externalFactFileReadable = func(string) bool { return false }
-	t.Setenv("SYSTEMROOT", `C:\Windows`)
-	t.Cleanup(func() {
-		externalFactGOOS = oldGOOS
-		externalFactRunCommand = oldRun
-		externalFactFileReadable = oldReadable
-	})
-
-	var gotArgs []string
-	externalFactRunCommand = func(_ context.Context, name string, args ...string) ([]byte, []byte, error) {
-		if name != "powershell.exe" {
-			t.Fatalf("PowerShell command = %q, want powershell.exe", name)
-		}
-		gotArgs = append([]string(nil), args...)
-		return []byte("ps_fact=loaded\n"), nil, nil
+	host := &fakeExternalFactLoaderHost{
+		goosValue:        "windows",
+		env:              []string{`SYSTEMROOT=C:\Windows`},
+		fileReadableFunc: func(string) bool { return false },
+		runCommandFunc: func(_ context.Context, _ string, _ ...string) ([]byte, []byte, error) {
+			return []byte("ps_fact=loaded\n"), nil, nil
+		},
 	}
 
-	got, err := LoadExternalFacts(testSession, []string{dir})
+	got, err := externalFactLoader{
+		s:          testSession,
+		mode:       externalFactLoaderCLI,
+		dirs:       []string{dir},
+		host:       host,
+		includeEnv: true,
+	}.load()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -877,7 +1056,10 @@ func TestLoadExternalFacts_windowsPowerShellExtensionIsCaseInsensitiveLikeRubyPa
 		t.Fatalf("LoadExternalFacts(testSession) = %#v, want %#v", got, want)
 	}
 	wantArgs := []string{"-NoProfile", "-NonInteractive", "-NoLogo", "-ExecutionPolicy", "Bypass", "-File", path}
-	if !reflect.DeepEqual(gotArgs, wantArgs) {
+	if gotName := host.runCommandNames[0]; gotName != "powershell.exe" {
+		t.Fatalf("PowerShell command = %q, want powershell.exe", gotName)
+	}
+	if gotArgs := host.runCommandArgsets[0]; !reflect.DeepEqual(gotArgs, wantArgs) {
 		t.Fatalf("PowerShell args = %#v, want %#v", gotArgs, wantArgs)
 	}
 }
@@ -889,20 +1071,22 @@ func TestLoadExternalFacts_windowsPowerShellSkipsDirectories(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	oldGOOS := externalFactGOOS
-	oldRun := externalFactRunCommand
-	externalFactGOOS = "windows"
-	t.Cleanup(func() {
-		externalFactGOOS = oldGOOS
-		externalFactRunCommand = oldRun
-	})
-
-	externalFactRunCommand = func(_ context.Context, name string, args ...string) ([]byte, []byte, error) {
-		t.Fatalf("PowerShell command ran for directory: %s %#v", name, args)
-		return nil, nil, nil
+	host := &fakeExternalFactLoaderHost{
+		goosValue: "windows",
+		env:       []string{},
+		runCommandFunc: func(_ context.Context, name string, args ...string) ([]byte, []byte, error) {
+			t.Fatalf("PowerShell command ran for directory: %s %#v", name, args)
+			return nil, nil, nil
+		},
 	}
 
-	got, err := LoadExternalFacts(testSession, []string{dir})
+	got, err := externalFactLoader{
+		s:          testSession,
+		mode:       externalFactLoaderCLI,
+		dirs:       []string{dir},
+		host:       host,
+		includeEnv: true,
+	}.load()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -918,15 +1102,7 @@ func TestLoadExternalFacts_windowsPowerShellWarnsWithRubyCommand(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	oldGOOS := externalFactGOOS
-	oldRun := externalFactRunCommand
-	oldReadable := externalFactFileReadable
-	externalFactGOOS = "windows"
-	externalFactFileReadable = func(string) bool { return false }
 	t.Cleanup(func() {
-		externalFactGOOS = oldGOOS
-		externalFactRunCommand = oldRun
-		externalFactFileReadable = oldReadable
 		SetWarningHandler(nil)
 	})
 
@@ -934,11 +1110,22 @@ func TestLoadExternalFacts_windowsPowerShellWarnsWithRubyCommand(t *testing.T) {
 	SetWarningHandler(func(message string) {
 		warnings = append(warnings, message)
 	})
-	externalFactRunCommand = func(_ context.Context, name string, args ...string) ([]byte, []byte, error) {
-		return []byte("ps_fact=loaded\n"), []byte("some error\n"), nil
+	host := &fakeExternalFactLoaderHost{
+		goosValue:        "windows",
+		env:              []string{},
+		fileReadableFunc: func(string) bool { return false },
+		runCommandFunc: func(_ context.Context, _ string, _ ...string) ([]byte, []byte, error) {
+			return []byte("ps_fact=loaded\n"), []byte("some error\n"), nil
+		},
 	}
 
-	got, err := LoadExternalFacts(testSession, []string{dir})
+	got, err := externalFactLoader{
+		s:          testSession,
+		mode:       externalFactLoaderCLI,
+		dirs:       []string{dir},
+		host:       host,
+		includeEnv: true,
+	}.load()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -953,23 +1140,20 @@ func TestLoadExternalFacts_windowsPowerShellWarnsWithRubyCommand(t *testing.T) {
 }
 
 func TestCurrentPowerShellPathPrefersSysnativeThenSystem32(t *testing.T) {
-	oldReadable := externalFactFileReadable
-	t.Cleanup(func() { externalFactFileReadable = oldReadable })
-
 	readable := map[string]bool{
 		`C:\Windows\sysnative\WindowsPowershell\v1.0\powershell.exe`: true,
 		`C:\Windows\system32\WindowsPowershell\v1.0\powershell.exe`:  true,
 	}
-	externalFactFileReadable = func(path string) bool { return readable[path] }
+	readableFunc := func(path string) bool { return readable[path] }
 
-	got := currentPowerShellPath(`C:\Windows`)
+	got := currentPowerShellPath(`C:\Windows`, readableFunc)
 	want := `C:\Windows\sysnative\WindowsPowershell\v1.0\powershell.exe`
 	if got != want {
 		t.Fatalf("currentPowerShellPath() = %q, want %q", got, want)
 	}
 
 	delete(readable, want)
-	got = currentPowerShellPath(`C:\Windows`)
+	got = currentPowerShellPath(`C:\Windows`, readableFunc)
 	want = `C:\Windows\system32\WindowsPowershell\v1.0\powershell.exe`
 	if got != want {
 		t.Fatalf("currentPowerShellPath() = %q, want %q", got, want)

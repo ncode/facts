@@ -61,18 +61,14 @@ func Run(stdout, stderr io.Writer, args []string) error {
 func factGroups(args []string) ([]engine.FactGroup, error) {
 	groups := engine.BuiltinFactGroups()
 	configPath := configPathFromArgs(args)
-	configured, err := engine.ConfigFactGroups(configPath)
+	config, err := engine.ParseConfig(configPath)
 	if err != nil {
 		return nil, err
 	}
-	groups = engine.MergeFactGroups(groups, configured)
+	groups = engine.MergeFactGroups(groups, config.FactGroups)
 	externalDirs := externalDirsFromArgs(args)
 	if len(externalDirs) == 0 {
-		options, err := engine.ConfigFileOptions(configPath)
-		if err != nil {
-			return nil, err
-		}
-		externalDirs = options.ExternalDirs
+		externalDirs = config.ExternalDirs
 	}
 	externalDirs = effectiveExternalDirs(externalDirs)
 	external, err := engine.ExternalFactGroups(externalDirs)
@@ -164,7 +160,7 @@ Options
 	    -t [--timing]                     Show how much time it took to resolve each fact.
 	       [--sequential]                 Resolve facts sequentially.
 	       [--http-debug]                 Write HTTP request and responses to stderr.
-	    -p [--puppet]                     Load Puppet-specific facts.
+	    -p [--puppet]                     Load Puppet plugin external facts.
 	    -h [--help]                       Help for all arguments
 	       --version, -v                  Print the version
 	       --man                          Display manual.
@@ -208,7 +204,7 @@ OPTIONS
   * -t, --timing: Show how much time it took to resolve each fact.
   * --sequential: Resolve facts sequentially.
   * --http-debug: Write HTTP request and responses to stderr.
-  * -p, --puppet: Load Puppet-specific facts. Puppet's plugin-fact destinations are searched for external facts only; synced Ruby plugin custom facts are not loaded and a warning is emitted (see docs/CUSTOM_FACT_MIGRATION.md).
+  * -p, --puppet: Search Puppet's plugin-fact destinations for external facts only; synced Ruby plugin custom facts are not loaded and a warning is emitted (see docs/CUSTOM_FACT_MIGRATION.md).
   * --version, -v: Print the version.
   * --man: Display manual.
   * --list-block-groups: List block groups.
@@ -293,7 +289,7 @@ func runQuery(stdout, stderr io.Writer, args []string) error {
 		return optionError(stdout, errors.New("option --puppet cannot be specified more than once."))
 	}
 	configFile := firstNonEmpty(*configPath, *configPathShort)
-	configOptions, configErr := engine.ConfigFileOptions(configFile)
+	configOptions, configErr := engine.ParseConfig(configFile)
 	if configErr != nil {
 		return configErr
 	}
@@ -317,15 +313,7 @@ func runQuery(stdout, stderr io.Writer, args []string) error {
 	}
 	blockedFacts := map[string]bool{}
 	if !*noBlock {
-		blocklist, configErr := engine.ConfigBlocklist(configFile)
-		if configErr != nil {
-			return configErr
-		}
-		groups, configErr := engine.ConfigFactGroups(configFile)
-		if configErr != nil {
-			return configErr
-		}
-		blockedFacts = engine.BlocklistedFactsForFiltering(blocklist, groups)
+		blockedFacts = engine.BlocklistedFactsForFiltering(configOptions.Blocklist, configOptions.FactGroups)
 	}
 	logLevel := firstNonEmpty(flags.Lookup("log-level").Value.String(), flags.Lookup("l").Value.String(), configOptions.LogLevel)
 	if logLevel != "" && !cli.SupportedLogLevel(logLevel) {
@@ -383,15 +371,7 @@ func runQuery(stdout, stderr io.Writer, args []string) error {
 	mergeDottedFacts := configOptions.ForceDotResolution || *forceDotResolution
 	facts = engine.SelectWithDottedFacts(facts, flags.Args(), mergeDottedFacts)
 	if !*noCache {
-		ttls, configErr := engine.ConfigTTLs(configFile)
-		if configErr != nil {
-			return configErr
-		}
-		groups, configErr := engine.ConfigFactGroups(configFile)
-		if configErr != nil {
-			return configErr
-		}
-		cache := engine.NewFactCache(engine.DefaultCachePath(), ttls, groups)
+		cache := engine.NewFactCache(engine.DefaultCachePath(), configOptions.TTLs, configOptions.FactGroups)
 		remaining, cached := cache.ResolveFacts(facts)
 		if err := cache.CacheFacts(remaining); err != nil {
 			return err
@@ -399,16 +379,13 @@ func runQuery(stdout, stderr io.Writer, args []string) error {
 		facts = append(remaining, cached...)
 	}
 	resolutionDuration := time.Since(resolutionStart).Seconds()
-	var out string
-	if *jsonOutput || *jsonOutputShort {
-		out, err = engine.FormatJSONWithDottedFacts(facts, mergeDottedFacts)
-	} else if *yamlOutput || *yamlOutputShort {
-		out = engine.FormatYAMLWithDottedFacts(facts, mergeDottedFacts)
-	} else if *hoconOutput {
-		out = engine.FormatHOCONWithDottedFacts(facts, mergeDottedFacts)
-	} else {
-		out = engine.FormatLegacyColored(facts, mergeDottedFacts, colorOutput)
-	}
+	out, err := engine.BuildFormatter(engine.FormatOptions{
+		JSON:               *jsonOutput || *jsonOutputShort,
+		YAML:               *yamlOutput || *yamlOutputShort,
+		HOCON:              *hoconOutput,
+		IncludeTypedDotted: mergeDottedFacts,
+		Colorize:           colorOutput,
+	}).Format(facts)
 	if err != nil {
 		return err
 	}

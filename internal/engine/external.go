@@ -28,10 +28,72 @@ var ErrNullByte = errors.New("external fact contains a null byte reference")
 const externalFactResolutionEnv = "FACTER_EXTERNAL_FACTS_RUNNING"
 
 var externalFactCommandTimeout = 30 * time.Second
-var externalFactGOOS = runtime.GOOS
-var externalFactRunCommand = runExternalFactCommand
-var externalFactFileReadable = fileReadable
-var externalFactOpen = os.Open
+
+type externalFactLoaderMode int
+
+const (
+	externalFactLoaderCLI externalFactLoaderMode = iota
+	externalFactLoaderLibrary
+)
+
+type externalFactLoaderHost interface {
+	readDir(string) ([]os.DirEntry, error)
+	open(string) (io.ReadCloser, error)
+	fileReadable(string) bool
+	environ() []string
+	goos() string
+	runCommand(context.Context, string, ...string) ([]byte, []byte, error)
+	externalFactResolutionRunning() bool
+}
+
+type externalFactOSHost struct{}
+
+func (externalFactOSHost) readDir(dir string) ([]os.DirEntry, error) {
+	return os.ReadDir(dir)
+}
+
+func (externalFactOSHost) open(path string) (io.ReadCloser, error) {
+	return os.Open(path)
+}
+
+func (externalFactOSHost) fileReadable(path string) bool {
+	return fileReadable(path)
+}
+
+func (externalFactOSHost) environ() []string {
+	return os.Environ()
+}
+
+func (externalFactOSHost) goos() string {
+	return runtime.GOOS
+}
+
+func (externalFactOSHost) runCommand(ctx context.Context, name string, args ...string) ([]byte, []byte, error) {
+	return runExternalFactCommand(ctx, name, args...)
+}
+
+func (externalFactOSHost) externalFactResolutionRunning() bool {
+	return ExternalFactResolutionRunning()
+}
+
+type externalFactLoader struct {
+	s          *Session
+	mode       externalFactLoaderMode
+	dirs       []string
+	blocked    map[string]bool
+	host       externalFactLoaderHost
+	includeEnv bool
+}
+
+func (l externalFactLoader) withDefaults() externalFactLoader {
+	if l.s == nil {
+		l.s = NewSession()
+	}
+	if l.host == nil {
+		l.host = externalFactOSHost{}
+	}
+	return l
+}
 
 var diagnosticState struct {
 	mu             sync.Mutex
@@ -104,64 +166,67 @@ func LoadExternalFacts(s *Session, dirs []string) ([]ResolvedFact, error) {
 // semantics — skipping files whose base name is blocklisted by the Facter
 // config.
 func LoadExternalFactsWithBlocklist(s *Session, dirs []string, blocked map[string]bool) ([]ResolvedFact, error) {
-	facts, err := loadExternalDirFacts(s, dirs, blocked, nil)
+	return externalFactLoader{
+		s:          s,
+		mode:       externalFactLoaderCLI,
+		dirs:       dirs,
+		blocked:    blocked,
+		includeEnv: true,
+	}.load()
+}
+
+func (l externalFactLoader) load() ([]ResolvedFact, error) {
+	l = l.withDefaults()
+	facts, failures, err := l.loadDirFacts()
 	if err != nil {
 		return nil, err
 	}
-	envFacts, err := loadExternalEnvFacts(os.Environ())
-	if err != nil {
-		return nil, err
+	if l.includeEnv {
+		envFacts, err := loadExternalEnvFacts(l.host.environ())
+		if err != nil {
+			if l.mode == externalFactLoaderCLI {
+				return nil, err
+			}
+			failures = append(failures, err)
+		} else {
+			facts = append(facts, envFacts...)
+		}
 	}
-	facts = append(facts, envFacts...)
+	if l.mode == externalFactLoaderLibrary {
+		return facts, errors.Join(failures...)
+	}
 	return facts, nil
 }
 
-// LoadExternalFactsFromDirs loads external facts from exactly the given
-// directories — no environment variables — returning every fact that loaded
-// together with the per-source failures joined. Library engines use this to
-// keep opted-in sources hermetic and discovery failures partial.
-func LoadExternalFactsFromDirs(s *Session, dirs []string, blocked map[string]bool) ([]ResolvedFact, error) {
-	var failures []error
-	facts, err := loadExternalDirFacts(s, dirs, blocked, &failures)
-	if err != nil {
-		failures = append(failures, err)
-	}
-	return facts, errors.Join(failures...)
-}
-
-// loadExternalDirFacts walks dirs loading external fact files. With failures
-// nil it keeps the CLI contract: executable and cancelled-context failures are
-// skipped silently and the first hard error aborts the load. With failures
-// non-nil every failure is collected and loading continues, returning partial
-// results.
-func loadExternalDirFacts(s *Session, dirs []string, blocked map[string]bool, failures *[]error) ([]ResolvedFact, error) {
+func (l externalFactLoader) loadDirFacts() ([]ResolvedFact, []error, error) {
 	facts := []ResolvedFact{}
-	for _, dir := range dirs {
-		entries, err := os.ReadDir(dir)
+	var failures []error
+	for _, dir := range l.dirs {
+		entries, err := l.host.readDir(dir)
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
 				continue
 			}
 			err = fmt.Errorf("read external dir %s: %w", dir, err)
-			if failures == nil {
-				return nil, err
+			if l.mode == externalFactLoaderCLI {
+				return nil, nil, err
 			}
-			*failures = append(*failures, err)
+			failures = append(failures, err)
 			continue
 		}
 		slices.SortFunc(entries, func(a, b os.DirEntry) int {
 			return strings.Compare(b.Name(), a.Name())
 		})
 		for _, entry := range entries {
-			if blocked[entry.Name()] {
-				s.debug(fmt.Sprintf("External fact file %s blocked.", entry.Name()))
+			if l.blocked[entry.Name()] {
+				l.s.debug(fmt.Sprintf("External fact file %s blocked.", entry.Name()))
 				continue
 			}
 			if entry.IsDir() {
 				continue
 			}
 			if ignoredBackupExternalFactFile(entry.Name()) {
-				s.debug(fmt.Sprintf("External fact file %s ignored: %s extension.", entry.Name(), strings.ToLower(filepath.Ext(entry.Name()))))
+				l.s.debug(fmt.Sprintf("External fact file %s ignored: %s extension.", entry.Name(), strings.ToLower(filepath.Ext(entry.Name()))))
 				continue
 			}
 			if ignoredExternalFactFile(entry.Name()) {
@@ -171,27 +236,27 @@ func loadExternalDirFacts(s *Session, dirs []string, blocked map[string]bool, fa
 			info, err := entry.Info()
 			if err != nil {
 				err = fmt.Errorf("stat external fact %s: %w", path, err)
-				if failures == nil {
-					return nil, err
+				if l.mode == externalFactLoaderCLI {
+					return nil, nil, err
 				}
-				*failures = append(*failures, err)
+				failures = append(failures, err)
 				continue
 			}
-			loaded, err := loadExternalFactFile(s, path, info.Mode())
+			loaded, err := l.loadExternalFactFile(path, info.Mode())
 			if err != nil {
-				if failures == nil {
-					if errors.Is(err, errExternalFactExec) || s.Context().Err() != nil && errors.Is(err, s.Context().Err()) {
+				if l.mode == externalFactLoaderCLI {
+					if errors.Is(err, errExternalFactExec) || l.s.Context().Err() != nil && errors.Is(err, l.s.Context().Err()) {
 						continue
 					}
-					return nil, err
+					return nil, nil, err
 				}
-				*failures = append(*failures, err)
+				failures = append(failures, err)
 				continue
 			}
 			facts = append(facts, loaded...)
 		}
 	}
-	return facts, nil
+	return facts, failures, nil
 }
 
 func loadExternalEnvFacts(env []string) ([]ResolvedFact, error) {
@@ -313,38 +378,38 @@ func ExternalFactGroups(dirs []string) ([]FactGroup, error) {
 	return groups, nil
 }
 
-func loadExternalFactFile(s *Session, path string, mode os.FileMode) ([]ResolvedFact, error) {
+func (l externalFactLoader) loadExternalFactFile(path string, mode os.FileMode) ([]ResolvedFact, error) {
 	ext := strings.ToLower(filepath.Ext(path))
 	switch ext {
 	case ".txt":
-		return loadExternalTxtFacts(path)
+		return l.loadExternalTxtFacts(path)
 	case ".json":
-		return loadExternalJSONFacts(s, path)
+		return l.loadExternalJSONFacts(path)
 	case ".yaml", ".yml":
-		return loadExternalYAMLFacts(s, path)
+		return l.loadExternalYAMLFacts(path)
 	case ".rb":
-		s.warn(fmt.Sprintf("Ruby fact files are not supported by the Go port; skipping %s. Rewrite it as an executable external fact (see docs/CUSTOM_FACT_MIGRATION.md).", path))
+		l.s.warn(fmt.Sprintf("Ruby fact files are not supported by the Go port; skipping %s. Rewrite it as an executable external fact (see docs/CUSTOM_FACT_MIGRATION.md).", path))
 		return nil, nil
 	case ".ps1":
-		if externalFactGOOS == "windows" {
-			return loadExternalPowerShellFacts(s, path)
+		if l.host.goos() == "windows" {
+			return l.loadExternalPowerShellFacts(path)
 		}
-		if mode.IsRegular() && mode&0o111 != 0 && !ExternalFactResolutionRunning() {
-			return loadExternalExecutableFacts(s, path)
+		if mode.IsRegular() && mode&0o111 != 0 && !l.host.externalFactResolutionRunning() {
+			return l.loadExternalExecutableFacts(path)
 		}
 		return nil, nil
 	default:
-		if externalFactGOOS != "windows" && windowsExecutableExternalFactExt(ext) {
+		if l.host.goos() != "windows" && windowsExecutableExternalFactExt(ext) {
 			return nil, nil
 		}
-		if externalFactGOOS == "windows" && windowsExecutableExternalFactExt(ext) && mode.IsRegular() && !ExternalFactResolutionRunning() {
-			return loadExternalExecutableFacts(s, path)
+		if l.host.goos() == "windows" && windowsExecutableExternalFactExt(ext) && mode.IsRegular() && !l.host.externalFactResolutionRunning() {
+			return l.loadExternalExecutableFacts(path)
 		}
-		if mode.IsRegular() && mode&0o111 != 0 && !ExternalFactResolutionRunning() {
-			return loadExternalExecutableFacts(s, path)
+		if mode.IsRegular() && mode&0o111 != 0 && !l.host.externalFactResolutionRunning() {
+			return l.loadExternalExecutableFacts(path)
 		}
 		if mode.IsRegular() {
-			reportEmptyStructuredExternalFact(s, path)
+			reportEmptyStructuredExternalFact(l.s, path)
 		}
 		return nil, nil
 	}
@@ -359,8 +424,8 @@ func windowsExecutableExternalFactExt(ext string) bool {
 	}
 }
 
-func loadExternalTxtFacts(path string) ([]ResolvedFact, error) {
-	file, err := externalFactOpen(path)
+func (l externalFactLoader) loadExternalTxtFacts(path string) ([]ResolvedFact, error) {
+	file, err := l.host.open(path)
 	if err != nil {
 		return nil, nil
 	}
@@ -399,8 +464,8 @@ func parseKeyValueFacts(scanner *bufio.Scanner) ([]ResolvedFact, error) {
 	return facts, nil
 }
 
-func loadExternalExecutableFacts(s *Session, path string) ([]ResolvedFact, error) {
-	return loadExternalCommandFacts(s, externalExecutableCommandName(path), path)
+func (l externalFactLoader) loadExternalExecutableFacts(path string) ([]ResolvedFact, error) {
+	return l.loadExternalCommandFacts(externalExecutableCommandName(path), path)
 }
 
 func externalExecutableCommandName(path string) string {
@@ -410,24 +475,33 @@ func externalExecutableCommandName(path string) string {
 	return path
 }
 
-func loadExternalPowerShellFacts(s *Session, path string) ([]ResolvedFact, error) {
-	powershell := currentPowerShellPath(os.Getenv("SYSTEMROOT"))
-	return loadExternalCommandFacts(
-		s,
+func (l externalFactLoader) loadExternalPowerShellFacts(path string) ([]ResolvedFact, error) {
+	powershell := currentPowerShellPath(systemRootFromEnv(l.host.environ()), l.host.fileReadable)
+	return l.loadExternalCommandFacts(
 		powershell,
 		`"`+powershell+`" -NoProfile -NonInteractive -NoLogo -ExecutionPolicy Bypass -File "`+path+`"`,
 		"-NoProfile", "-NonInteractive", "-NoLogo", "-ExecutionPolicy", "Bypass", "-File", path,
 	)
 }
 
-func currentPowerShellPath(systemRoot string) string {
+func systemRootFromEnv(env []string) string {
+	for _, entry := range env {
+		name, value, ok := strings.Cut(entry, "=")
+		if ok && strings.EqualFold(name, "SYSTEMROOT") {
+			return value
+		}
+	}
+	return ""
+}
+
+func currentPowerShellPath(systemRoot string, readable func(string) bool) string {
 	if systemRoot != "" {
 		sysnative := systemRoot + `\sysnative\WindowsPowershell\v1.0\powershell.exe`
-		if externalFactFileReadable(sysnative) {
+		if readable(sysnative) {
 			return sysnative
 		}
 		system32 := systemRoot + `\system32\WindowsPowershell\v1.0\powershell.exe`
-		if externalFactFileReadable(system32) {
+		if readable(system32) {
 			return system32
 		}
 	}
@@ -444,12 +518,12 @@ func fileReadable(path string) bool {
 // failures.
 var errExternalFactExec = errors.New("executable external fact failed")
 
-func loadExternalCommandFacts(s *Session, name, warningName string, args ...string) ([]ResolvedFact, error) {
-	ctx, cancel := context.WithTimeout(s.Context(), externalFactCommandTimeout)
+func (l externalFactLoader) loadExternalCommandFacts(name, warningName string, args ...string) ([]ResolvedFact, error) {
+	ctx, cancel := context.WithTimeout(l.s.Context(), externalFactCommandTimeout)
 	defer cancel()
 
-	out, stderr, err := externalFactRunCommand(ctx, name, args...)
-	if parentErr := s.Context().Err(); parentErr != nil {
+	out, stderr, err := l.host.runCommand(ctx, name, args...)
+	if parentErr := l.s.Context().Err(); parentErr != nil {
 		return nil, fmt.Errorf("execute external fact %s: %w", warningName, parentErr)
 	}
 	if ctx.Err() != nil {
@@ -459,7 +533,7 @@ func loadExternalCommandFacts(s *Session, name, warningName string, args ...stri
 		return nil, fmt.Errorf("%w: %s: %v", errExternalFactExec, warningName, err)
 	}
 	if message := strings.TrimSpace(string(stderr)); message != "" {
-		s.warn(fmt.Sprintf("Command %s completed with the following stderr message: %s", warningName, message))
+		l.s.warn(fmt.Sprintf("Command %s completed with the following stderr message: %s", warningName, message))
 	}
 	if len(out) == 0 {
 		return nil, nil
@@ -491,8 +565,8 @@ func runExternalFactCommand(ctx context.Context, name string, args ...string) ([
 	return out, stderr.Bytes(), err
 }
 
-func loadExternalJSONFacts(s *Session, path string) ([]ResolvedFact, error) {
-	file, err := externalFactOpen(path)
+func (l externalFactLoader) loadExternalJSONFacts(path string) ([]ResolvedFact, error) {
+	file, err := l.host.open(path)
 	if err != nil {
 		return nil, nil
 	}
@@ -507,18 +581,18 @@ func loadExternalJSONFacts(s *Session, path string) ([]ResolvedFact, error) {
 
 	values, ok := value.(map[string]any)
 	if !ok {
-		reportStructuredExternalFactWithoutKeyValueData(s, path)
+		reportStructuredExternalFactWithoutKeyValueData(l.s, path)
 		return nil, nil
 	}
 	if len(values) == 0 {
-		reportEmptyStructuredExternalFact(s, path)
+		reportEmptyStructuredExternalFact(l.s, path)
 		return nil, nil
 	}
 	return externalFactsFromMap(values)
 }
 
-func loadExternalYAMLFacts(s *Session, path string) ([]ResolvedFact, error) {
-	file, err := externalFactOpen(path)
+func (l externalFactLoader) loadExternalYAMLFacts(path string) ([]ResolvedFact, error) {
+	file, err := l.host.open(path)
 	if err != nil {
 		return nil, nil
 	}
@@ -536,11 +610,11 @@ func loadExternalYAMLFacts(s *Session, path string) ([]ResolvedFact, error) {
 	}
 	values, ok := value.(map[string]any)
 	if !ok {
-		reportStructuredExternalFactWithoutKeyValueData(s, path)
+		reportStructuredExternalFactWithoutKeyValueData(l.s, path)
 		return nil, nil
 	}
 	if len(values) == 0 {
-		reportEmptyStructuredExternalFact(s, path)
+		reportEmptyStructuredExternalFact(l.s, path)
 		return nil, nil
 	}
 	return externalYAMLFactsFromMap(values)

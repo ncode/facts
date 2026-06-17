@@ -10,7 +10,6 @@ package facts
 import (
 	"context"
 	"errors"
-	"os/exec"
 	"testing"
 )
 
@@ -60,12 +59,6 @@ func TestSnapshotTree_includesStandardCoreRootFacts(t *testing.T) {
 		"dmi", "identity", "is_virtual",
 		"kernel", "kernelmajversion", "kernelrelease", "kernelversion",
 		"system_uptime", "timezone", "virtual",
-	}
-	// ruby resolves only where a Ruby runtime exists; without one the fact
-	// is absent, never an empty map (openspec change
-	// omit-not-applicable-facts).
-	if _, err := exec.LookPath("ruby"); err == nil {
-		names = append(names, "ruby")
 	}
 	for _, name := range names {
 		if _, ok := tree[name]; !ok {

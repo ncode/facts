@@ -13,13 +13,6 @@ func BenchmarkCoreFacts(b *testing.B) {
 	}
 }
 
-func BenchmarkCoreFactsWithoutRuby(b *testing.B) {
-	b.ReportAllocs()
-	for b.Loop() {
-		_ = CoreFactsWithRuby(testSession, false)
-	}
-}
-
 func BenchmarkParseLinuxMeminfoBytes(b *testing.B) {
 	input := "MemTotal:       16384000 kB\nMemAvailable:    4096000 kB\nSwapTotal:       1048576 kB\nSwapFree:         262144 kB\n"
 	b.ReportAllocs()

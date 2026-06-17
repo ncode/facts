@@ -1,8 +1,7 @@
-# go-port-framework-fidelity Specification
+# Delta: go-port-framework-fidelity
 
-## Purpose
-TBD - created by archiving change close-go-port-release-readiness-gaps. Update Purpose after archive.
-## Requirements
+## MODIFIED Requirements
+
 ### Requirement: Bounded and documented --puppet behavior
 The Go port SHALL define `--puppet` behavior explicitly. `--puppet` remains an external-fact compatibility bridge for Puppet plugin fact destinations; it SHALL NOT inventory Puppet package versions.
 
@@ -17,15 +16,3 @@ The Go port SHALL define `--puppet` behavior explicitly. `--puppet` remains an e
 #### Scenario: Ruby plugin custom facts warn
 - **WHEN** `facts --puppet` runs and Puppet Ruby plugin custom facts would have been loaded by Ruby Facter
 - **THEN** the Go port MUST emit a warning that Ruby plugin custom facts are not loaded, and the deviation MUST be documented in the migration guide (`docs/CUSTOM_FACT_MIGRATION.md`) and man page
-
-### Requirement: HOCON configuration parsing fidelity
-The Go port SHALL parse `facter.conf` with semantics equivalent to Ruby facter's HOCON handling for the supported configuration surface.
-
-#### Scenario: Parser library or pinned subset
-- **WHEN** `facter.conf` parsing is implemented
-- **THEN** it MUST either use a HOCON parser library validated against a fixture corpus shared with the Ruby behavior, or document the exact supported configuration subset with tests that pin both accepted and rejected syntax at the boundary
-
-#### Scenario: Existing configuration keys keep working
-- **WHEN** the parser implementation changes
-- **THEN** all configuration behavior already covered by Go tests (global, cli, fact-groups, blocklist, ttls, repeated entries, quoted values, invalid config diagnostics, CLI/config precedence) MUST continue to pass unchanged
-

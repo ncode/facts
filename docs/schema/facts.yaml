@@ -24,12 +24,6 @@
 #
 # to list exactly what still needs an entry here.
 
-aio_agent_version:
-  type: string
-  description: The puppet-agent (AIO) package version, when one is installed.
-  platforms: [linux, darwin, windows, freebsd]
-  conditional: true
-
 augeas.version:
   type: string
   description: The Augeas version reported by augparse, when Augeas is installed.

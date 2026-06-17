@@ -11,9 +11,11 @@ import (
 
 // FormatOptions selects the presentation format for resolved facts.
 type FormatOptions struct {
-	JSON  bool
-	YAML  bool
-	HOCON bool
+	JSON               bool
+	YAML               bool
+	HOCON              bool
+	IncludeTypedDotted bool
+	Colorize           bool
 }
 
 // Formatter renders resolved facts in one presentation format.
@@ -37,13 +39,21 @@ func (f formatterFunc) Format(facts []ResolvedFact) (string, error) {
 func BuildFormatter(opts FormatOptions) Formatter {
 	switch {
 	case opts.JSON:
-		return formatterFunc{name: "json", format: FormatJSON}
+		return formatterFunc{name: "json", format: func(facts []ResolvedFact) (string, error) {
+			return FormatJSONWithDottedFacts(facts, opts.IncludeTypedDotted)
+		}}
 	case opts.YAML:
-		return formatterFunc{name: "yaml", format: func(facts []ResolvedFact) (string, error) { return FormatYAML(facts), nil }}
+		return formatterFunc{name: "yaml", format: func(facts []ResolvedFact) (string, error) {
+			return FormatYAMLWithDottedFacts(facts, opts.IncludeTypedDotted), nil
+		}}
 	case opts.HOCON:
-		return formatterFunc{name: "hocon", format: func(facts []ResolvedFact) (string, error) { return FormatHOCON(facts), nil }}
+		return formatterFunc{name: "hocon", format: func(facts []ResolvedFact) (string, error) {
+			return FormatHOCONWithDottedFacts(facts, opts.IncludeTypedDotted), nil
+		}}
 	default:
-		return formatterFunc{name: "legacy", format: func(facts []ResolvedFact) (string, error) { return FormatLegacy(facts), nil }}
+		return formatterFunc{name: "legacy", format: func(facts []ResolvedFact) (string, error) {
+			return FormatLegacyColored(facts, opts.IncludeTypedDotted, opts.Colorize), nil
+		}}
 	}
 }
 

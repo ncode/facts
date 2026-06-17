@@ -29,8 +29,9 @@ var NativeDefaultConfigPath = platformNativeDefaultConfigPath
 // facter.conf path, read when no facts-native config file exists.
 var DefaultConfigPath = platformDefaultConfigPath
 
-// ConfigOptions contains Facter options loaded from a config file.
-type ConfigOptions struct {
+// Config contains the supported Facter config values loaded from a config file.
+type Config struct {
+	Blocklist          []string
 	ExternalDirs       []string
 	Debug              bool
 	Verbose            bool
@@ -39,6 +40,8 @@ type ConfigOptions struct {
 	ForceDotResolution bool
 	Sequential         bool
 	SequentialSet      bool
+	TTLs               []FactTTL
+	FactGroups         []FactGroup
 }
 
 // DefaultExternalFactDirs returns the default external fact directories:
@@ -90,85 +93,31 @@ type FactTTL struct {
 	TTL  string
 }
 
-// ConfigBlocklist returns fact and group names from a Facter config blocklist.
-func ConfigBlocklist(path string) ([]string, error) {
-	options, err := readConfigOptionsFile(path)
-	if err != nil {
-		return nil, err
-	}
-	return options.Blocklist, nil
+// ParseConfig returns every supported value from a Facter config file.
+func ParseConfig(path string) (Config, error) {
+	return readConfigOptionsFile(path)
 }
 
-// ConfigFileOptions returns supported Facter options from a config file.
-func ConfigFileOptions(path string) (ConfigOptions, error) {
-	options, err := readConfigOptionsFile(path)
-	if err != nil {
-		return ConfigOptions{}, err
-	}
-	return ConfigOptions{
-		ExternalDirs:       options.ExternalDirs,
-		Debug:              options.Debug,
-		Verbose:            options.Verbose,
-		LogLevel:           options.LogLevel,
-		NoExternalFacts:    options.NoExternalFacts,
-		ForceDotResolution: options.ForceDotResolution,
-		Sequential:         options.Sequential,
-		SequentialSet:      options.SequentialSet,
-	}, nil
-}
-
-// ConfigTTLs returns configured cache TTLs from the facts section.
-func ConfigTTLs(path string) ([]FactTTL, error) {
-	options, err := readConfigOptionsFile(path)
-	if err != nil {
-		return nil, err
-	}
-	return options.TTLs, nil
-}
-
-// ConfigFactGroups returns configured fact groups from facter.conf.
-func ConfigFactGroups(path string) ([]FactGroup, error) {
-	options, err := readConfigOptionsFile(path)
-	if err != nil {
-		return nil, err
-	}
-	return options.FactGroups, nil
-}
-
-type readConfigOptions struct {
-	Blocklist          []string
-	ExternalDirs       []string
-	Debug              bool
-	Verbose            bool
-	LogLevel           string
-	NoExternalFacts    bool
-	ForceDotResolution bool
-	Sequential         bool
-	SequentialSet      bool
-	TTLs               []FactTTL
-	FactGroups         []FactGroup
-}
-
-func readConfigOptionsFile(path string) (readConfigOptions, error) {
+func readConfigOptionsFile(path string) (Config, error) {
 	if path == "" {
 		path = readableDefaultConfigPath()
 		if path == "" {
-			return readConfigOptions{}, nil
+			return Config{}, nil
 		}
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		warn(fmt.Sprintf("Facts failed to read config file %s: %v", path, err))
-		return readConfigOptions{}, nil
+		return Config{}, nil
 	}
 	content := stripConfigLineComments(string(data))
 	if invalidConfigContent(content) {
 		warn(fmt.Sprintf("Facts failed to read config file %s: invalid config", path))
-		return readConfigOptions{}, nil
+		return Config{}, nil
 	}
 	cliSection := configSection(content, "cli")
 	sequential, sequentialSet := configBoolValue(content, sequentialPattern)
-	return readConfigOptions{
+	return Config{
 		Blocklist:          lowerConfigValues(configList(content, blocklistPattern)),
 		ExternalDirs:       configList(content, externalDirPattern),
 		Debug:              configBool(cliSection, debugPattern),

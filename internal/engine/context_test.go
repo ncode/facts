@@ -26,7 +26,7 @@ func TestLoadExternalCommandFactsHonorsCancelledContext(t *testing.T) {
 	ctx := cancelledContext()
 	s := NewSessionContext(ctx)
 
-	facts, err := loadExternalCommandFacts(s, "echo", "echo", "unreachable=fact")
+	facts, err := externalFactLoader{s: s}.withDefaults().loadExternalCommandFacts("echo", "echo", "unreachable=fact")
 	if !errors.Is(err, ctx.Err()) {
 		t.Fatalf("loadExternalCommandFacts() err = %v, want %v", err, ctx.Err())
 	}

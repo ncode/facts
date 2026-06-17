@@ -3,15 +3,47 @@ package engine
 import (
 	"context"
 	"log/slog"
+	"os"
+	"os/exec"
 	"sync"
 )
+
+type hostOS interface {
+	run(context.Context, string, ...string) string
+	readFile(string) ([]byte, error)
+	stat(string) (os.FileInfo, error)
+	lstat(string) (os.FileInfo, error)
+}
+
+type osHost struct{}
+
+func (osHost) run(ctx context.Context, name string, args ...string) string {
+	data, err := exec.CommandContext(ctx, name, args...).Output()
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
+
+func (osHost) readFile(path string) ([]byte, error) {
+	return os.ReadFile(path)
+}
+
+func (osHost) stat(path string) (os.FileInfo, error) {
+	return os.Stat(path)
+}
+
+func (osHost) lstat(path string) (os.FileInfo, error) {
+	return os.Lstat(path)
+}
 
 // Session carries the state of one resolution run: memoized host probes and
 // resolution-scoped caches. Resolvers share a Session so facts derived from
 // the same probe agree within a run; a fresh Session re-reads the host, which
 // is how discovery stays current and how independent engines stay isolated.
 type Session struct {
-	ctx context.Context
+	ctx  context.Context
+	host hostOS
 	// logger receives engine diagnostics when the session belongs to an
 	// Engine; when nil, diagnostics fall back to the process-wide handler
 	// callbacks that back the CLI and the Ruby-compat API.
@@ -19,7 +51,7 @@ type Session struct {
 
 	coreFacts struct {
 		mu    sync.Mutex
-		facts map[bool][]ResolvedFact
+		facts []ResolvedFact
 	}
 
 	augeasVersion                memo[string]
@@ -64,12 +96,24 @@ func NewSessionContext(ctx context.Context) *Session {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return &Session{ctx: ctx}
+	return &Session{ctx: ctx, host: osHost{}}
 }
 
 // Context returns the context this session's resolution work runs under.
 func (s *Session) Context() context.Context {
 	return s.ctx
+}
+
+func (s *Session) readFile(path string) ([]byte, error) {
+	return s.host.readFile(path)
+}
+
+func (s *Session) stat(path string) (os.FileInfo, error) {
+	return s.host.stat(path)
+}
+
+func (s *Session) lstat(path string) (os.FileInfo, error) {
+	return s.host.lstat(path)
 }
 
 func (s *Session) warn(message string) {
