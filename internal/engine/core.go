@@ -1656,6 +1656,7 @@ func currentNetworkingData(goos string, interfaces map[string]any, run commandRu
 		expandInterfaceBindings(interfaces)
 		return windowsPrimaryInterface(interfaces), interfaces
 	case "linux":
+		expandInterfaceBindings(interfaces)
 		return linuxPrimaryInterface(readText("/proc/net/route", readFile), interfaces, run), interfaces
 	default:
 		return "", interfaces
@@ -2683,7 +2684,7 @@ func mountpointsFactWithSkip(entries []mountEntry, stat func(string) (mountStat,
 		if ok {
 			mountpoint["available"] = bytesToHumanReadable(stats.AvailableBytes)
 			mountpoint["available_bytes"] = stats.AvailableBytes
-			mountpoint["capacity"] = filesystemCapacity(stats.UsedBytes, stats.SizeBytes)
+			mountpoint["capacity"] = filesystemCapacity(stats.UsedBytes, stats.AvailableBytes)
 			mountpoint["size"] = bytesToHumanReadable(stats.SizeBytes)
 			mountpoint["size_bytes"] = stats.SizeBytes
 			mountpoint["used"] = bytesToHumanReadable(stats.UsedBytes)
@@ -3000,13 +3001,23 @@ func memorySwapValues(totalBytes, availableBytes int) memorySwapFactValues {
 	}
 }
 
-func filesystemCapacity(used, total int) string {
-	if total > 0 && used == total {
+// filesystemCapacity computes the df/Facter capacity percentage as
+// used/(used+available). The denominator is the space visible to an
+// unprivileged writer (used + available), so root-reserved blocks read the
+// same percentage df reports and a fully used mount (available == 0) reads
+// 100%, not 0%. An empty or unknown mount (used <= 0) reads 0%.
+func filesystemCapacity(used, available int) string {
+	if available <= 0 {
+		// No space available — full. Covers full read-only mounts and the
+		// zero-size special filesystems (/dev/pts, hugepages) that Facter
+		// reports as 100%. Checked before used so a 0-used/0-available mount
+		// is 100%, not 0%.
 		return "100%"
 	}
-	if used <= 0 || total <= 0 {
+	if used <= 0 {
 		return "0%"
 	}
+	total := used + available
 	percent := 100.0 * float64(used) / float64(total)
 	return strconv.FormatFloat(percent, 'f', 2, 64) + "%"
 }
