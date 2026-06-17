@@ -2,6 +2,7 @@ package engine
 
 import (
 	"fmt"
+	"log/slog"
 	"strconv"
 	"strings"
 )
@@ -74,18 +75,21 @@ func FormatFactGroups(groups []FactGroup) string {
 }
 
 // GroupTTLSeconds returns the configured TTL for fact in seconds.
-func GroupTTLSeconds(ttls []FactTTL, fact string) (int64, bool) {
+func GroupTTLSeconds(ttls []FactTTL, fact string, log *slog.Logger) (int64, bool) {
 	for _, ttl := range ttls {
 		if ttl.Fact != fact {
 			continue
 		}
-		seconds, ok := ttlSeconds(ttl.TTL)
+		seconds, ok := ttlSeconds(ttl.TTL, log)
 		return seconds, ok
 	}
 	return 0, false
 }
 
-func ttlSeconds(value string) (int64, bool) {
+func ttlSeconds(value string, log *slog.Logger) (int64, bool) {
+	if log == nil {
+		log = slog.New(slog.DiscardHandler)
+	}
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return 0, false
@@ -114,7 +118,7 @@ func ttlSeconds(value string) (int64, bool) {
 	}
 	multiplier, divisor, ok := ttlUnitScale(unit)
 	if !ok {
-		reportError(fmt.Sprintf("Could not parse time unit %s (try %s)", rubyTTLLogUnit(unit), rubyTTLUnits))
+		log.Error(fmt.Sprintf("Could not parse time unit %s (try %s)", rubyTTLLogUnit(unit), rubyTTLUnits))
 		return 0, false
 	}
 	return n * multiplier / divisor, true

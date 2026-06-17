@@ -16,7 +16,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -93,61 +92,6 @@ func (l externalFactLoader) withDefaults() externalFactLoader {
 		l.host = externalFactOSHost{}
 	}
 	return l
-}
-
-var diagnosticState struct {
-	mu             sync.Mutex
-	debugHandler   func(string)
-	warningHandler func(string)
-	errorHandler   func(string)
-}
-
-// SetDebugHandler registers a process-wide debug callback for internal diagnostics.
-func SetDebugHandler(handler func(string)) {
-	diagnosticState.mu.Lock()
-	defer diagnosticState.mu.Unlock()
-	diagnosticState.debugHandler = handler
-}
-
-// SetWarningHandler registers a process-wide warning callback for internal diagnostics.
-func SetWarningHandler(handler func(string)) {
-	diagnosticState.mu.Lock()
-	defer diagnosticState.mu.Unlock()
-	diagnosticState.warningHandler = handler
-}
-
-// SetErrorHandler registers a process-wide error callback for internal diagnostics.
-func SetErrorHandler(handler func(string)) {
-	diagnosticState.mu.Lock()
-	defer diagnosticState.mu.Unlock()
-	diagnosticState.errorHandler = handler
-}
-
-func warn(message string) {
-	diagnosticState.mu.Lock()
-	handler := diagnosticState.warningHandler
-	diagnosticState.mu.Unlock()
-	if handler != nil {
-		handler(message)
-	}
-}
-
-func debug(message string) {
-	diagnosticState.mu.Lock()
-	handler := diagnosticState.debugHandler
-	diagnosticState.mu.Unlock()
-	if handler != nil {
-		handler(message)
-	}
-}
-
-func reportError(message string) {
-	diagnosticState.mu.Lock()
-	handler := diagnosticState.errorHandler
-	diagnosticState.mu.Unlock()
-	if handler != nil {
-		handler(message)
-	}
 }
 
 // ExternalFactResolutionRunning reports whether Facts is already resolving

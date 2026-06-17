@@ -494,10 +494,6 @@ func fileExistsWithHost(host hostOS, path string) bool {
 	return err == nil
 }
 
-func dirExists(path string) bool {
-	return dirExistsWithHost(osHost{}, path)
-}
-
 func dirExistsWithHost(host hostOS, path string) bool {
 	info, err := host.stat(path)
 	return err == nil && info.IsDir()

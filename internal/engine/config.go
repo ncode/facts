@@ -2,6 +2,7 @@ package engine
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"regexp"
 	"runtime"
@@ -94,11 +95,16 @@ type FactTTL struct {
 }
 
 // ParseConfig returns every supported value from a Facter config file.
-func ParseConfig(path string) (Config, error) {
-	return readConfigOptionsFile(path)
+// Diagnostics (an unreadable or invalid config file) are emitted to log; pass a
+// discard logger to ignore them.
+func ParseConfig(path string, log *slog.Logger) (Config, error) {
+	return readConfigOptionsFile(path, log)
 }
 
-func readConfigOptionsFile(path string) (Config, error) {
+func readConfigOptionsFile(path string, log *slog.Logger) (Config, error) {
+	if log == nil {
+		log = slog.New(slog.DiscardHandler)
+	}
 	if path == "" {
 		path = readableDefaultConfigPath()
 		if path == "" {
@@ -107,12 +113,12 @@ func readConfigOptionsFile(path string) (Config, error) {
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
-		warn(fmt.Sprintf("Facts failed to read config file %s: %v", path, err))
+		log.Warn(fmt.Sprintf("Facts failed to read config file %s: %v", path, err))
 		return Config{}, nil
 	}
 	content := stripConfigLineComments(string(data))
 	if invalidConfigContent(content) {
-		warn(fmt.Sprintf("Facts failed to read config file %s: invalid config", path))
+		log.Warn(fmt.Sprintf("Facts failed to read config file %s: invalid config", path))
 		return Config{}, nil
 	}
 	cliSection := configSection(content, "cli")

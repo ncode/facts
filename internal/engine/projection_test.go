@@ -203,7 +203,7 @@ func TestSnapshotValueReusesSnapshotTree(t *testing.T) {
 	facts := []ResolvedFact{
 		{Name: "os", Value: map[string]any{"release": map[string]any{"major": "13"}}, Type: "core"},
 	}
-	sn := newSnapshot(facts)
+	sn := newSnapshot(facts, nil)
 
 	// The Snapshot's projection collection must be the very tree built once at
 	// newSnapshot, so repeated Value calls never rebuild it.

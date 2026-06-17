@@ -16,7 +16,7 @@ func BenchmarkFactCacheResolveFacts(b *testing.B) {
 		"networking.domain":    "example",
 		"networking.ip":        "192.0.2.10",
 	})
-	cache := NewFactCache(dir, []FactTTL{{Fact: "networking", TTL: "1 hour"}}, nil)
+	cache := NewFactCache(dir, []FactTTL{{Fact: "networking", TTL: "1 hour"}}, nil, discardLog())
 	searched := []ResolvedFact{
 		{Name: "networking.hostname", Type: "core"},
 		{Name: "networking.domain", Type: "core"},

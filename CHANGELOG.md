@@ -1,5 +1,24 @@
 # Facts (Go port)
 
+## Unreleased
+
+### Changed
+
+- Engine diagnostics now flow through a single seam — the per-Engine
+  `log/slog` logger. The package-global diagnostic handlers
+  (`SetWarningHandler`/`SetDebugHandler`/`SetErrorHandler`) and the
+  process-global `warn`/`debug`/`reportError` are removed. A library Engine
+  built with `WithLogger` now also receives the diagnostics previously routed
+  to the global sink — config-file parsing, the persistent cache, fact-group
+  TTL parsing, OS-hierarchy detection, and canonical-tree collection
+  collisions (the last reported once at discovery, at error severity). The
+  `facts` CLI stderr output is unchanged: the same `WARN Facts -`/`DEBUG
+  Facts -` lines, and error-class engine diagnostics remain dropped. This
+  last point is Facter-aligned, not a gap: when `--force-dot-resolution`
+  expands dotted typed facts and two collide, the colliding fact is silently
+  dropped with no diagnostic — matching Facter 4.10.0, validated in-VM
+  (silent drop, empty stderr at every log level, exit 0).
+
 ## v0.0.2 - 2026-06-16
 
 ### Changed

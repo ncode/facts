@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"iter"
+	"log/slog"
 	"reflect"
 	"slices"
 	"sort"
@@ -23,8 +24,14 @@ type Snapshot struct {
 	projection *Projection
 }
 
-func newSnapshot(facts []ResolvedFact) *Snapshot {
-	tree := Collection(facts)
+func newSnapshot(facts []ResolvedFact, log *slog.Logger) *Snapshot {
+	if log == nil {
+		log = slog.New(slog.DiscardHandler)
+	}
+	tree, collisions := collectFacts(facts, false)
+	for _, fact := range collisions {
+		reportCollectionCollision(log, fact)
+	}
 	return &Snapshot{
 		facts:      facts,
 		tree:       tree,

@@ -96,7 +96,7 @@ func NewSessionContext(ctx context.Context) *Session {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return &Session{ctx: ctx, host: osHost{}}
+	return &Session{ctx: ctx, host: osHost{}, logger: slog.New(slog.DiscardHandler)}
 }
 
 // Context returns the context this session's resolution work runs under.
@@ -116,28 +116,26 @@ func (s *Session) lstat(path string) (os.FileInfo, error) {
 	return s.host.lstat(path)
 }
 
-func (s *Session) warn(message string) {
-	if s.logger != nil {
-		s.logger.Warn(message)
-		return
+// logr returns the session logger, defaulting to a discard logger so a Session
+// built as a bare literal never panics. Sessions from NewSessionContext always
+// carry a non-nil logger (a DiscardHandler unless an Engine supplies one).
+func (s *Session) logr() *slog.Logger {
+	if s.logger == nil {
+		return slog.New(slog.DiscardHandler)
 	}
-	warn(message)
+	return s.logger
+}
+
+func (s *Session) warn(message string) {
+	s.logr().Warn(message)
 }
 
 func (s *Session) debug(message string) {
-	if s.logger != nil {
-		s.logger.Debug(message)
-		return
-	}
-	debug(message)
+	s.logr().Debug(message)
 }
 
 func (s *Session) reportError(message string) {
-	if s.logger != nil {
-		s.logger.Error(message)
-		return
-	}
-	reportError(message)
+	s.logr().Error(message)
 }
 
 type memo[T any] struct {

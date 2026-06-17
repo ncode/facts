@@ -31,7 +31,7 @@ fact-groups : {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
-		if _, err := ParseConfig(path); err != nil {
+		if _, err := ParseConfig(path, discardLog()); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -46,7 +46,7 @@ func BenchmarkGroupTTLSeconds(b *testing.B) {
 
 	b.ReportAllocs()
 	for b.Loop() {
-		seconds, ok := GroupTTLSeconds(ttls, "operating system")
+		seconds, ok := GroupTTLSeconds(ttls, "operating system", discardLog())
 		if !ok || seconds != 10000 {
 			b.Fatalf("GroupTTLSeconds() = %d, %t; want 10000, true", seconds, ok)
 		}

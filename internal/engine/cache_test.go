@@ -18,7 +18,7 @@ func TestFactCache_resolvesFreshCachedFactAndSkipsSearch(t *testing.T) {
 		"os":                   "Ubuntu",
 	})
 
-	cache := NewFactCache(dir, []FactTTL{{Fact: "operating system", TTL: "1 hour"}}, nil)
+	cache := NewFactCache(dir, []FactTTL{{Fact: "operating system", TTL: "1 hour"}}, nil, discardLog())
 	searched := []ResolvedFact{{Name: "os", Type: "core"}, {Name: "site_role", Type: "custom"}}
 
 	remaining, cached := cache.ResolveFacts(searched)
@@ -92,7 +92,7 @@ func TestFactCache_resolvesExternalFactFromFileBasenameCacheGroup(t *testing.T) 
 		"other_external_fact":  "other_ext_fact",
 	})
 
-	cache := NewFactCache(dir, []FactTTL{{Fact: "ext_file.txt", TTL: "1 hour"}}, nil)
+	cache := NewFactCache(dir, []FactTTL{{Fact: "ext_file.txt", TTL: "1 hour"}}, nil, discardLog())
 	searched := []ResolvedFact{{Name: "my_external_fact", Type: "file", File: "/tmp/ext_file.txt"}}
 
 	remaining, cached := cache.ResolveFacts(searched)
@@ -116,13 +116,13 @@ func TestFactCache_refusesExternalFactFromCustomGroupLikeRubyCacheManager(t *tes
 		"my_external_fact":     "ext_fact",
 	})
 	errors := []string{}
-	SetErrorHandler(func(message string) { errors = append(errors, message) })
-	t.Cleanup(func() { SetErrorHandler(nil) })
+	logger := captureLogger(nil, nil, &errors)
 
 	cache := NewFactCache(
 		dir,
 		[]FactTTL{{Fact: "cached-custom-facts", TTL: "1 hour"}},
 		[]FactGroup{{Name: "cached-custom-facts", Facts: []string{"ext_file.txt"}}},
+		logger,
 	)
 	searched := []ResolvedFact{{Name: "my_external_fact", Type: "file", File: "/tmp/ext_file.txt"}}
 
@@ -152,7 +152,7 @@ func TestFactCache_ignoresExpiredCacheAndDeletesFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cache := NewFactCache(dir, []FactTTL{{Fact: "operating system", TTL: "1 hour"}}, nil)
+	cache := NewFactCache(dir, []FactTTL{{Fact: "operating system", TTL: "1 hour"}}, nil, discardLog())
 	searched := []ResolvedFact{{Name: "os", Type: "core"}}
 
 	remaining, cached := cache.ResolveFacts(searched)
@@ -176,7 +176,7 @@ func TestFactCache_resolveFactsDeletesCacheWhenSearchedCoreFactMissingLikeRubyCa
 		"memory":               "1 GiB",
 	})
 
-	cache := NewFactCache(dir, []FactTTL{{Fact: "operating system", TTL: "1 hour"}}, nil)
+	cache := NewFactCache(dir, []FactTTL{{Fact: "operating system", TTL: "1 hour"}}, nil, discardLog())
 	searched := []ResolvedFact{{Name: "os", Type: "core"}}
 
 	remaining, cached := cache.ResolveFacts(searched)
@@ -194,7 +194,7 @@ func TestFactCache_resolveFactsDeletesCacheWhenSearchedCoreFactMissingLikeRubyCa
 
 func TestFactCache_cacheFactsWritesConfiguredGroups(t *testing.T) {
 	dir := t.TempDir()
-	cache := NewFactCache(dir, []FactTTL{{Fact: "networking", TTL: "30 minutes"}}, nil)
+	cache := NewFactCache(dir, []FactTTL{{Fact: "networking", TTL: "30 minutes"}}, nil, discardLog())
 
 	if err := cache.CacheFacts([]ResolvedFact{
 		{Name: "networking.hostname", Value: "node.example", Type: "core"},
@@ -223,9 +223,8 @@ func TestFactCache_cacheFactsWarnsWhenCacheFileCannotBeWrittenLikeRubyCacheManag
 		cacheWriteFile = originalWriteFile
 	})
 	warnings := []string{}
-	SetWarningHandler(func(message string) { warnings = append(warnings, message) })
-	t.Cleanup(func() { SetWarningHandler(nil) })
-	cache := NewFactCache(dir, []FactTTL{{Fact: "operating system", TTL: "1 hour"}}, nil)
+	logger := captureLogger(nil, &warnings, nil)
+	cache := NewFactCache(dir, []FactTTL{{Fact: "operating system", TTL: "1 hour"}}, nil, logger)
 
 	if err := cache.CacheFacts([]ResolvedFact{{Name: "os", Value: "Ubuntu", Type: "core"}}); err != nil {
 		t.Fatalf("CacheFacts() err = %v, want nil", err)
@@ -246,10 +245,9 @@ func TestFactCache_cacheFactsOverwritesInvalidFreshCacheLikeRubyCacheManager(t *
 		t.Fatal(err)
 	}
 	debugMessages := []string{}
-	SetDebugHandler(func(message string) { debugMessages = append(debugMessages, message) })
-	t.Cleanup(func() { SetDebugHandler(nil) })
+	logger := captureLogger(&debugMessages, nil, nil)
 
-	cache := NewFactCache(dir, []FactTTL{{Fact: "operating system", TTL: "1 hour"}}, nil)
+	cache := NewFactCache(dir, []FactTTL{{Fact: "operating system", TTL: "1 hour"}}, nil, logger)
 
 	if err := cache.CacheFacts([]ResolvedFact{{Name: "os", Value: "Ubuntu", Type: "core"}}); err != nil {
 		t.Fatal(err)
@@ -282,9 +280,8 @@ func TestFactCache_cacheFactsLogsNoKeysForNonObjectFreshCacheLikeRubyCacheManage
 		t.Fatal(err)
 	}
 	debugMessages := []string{}
-	SetDebugHandler(func(message string) { debugMessages = append(debugMessages, message) })
-	t.Cleanup(func() { SetDebugHandler(nil) })
-	cache := NewFactCache(dir, []FactTTL{{Fact: "operating system", TTL: "1 hour"}}, nil)
+	logger := captureLogger(&debugMessages, nil, nil)
+	cache := NewFactCache(dir, []FactTTL{{Fact: "operating system", TTL: "1 hour"}}, nil, logger)
 
 	if err := cache.CacheFacts([]ResolvedFact{{Name: "os", Value: "Ubuntu", Type: "core"}}); err != nil {
 		t.Fatal(err)
@@ -319,10 +316,9 @@ func TestFactCache_resolveFactsWarnsWhenCorruptCacheCannotBeDeletedLikeRubyCache
 		cacheRemove = originalRemove
 	})
 	warnings := []string{}
-	SetWarningHandler(func(message string) { warnings = append(warnings, message) })
-	t.Cleanup(func() { SetWarningHandler(nil) })
+	logger := captureLogger(nil, &warnings, nil)
 
-	cache := NewFactCache(dir, []FactTTL{{Fact: "ext_file.txt", TTL: "1 hour"}}, nil)
+	cache := NewFactCache(dir, []FactTTL{{Fact: "ext_file.txt", TTL: "1 hour"}}, nil, logger)
 	searched := []ResolvedFact{{Name: "my_external_fact", Type: "file", File: "/tmp/ext_file.txt"}}
 
 	remaining, cached := cache.ResolveFacts(searched)

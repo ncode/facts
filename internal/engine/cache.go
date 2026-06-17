@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -29,14 +30,21 @@ type FactCache struct {
 	dir    string
 	groups map[string]FactGroup
 	ttls   map[string]time.Duration
+	log    *slog.Logger
 }
 
 // NewFactCache returns a cache using configured TTLs and custom fact groups.
-func NewFactCache(dir string, ttls []FactTTL, groups []FactGroup) *FactCache {
+// Diagnostics (cache read/write failures, unsupported custom groups) are emitted
+// to log; pass a discard logger to ignore them.
+func NewFactCache(dir string, ttls []FactTTL, groups []FactGroup, log *slog.Logger) *FactCache {
+	if log == nil {
+		log = slog.New(slog.DiscardHandler)
+	}
 	cache := &FactCache{
 		dir:    dir,
 		groups: make(map[string]FactGroup),
 		ttls:   make(map[string]time.Duration),
+		log:    log,
 	}
 	for _, group := range BuiltinFactGroups() {
 		cache.groups[group.Name] = group
@@ -51,6 +59,15 @@ func NewFactCache(dir string, ttls []FactTTL, groups []FactGroup) *FactCache {
 		}
 	}
 	return cache
+}
+
+// logger returns the cache logger, defaulting to a discard logger so a
+// zero-value FactCache never panics.
+func (fc *FactCache) logger() *slog.Logger {
+	if fc == nil || fc.log == nil {
+		return slog.New(slog.DiscardHandler)
+	}
+	return fc.log
 }
 
 // ResolveFacts returns facts still requiring resolution plus facts loaded from a fresh cache.
@@ -83,7 +100,7 @@ func (fc *FactCache) ResolveFacts(searched []ResolvedFact) ([]ResolvedFact, []Re
 			fresh = fc.cacheFresh(group, ttl)
 			freshness[freshKey{group, ttl}] = fresh
 		}
-		if externalFactInCustomGroup(fact, group) || !fresh {
+		if externalFactInCustomGroup(fact, group, fc.logger()) || !fresh {
 			remaining = append(remaining, fact)
 			continue
 		}
@@ -102,7 +119,7 @@ func (fc *FactCache) ResolveFacts(searched []ResolvedFact) ([]ResolvedFact, []Re
 			continue
 		}
 		if !cacheDataHasKeyMatchingFact(data, fact.Name) {
-			deleteCacheFile(filepath.Join(fc.dir, group))
+			deleteCacheFile(filepath.Join(fc.dir, group), fc.logger())
 			// The file is gone: later facts in this group must miss, as they
 			// would if they re-read the cache.
 			reads[group] = groupRead{}
@@ -153,7 +170,7 @@ func cacheDataHasKeyMatchingFact(data map[string]any, name string) bool {
 	return false
 }
 
-func externalFactInCustomGroup(fact ResolvedFact, group string) bool {
+func externalFactInCustomGroup(fact ResolvedFact, group string, log *slog.Logger) bool {
 	if fact.Type != "file" || fact.File == "" {
 		return false
 	}
@@ -161,7 +178,7 @@ func externalFactInCustomGroup(fact ResolvedFact, group string) bool {
 	if group == factName {
 		return false
 	}
-	reportError(fmt.Sprintf("Cannot cache '%s' fact from '%s' group. Caching custom group is not supported for external facts.", factName, group))
+	log.Error(fmt.Sprintf("Cannot cache '%s' fact from '%s' group. Caching custom group is not supported for external facts.", factName, group))
 	return true
 }
 
@@ -185,7 +202,7 @@ func (fc *FactCache) CacheFacts(facts []ResolvedFact) error {
 		return nil
 	}
 	if err := os.MkdirAll(fc.dir, 0o755); err != nil {
-		if warnCacheWriteFailure(err) {
+		if warnCacheWriteFailure(err, fc.logger()) {
 			return nil
 		}
 		return err
@@ -201,7 +218,7 @@ func (fc *FactCache) CacheFacts(facts []ResolvedFact) error {
 			return err
 		}
 		if err := cacheWriteFile(filepath.Join(fc.dir, group), encoded, 0o600); err != nil {
-			if warnCacheWriteFailure(err) {
+			if warnCacheWriteFailure(err, fc.logger()) {
 				return nil
 			}
 			return err
@@ -210,11 +227,11 @@ func (fc *FactCache) CacheFacts(facts []ResolvedFact) error {
 	return nil
 }
 
-func warnCacheWriteFailure(err error) bool {
+func warnCacheWriteFailure(err error, log *slog.Logger) bool {
 	if !errors.Is(err, os.ErrPermission) {
 		return false
 	}
-	warn(fmt.Sprintf("Could not write cache: %v", err))
+	log.Warn(fmt.Sprintf("Could not write cache: %v", err))
 	return true
 }
 
@@ -278,26 +295,26 @@ func (fc *FactCache) shouldWriteCache(group string, ttl time.Duration, data map[
 		_ = os.Remove(path)
 		return true
 	}
-	return !cacheContainsFacts(path, data)
+	return !cacheContainsFacts(path, data, fc.logger())
 }
 
-func cacheContainsFacts(path string, data map[string]any) bool {
+func cacheContainsFacts(path string, data map[string]any, log *slog.Logger) bool {
 	existing, err := os.ReadFile(path)
 	if err != nil {
 		return false
 	}
 	var decoded any
 	if err := json.Unmarshal(existing, &decoded); err != nil {
-		debug(fmt.Sprintf("Failed to read cache file %s. Detail: %v", path, err))
+		log.Debug(fmt.Sprintf("Failed to read cache file %s. Detail: %v", path, err))
 		return false
 	}
 	if decoded == nil {
-		debug(fmt.Sprintf("No keys found in %s. Detail: cached data is nil", path))
+		log.Debug(fmt.Sprintf("No keys found in %s. Detail: cached data is nil", path))
 		return false
 	}
 	cached, ok := decoded.(map[string]any)
 	if !ok {
-		debug(fmt.Sprintf("No keys found in %s. Detail: cached data has no object keys", path))
+		log.Debug(fmt.Sprintf("No keys found in %s. Detail: cached data has no object keys", path))
 		return false
 	}
 	for key := range data {
@@ -316,19 +333,19 @@ func (fc *FactCache) readCache(group string) (map[string]any, bool) {
 	}
 	var decoded map[string]any
 	if err := json.Unmarshal(data, &decoded); err != nil {
-		deleteCacheFile(path)
+		deleteCacheFile(path, fc.logger())
 		return nil, false
 	}
 	if decoded["cache_format_version"] != float64(cacheFormatVersion) {
-		deleteCacheFile(path)
+		deleteCacheFile(path, fc.logger())
 		return nil, false
 	}
 	return decoded, true
 }
 
-func deleteCacheFile(path string) {
+func deleteCacheFile(path string, log *slog.Logger) {
 	if err := cacheRemove(path); err != nil {
-		warn(fmt.Sprintf("Could not delete cache: %v", err))
+		log.Warn(fmt.Sprintf("Could not delete cache: %v", err))
 	}
 }
 
