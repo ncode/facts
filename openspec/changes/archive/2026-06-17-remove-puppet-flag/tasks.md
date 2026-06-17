@@ -39,4 +39,4 @@
 - [x] 6.1 `rtk go test ./...` and `rtk go test -race ./...` pass; `go vet ./...` and gofmt clean
 - [x] 6.2 External-fact and formatter/output-contract tests pass unmodified (proof the surviving contracts are untouched)
 - [x] 6.3 `openspec validate remove-puppet-flag --strict` passes; archive after merge and sync the three spec deltas to `openspec/specs/`
-- [ ] 6.4 All platform CI gates green on the final commit
+- [x] 6.4 All platform CI gates green on the final commit (PR #7, 22/22 checks)
