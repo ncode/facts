@@ -29,6 +29,3 @@ The repository SHALL provide a migration guide stating that Facts reads no `.rb`
 - **WHEN** an operator with existing Ruby custom facts evaluates Facts
 - **THEN** `docs/CUSTOM_FACT_MIGRATION.md` MUST state that `.rb` fact files are not read, reference ADR-0006 for the rationale, and map at least: literal `setcode` values to structured-data external facts, command and `Facter::Core::Execution` `setcode` to executable external facts, `confine` to conditional logic inside the executable, and `weight` to single-source-of-truth external facts
 
-#### Scenario: Puppet plugin deviation is documented
-- **WHEN** an operator reads the migration guide or the man page
-- **THEN** the documented deviation that `facter --puppet` does not load Puppet Ruby plugin custom facts MUST appear there (formerly documented in the deleted DSL contract document)

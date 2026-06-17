@@ -55,11 +55,11 @@ func TestValidateOptions_rejectsInvalidPairs(t *testing.T) {
 }
 
 func TestValidateOptions_rejectsDuplicateCanonicalOptions(t *testing.T) {
-	err := ValidateOptions([]string{"--puppet", "-p"})
+	err := ValidateOptions([]string{"--json", "-j"})
 	if err == nil {
 		t.Fatal("ValidateOptions() err = nil, want duplicate option error")
 	}
-	if got, want := err.Error(), "option --puppet cannot be specified more than once."; got != want {
+	if got, want := err.Error(), "option --json cannot be specified more than once."; got != want {
 		t.Fatalf("ValidateOptions() err = %q, want %q", got, want)
 	}
 }
@@ -86,7 +86,7 @@ func TestValidateOptions_rejectsRemovedCustomFactOptions(t *testing.T) {
 }
 
 func TestValidateOptions_rejectsUnknownConcatenatedShortOption(t *testing.T) {
-	args := PrepareArguments([]string{"-pjdtz"})
+	args := PrepareArguments([]string{"-jdtz"})
 	err := ValidateOptions(args)
 	if err == nil {
 		t.Fatal("ValidateOptions() err = nil, want unknown option error")

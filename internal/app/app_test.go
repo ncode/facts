@@ -98,7 +98,6 @@ func TestRun_helpListsSupportedCompatibilityOptions(t *testing.T) {
 		"-d [--debug]",
 		"[--external-dir]",
 		"[--no-external-facts]",
-		"-p [--puppet]",
 		"[--strict]",
 		"-t [--timing]",
 		"--version, -v",
@@ -598,83 +597,6 @@ func TestRun_timingPrintsResolutionDuration(t *testing.T) {
 	}
 }
 
-func TestRun_acceptsNoPuppetCompatibilityFlag(t *testing.T) {
-	var stdout, stderr bytes.Buffer
-
-	if err := Run(&stdout, &stderr, []string{"--no-puppet", "facterversion"}); err != nil {
-		t.Fatal(err)
-	}
-	if got, want := stdout.String(), engine.Version+"\n"; got != want {
-		t.Fatalf("stdout = %q, want %q", got, want)
-	}
-	if stderr.Len() != 0 {
-		t.Fatalf("stderr = %q, want empty", stderr.String())
-	}
-}
-
-func TestRun_puppetDoesNotLoadPuppetVersionFact(t *testing.T) {
-	dir := t.TempDir()
-	puppet := filepath.Join(dir, "puppet")
-	content := "#!/bin/sh\nprintf '8.10.0\\n'\n"
-	if runtime.GOOS == "windows" {
-		puppet += ".bat"
-		content = "@echo off\r\necho 8.10.0\r\n"
-	}
-	if err := os.WriteFile(puppet, []byte(content), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", dir)
-	var stdout, stderr bytes.Buffer
-
-	if err := Run(&stdout, &stderr, []string{"--puppet", "puppetversion"}); err != nil {
-		t.Fatal(err)
-	}
-	if got, want := stdout.String(), ""; got != want {
-		t.Fatalf("stdout = %q, want %q", got, want)
-	}
-	if stderr.Len() != 0 {
-		t.Fatalf("stderr = %q, want empty", stderr.String())
-	}
-}
-
-func TestRun_puppetSearchesPluginFactDestAndWarnsAboutRubyPluginFacts(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("Windows default Puppet cache is ProgramData; dir resolution covered by internal/engine tests")
-	}
-	if os.Geteuid() == 0 {
-		t.Skip("root resolves the system Puppet cache; dir resolution covered by internal/engine tests")
-	}
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("PATH", t.TempDir())
-	cache := filepath.Join(home, ".puppetlabs", "opt", "puppet", "cache")
-	factsD := filepath.Join(cache, "facts.d")
-	if err := os.MkdirAll(factsD, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(factsD, "synced.txt"), []byte("pluginfact=from-puppet\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	libFacter := filepath.Join(cache, "lib", "facter")
-	if err := os.MkdirAll(libFacter, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(libFacter, "synced.rb"), []byte("Facter.add(:x)\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	var stdout, stderr bytes.Buffer
-
-	if err := Run(&stdout, &stderr, []string{"--puppet", "--no-cache", "pluginfact"}); err != nil {
-		t.Fatal(err)
-	}
-	if got, want := stdout.String(), "from-puppet\n"; got != want {
-		t.Fatalf("stdout = %q, want %q", got, want)
-	}
-	if !strings.Contains(stderr.String(), "Ruby plugin custom facts") {
-		t.Fatalf("stderr = %q, want Ruby plugin custom facts warning", stderr.String())
-	}
-}
-
 func TestRun_rejectsRemovedCustomFactOptions(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -685,6 +607,35 @@ func TestRun_rejectsRemovedCustomFactOptions(t *testing.T) {
 		{name: "no ruby", args: []string{"--no-ruby", "facterversion"}, option: "--no-ruby"},
 		{name: "no custom facts", args: []string{"--no-custom-facts", "facterversion"}, option: "--no-custom-facts"},
 		{name: "trace", args: []string{"--trace", "facterversion"}, option: "--trace"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			err := Run(&stdout, &stderr, tt.args)
+			if err == nil {
+				t.Fatalf("Run(%v) err = nil, want unknown option error", tt.args)
+			}
+			if got, want := err.Error(), "unrecognised option '"+tt.option+"'"; got != want {
+				t.Fatalf("Run(%v) err = %q, want %q", tt.args, got, want)
+			}
+			assertUsageOutput(t, stdout.String())
+			if stderr.Len() != 0 {
+				t.Fatalf("stderr = %q, want empty", stderr.String())
+			}
+		})
+	}
+}
+
+func TestRun_rejectsRemovedPuppetOptions(t *testing.T) {
+	tests := []struct {
+		name   string
+		args   []string
+		option string
+	}{
+		{name: "puppet", args: []string{"--puppet", "facterversion"}, option: "--puppet"},
+		{name: "puppet short", args: []string{"-p", "facterversion"}, option: "-p"},
+		{name: "no puppet", args: []string{"--no-puppet", "facterversion"}, option: "--no-puppet"},
 	}
 
 	for _, tt := range tests {
@@ -1513,10 +1464,10 @@ func TestRun_concatenatedShortTimingAndDebugFlags(t *testing.T) {
 	}
 }
 
-func TestRun_concatenatedShortPuppetJSONDebugAndTimingFlags(t *testing.T) {
+func TestRun_concatenatedShortJSONDebugAndTimingFlags(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
-	if err := Run(&stdout, &stderr, []string{"-pjdt", "os.name"}); err != nil {
+	if err := Run(&stdout, &stderr, []string{"-jdt", "os.name"}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(stdout.String(), "\"os.name\"") {
@@ -1533,57 +1484,12 @@ func TestRun_concatenatedShortPuppetJSONDebugAndTimingFlags(t *testing.T) {
 func TestRun_concatenatedShortFlagsRejectUnknownOption(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
-	err := Run(&stdout, &stderr, []string{"-pjdtz"})
+	err := Run(&stdout, &stderr, []string{"-jdtz"})
 	if err == nil {
 		t.Fatal("Run() err = nil, want unknown option")
 	}
 	if !strings.Contains(err.Error(), "unrecognised option '-z'") {
 		t.Fatalf("Run() err = %q, want unknown -z option", err)
-	}
-	assertUsageOutput(t, stdout.String())
-}
-
-func TestRun_rejectsConflictingPuppetCompatibilityOptions(t *testing.T) {
-	tests := []struct {
-		name     string
-		args     []string
-		wantText string
-	}{
-		{
-			name:     "no puppet",
-			args:     []string{"--puppet", "--no-puppet", "os.name"},
-			wantText: "--puppet and --no-puppet options conflict",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var stdout, stderr bytes.Buffer
-
-			err := Run(&stdout, &stderr, tt.args)
-			if err == nil {
-				t.Fatal("Run() err = nil, want conflicting option error")
-			}
-			if !strings.Contains(err.Error(), tt.wantText) {
-				t.Fatalf("Run() err = %q, want %q", err, tt.wantText)
-			}
-			assertUsageOutput(t, stdout.String())
-			if stderr.Len() != 0 {
-				t.Fatalf("stderr = %q, want empty", stderr.String())
-			}
-		})
-	}
-}
-
-func TestRun_rejectsDuplicatedPuppetOptions(t *testing.T) {
-	var stdout, stderr bytes.Buffer
-
-	err := Run(&stdout, &stderr, []string{"--puppet", "-p", "os.name"})
-	if err == nil {
-		t.Fatal("Run() err = nil, want duplicated option error")
-	}
-	if !strings.Contains(err.Error(), "option --puppet cannot be specified more than once") {
-		t.Fatalf("Run() err = %q, want duplicated option error", err)
 	}
 	assertUsageOutput(t, stdout.String())
 }
