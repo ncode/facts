@@ -133,7 +133,7 @@ func (e *Engine) Discover(ctx context.Context, queries ...string) (*Snapshot, er
 
 	if e.cfg.ConfigFile != "" || e.cfg.SystemDefaults {
 		configFile := e.cfg.ConfigFile
-		config, err := ParseConfig(configFile)
+		config, err := ParseConfig(configFile, s.logger)
 		if err != nil {
 			failures = append(failures, err)
 		} else {
@@ -155,7 +155,7 @@ func (e *Engine) Discover(ctx context.Context, queries ...string) (*Snapshot, er
 		if err := ctx.Err(); err != nil {
 			failures = append(failures, err)
 		}
-		return newSnapshot(facts), errors.Join(failures...)
+		return newSnapshot(facts, s.logger), errors.Join(failures...)
 	}
 
 	var externalFacts []ResolvedFact
@@ -177,7 +177,7 @@ func (e *Engine) Discover(ctx context.Context, queries ...string) (*Snapshot, er
 			loader.includeEnv = true
 			loaded, err := loader.load()
 			if err != nil {
-				return newSnapshot(nil), err
+				return newSnapshot(nil, s.logger), err
 			}
 			externalFacts = loaded
 		} else {
@@ -226,7 +226,7 @@ func (e *Engine) Discover(ctx context.Context, queries ...string) (*Snapshot, er
 	facts = FilterBlockedFacts(facts, blocked)
 
 	if e.cfg.UseCache && ctx.Err() == nil {
-		cache := NewFactCache(DefaultCachePath(), ttls, cacheGroups)
+		cache := NewFactCache(DefaultCachePath(), ttls, cacheGroups, s.logger)
 		remaining, cached := cache.ResolveFacts(facts)
 		if err := cache.CacheFacts(remaining); err != nil {
 			failures = append(failures, err)

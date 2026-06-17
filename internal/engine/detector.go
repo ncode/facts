@@ -3,6 +3,7 @@ package engine
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 )
 
@@ -44,13 +45,17 @@ func ConstructOSHierarchy(hierarchy []any, searchedOS string) []string {
 }
 
 // DetectOSHierarchy returns Ruby's detected OS hierarchy for an identifier.
-func DetectOSHierarchy(hierarchy []any, identifier, family string) []string {
+// Fallback diagnostics are emitted to log; pass a discard logger to ignore them.
+func DetectOSHierarchy(hierarchy []any, identifier, family string, log *slog.Logger) []string {
+	if log == nil {
+		log = slog.New(slog.DiscardHandler)
+	}
 	resolved := ConstructOSHierarchy(hierarchy, identifier)
 	if len(resolved) > 0 {
 		return resolved
 	}
 
-	debug("Could not detect hierarchy using os identifier: " + identifier + " , trying with family")
+	log.Debug("Could not detect hierarchy using os identifier: " + identifier + " , trying with family")
 	for candidate := range strings.FieldsSeq(family) {
 		resolved = ConstructOSHierarchy(hierarchy, candidate)
 		if len(resolved) > 0 {
@@ -58,7 +63,7 @@ func DetectOSHierarchy(hierarchy []any, identifier, family string) []string {
 		}
 	}
 
-	debug("Could not detect hierarchy using family " + family + ", falling back to Linux")
+	log.Debug("Could not detect hierarchy using family " + family + ", falling back to Linux")
 	return ConstructOSHierarchy(hierarchy, "linux")
 }
 

@@ -127,25 +127,67 @@ func TestCollectionWithDottedFactsKeepsExistingScalarOnNestedCollision(t *testin
 	}
 }
 
-func TestCollectionWithDottedFactsLogsNestedCollisionLikeRubyFactCollection(t *testing.T) {
+// Collisions are reported once at discovery (newSnapshot), not by the formatter
+// path. CollectionWithDottedFacts itself is diagnostic-silent so the formatter
+// and query paths that re-run collection never re-emit.
+func TestNewSnapshotReportsCollisionOnceLikeRubyFactCollection(t *testing.T) {
+	// A scalar fact whose name is also a dotted parent collides in the canonical
+	// tree (includeTypedDotted == false, the shape newSnapshot builds).
+	facts := []ResolvedFact{
+		{Name: "mygroup", Value: "scalar_value"},
+		{Name: "mygroup.fact1", Value: "g1_f1_value", Type: "custom"},
+	}
+	var errors []string
+	logger := captureLogger(nil, nil, &errors)
+
+	_ = newSnapshot(facts, logger)
+
+	wantErrors := []string{"Custom fact `mygroup.fact1` cannot be added to collection. The format of this fact is incompatible with other facts that belong to `mygroup` group"}
+	if !reflect.DeepEqual(errors, wantErrors) {
+		t.Fatalf("errors = %#v, want %#v", errors, wantErrors)
+	}
+}
+
+// The canonical tree (includeTypedDotted == false, the shape newSnapshot
+// builds) stores prefix-related typed facts as flat keys, so they do NOT
+// collide at discovery — both survive. The same pair DOES collide only when
+// --force-dot-resolution expands them (see
+// TestCollectionWithDottedFactsKeepsExistingScalarOnNestedCollision). That
+// format-time-only collision is deliberately out of scope for discovery-time
+// diagnostics: the canonical tree the Snapshot exposes has no collision, and
+// surfacing the force-dot drop is a separate output-contract concern.
+func TestNewSnapshotDoesNotReportFormatTimeOnlyCollision(t *testing.T) {
 	facts := []ResolvedFact{
 		{Name: "mygroup.fact1", Value: "g1_f1_value", Type: "custom"},
 		{Name: "mygroup.fact1.subfact1", Value: "g1_sg1_f1_value", Type: "custom"},
 	}
 	var errors []string
-	SetErrorHandler(func(message string) {
-		errors = append(errors, message)
-	})
-	t.Cleanup(func() { SetErrorHandler(nil) })
+	logger := captureLogger(nil, nil, &errors)
 
-	got := CollectionWithDottedFacts(facts, true)
+	snap := newSnapshot(facts, logger)
 
-	wantCollection := map[string]any{"mygroup": map[string]any{"fact1": "g1_f1_value"}}
-	if !reflect.DeepEqual(got, wantCollection) {
-		t.Fatalf("CollectionWithDottedFacts() = %#v, want %#v", got, wantCollection)
+	if len(errors) != 0 {
+		t.Fatalf("errors = %#v, want none (no canonical-tree collision)", errors)
 	}
-	wantErrors := []string{"Custom fact `mygroup.fact1.subfact1` cannot be added to collection. The format of this fact is incompatible with other facts that belong to `mygroup` group"}
-	if !reflect.DeepEqual(errors, wantErrors) {
-		t.Fatalf("errors = %#v, want %#v", errors, wantErrors)
+	wantTree := map[string]any{
+		"mygroup.fact1":          "g1_f1_value",
+		"mygroup.fact1.subfact1": "g1_sg1_f1_value",
+	}
+	if !reflect.DeepEqual(snap.tree, wantTree) {
+		t.Fatalf("tree = %#v, want %#v (both facts present as flat keys)", snap.tree, wantTree)
+	}
+}
+
+// The formatter/query path re-runs collection on every render and must stay
+// silent: it returns the merged collection without reporting collisions.
+func TestCollectionWithDottedFactsIsSilentOnCollision(t *testing.T) {
+	facts := []ResolvedFact{
+		{Name: "mygroup.fact1", Value: "g1_f1_value", Type: "custom"},
+		{Name: "mygroup.fact1.subfact1", Value: "g1_sg1_f1_value", Type: "custom"},
+	}
+	got := CollectionWithDottedFacts(facts, true)
+	want := map[string]any{"mygroup": map[string]any{"fact1": "g1_f1_value"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("CollectionWithDottedFacts() = %#v, want %#v", got, want)
 	}
 }

@@ -250,10 +250,10 @@ func TestLoadExternalFacts_reportsBlockedFilesLikeRubyDirectoryLoader(t *testing
 	}
 
 	var debugMessages []string
-	SetDebugHandler(func(message string) { debugMessages = append(debugMessages, message) })
-	t.Cleanup(func() { SetDebugHandler(nil) })
+	s := NewSession()
+	s.logger = captureLogger(&debugMessages, nil, nil)
 
-	got, err := LoadExternalFactsWithBlocklist(testSession, []string{dir}, map[string]bool{"data.yaml": true})
+	got, err := LoadExternalFactsWithBlocklist(s, []string{dir}, map[string]bool{"data.yaml": true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -276,10 +276,10 @@ func TestLoadExternalFacts_reportsIgnoredBackupFilesLikeRubyDirectoryLoader(t *t
 	}
 
 	var debugMessages []string
-	SetDebugHandler(func(message string) { debugMessages = append(debugMessages, message) })
-	t.Cleanup(func() { SetDebugHandler(nil) })
+	s := NewSession()
+	s.logger = captureLogger(&debugMessages, nil, nil)
 
-	got, err := LoadExternalFacts(testSession, []string{dir})
+	got, err := LoadExternalFacts(s, []string{dir})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -568,12 +568,10 @@ func TestLoadExternalFacts_reportsStructuredFilesWithoutKeyValueData(t *testing.
 	}
 
 	var messages []string
-	SetErrorHandler(func(message string) {
-		messages = append(messages, message)
-	})
-	t.Cleanup(func() { SetErrorHandler(nil) })
+	s := NewSession()
+	s.logger = captureLogger(nil, nil, &messages)
 
-	got, err := LoadExternalFacts(testSession, []string{dir})
+	got, err := LoadExternalFacts(s, []string{dir})
 	if err != nil {
 		t.Fatalf("LoadExternalFacts(testSession) err = %v, want nil", err)
 	}
@@ -602,12 +600,10 @@ func TestLoadExternalFacts_reportsEmptyStructuredFilesLikeRubyDirectoryLoader(t 
 	}
 
 	var messages []string
-	SetDebugHandler(func(message string) {
-		messages = append(messages, message)
-	})
-	t.Cleanup(func() { SetDebugHandler(nil) })
+	s := NewSession()
+	s.logger = captureLogger(&messages, nil, nil)
 
-	got, err := LoadExternalFacts(testSession, []string{dir})
+	got, err := LoadExternalFacts(s, []string{dir})
 	if err != nil {
 		t.Fatalf("LoadExternalFacts(testSession) err = %v, want nil", err)
 	}
@@ -631,12 +627,10 @@ func TestLoadExternalFacts_reportsUnsupportedVisibleFilesLikeRubyDirectoryLoader
 	}
 
 	var messages []string
-	SetDebugHandler(func(message string) {
-		messages = append(messages, message)
-	})
-	t.Cleanup(func() { SetDebugHandler(nil) })
+	s := NewSession()
+	s.logger = captureLogger(&messages, nil, nil)
 
-	got, err := LoadExternalFacts(testSession, []string{dir})
+	got, err := LoadExternalFacts(s, []string{dir})
 	if err != nil {
 		t.Fatalf("LoadExternalFacts(testSession) err = %v, want nil", err)
 	}
@@ -659,10 +653,10 @@ func TestLoadExternalFacts_skipsRubyFactFileWithWarningNamingTheFile(t *testing.
 	}
 
 	var warnings []string
-	SetWarningHandler(func(message string) { warnings = append(warnings, message) })
-	t.Cleanup(func() { SetWarningHandler(nil) })
+	s := NewSession()
+	s.logger = captureLogger(nil, &warnings, nil)
 
-	got, err := LoadExternalFacts(testSession, []string{dir})
+	got, err := LoadExternalFacts(s, []string{dir})
 	if err != nil {
 		t.Fatalf("LoadExternalFacts(testSession) err = %v, want nil", err)
 	}
@@ -1102,14 +1096,9 @@ func TestLoadExternalFacts_windowsPowerShellWarnsWithRubyCommand(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	t.Cleanup(func() {
-		SetWarningHandler(nil)
-	})
-
 	warnings := []string{}
-	SetWarningHandler(func(message string) {
-		warnings = append(warnings, message)
-	})
+	s := NewSession()
+	s.logger = captureLogger(nil, &warnings, nil)
 	host := &fakeExternalFactLoaderHost{
 		goosValue:        "windows",
 		env:              []string{},
@@ -1120,7 +1109,7 @@ func TestLoadExternalFacts_windowsPowerShellWarnsWithRubyCommand(t *testing.T) {
 	}
 
 	got, err := externalFactLoader{
-		s:          testSession,
+		s:          s,
 		mode:       externalFactLoaderCLI,
 		dirs:       []string{dir},
 		host:       host,
@@ -1203,12 +1192,10 @@ func TestLoadExternalFacts_executableWarnsWhenCommandWritesStderr(t *testing.T) 
 		t.Fatal(err)
 	}
 	warnings := []string{}
-	SetWarningHandler(func(message string) {
-		warnings = append(warnings, message)
-	})
-	t.Cleanup(func() { SetWarningHandler(nil) })
+	s := NewSession()
+	s.logger = captureLogger(nil, &warnings, nil)
 
-	got, err := LoadExternalFacts(testSession, []string{dir})
+	got, err := LoadExternalFacts(s, []string{dir})
 	if err != nil {
 		t.Fatal(err)
 	}

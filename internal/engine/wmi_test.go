@@ -40,7 +40,7 @@ func TestWindowsWMIOutput_fallsBackToPowerShellCIMWhenWmicIsMissing(t *testing.T
 		}
 	}
 
-	memory := parseWindowsMemory(windowsWMIOutput(run, "os", "FreePhysicalMemory,TotalVisibleMemorySize"))
+	memory := parseWindowsMemory(windowsWMIOutput(run, "os", "FreePhysicalMemory,TotalVisibleMemorySize"), discardLog())
 	if memory.TotalBytes == 0 {
 		t.Fatalf("memory = %+v, want parsed CIM fallback values", memory)
 	}

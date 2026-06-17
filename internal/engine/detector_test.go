@@ -60,12 +60,9 @@ func TestDetectOSHierarchyFallsBackToLinuxWhenDistroAndFamilyAreUnknownLikeRubyD
 		"Windows",
 	}
 	debugMessages := []string{}
-	SetDebugHandler(func(message string) {
-		debugMessages = append(debugMessages, message)
-	})
-	t.Cleanup(func() { SetDebugHandler(nil) })
+	logger := captureLogger(&debugMessages, nil, nil)
 
-	got := DetectOSHierarchy(hierarchy, "my_linux_distro", "")
+	got := DetectOSHierarchy(hierarchy, "my_linux_distro", "", logger)
 	want := []string{"Linux"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("DetectOSHierarchy() = %#v, want %#v", got, want)
@@ -87,12 +84,9 @@ func TestDetectOSHierarchyUsesFirstKnownFamilyLikeRubyDetector(t *testing.T) {
 		}},
 	}
 	debugMessages := []string{}
-	SetDebugHandler(func(message string) {
-		debugMessages = append(debugMessages, message)
-	})
-	t.Cleanup(func() { SetDebugHandler(nil) })
+	logger := captureLogger(&debugMessages, nil, nil)
 
-	got := DetectOSHierarchy(hierarchy, "my_linux_distro", "Rhel centos fedora")
+	got := DetectOSHierarchy(hierarchy, "my_linux_distro", "Rhel centos fedora", logger)
 	want := []string{"Linux", "El", "Centos"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("DetectOSHierarchy() = %#v, want %#v", got, want)

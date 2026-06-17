@@ -13,7 +13,7 @@ func TestSafeRead_returnsFileContent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, ok := safeRead(path, "")
+	got, ok := safeRead(path, "", discardLog())
 	if !ok {
 		t.Fatal("safeRead() ok = false, want true")
 	}
@@ -25,7 +25,7 @@ func TestSafeRead_returnsFileContent(t *testing.T) {
 func TestSafeRead_returnsDefaultForUnreadablePath(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "missing.txt")
 
-	got, ok := safeRead(path, "default")
+	got, ok := safeRead(path, "default", discardLog())
 	if ok {
 		t.Fatal("safeRead() ok = true, want false")
 	}
@@ -37,12 +37,9 @@ func TestSafeRead_returnsDefaultForUnreadablePath(t *testing.T) {
 func TestSafeRead_logsDebugForUnreadablePathLikeRubyFileHelper(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "missing.txt")
 	var messages []string
-	SetDebugHandler(func(message string) {
-		messages = append(messages, message)
-	})
-	t.Cleanup(func() { SetDebugHandler(nil) })
+	logger := captureLogger(&messages, nil, nil)
 
-	got, ok := safeRead(path, "default")
+	got, ok := safeRead(path, "default", logger)
 
 	if ok {
 		t.Fatal("safeRead() ok = true, want false")
@@ -62,7 +59,7 @@ func TestSafeReadLines_returnsFileLines(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, ok := safeReadLines(path, nil)
+	got, ok := safeReadLines(path, nil, discardLog())
 	if !ok {
 		t.Fatal("safeReadLines() ok = false, want true")
 	}
@@ -78,7 +75,7 @@ func TestSafeReadLines_preservesFinalLineWithoutNewline(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, ok := safeReadLines(path, nil)
+	got, ok := safeReadLines(path, nil, discardLog())
 	if !ok {
 		t.Fatal("safeReadLines() ok = false, want true")
 	}
@@ -92,7 +89,7 @@ func TestSafeReadLines_returnsDefaultForUnreadablePath(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "missing.txt")
 	want := []string{"default"}
 
-	got, ok := safeReadLines(path, want)
+	got, ok := safeReadLines(path, want, discardLog())
 	if ok {
 		t.Fatal("safeReadLines() ok = true, want false")
 	}
@@ -105,12 +102,9 @@ func TestSafeReadLines_logsDebugForUnreadablePathLikeRubyFileHelper(t *testing.T
 	path := filepath.Join(t.TempDir(), "missing.txt")
 	defaultLines := []string{"default"}
 	var messages []string
-	SetDebugHandler(func(message string) {
-		messages = append(messages, message)
-	})
-	t.Cleanup(func() { SetDebugHandler(nil) })
+	logger := captureLogger(&messages, nil, nil)
 
-	got, ok := safeReadLines(path, defaultLines)
+	got, ok := safeReadLines(path, defaultLines, logger)
 
 	if ok {
 		t.Fatal("safeReadLines() ok = true, want false")

@@ -220,7 +220,7 @@ func TestCurrentWindowsIdentityInfoUsesWhoamiCommands(t *testing.T) {
 		}
 	}
 
-	got := currentWindowsIdentityInfo(run)
+	got := currentWindowsIdentityInfo(run, discardLog())
 	if got.User != `MG93C9IN9WKOITF\Administrator` {
 		t.Fatalf("User = %q, want administrator", got.User)
 	}
@@ -231,15 +231,14 @@ func TestCurrentWindowsIdentityInfoUsesWhoamiCommands(t *testing.T) {
 
 func TestCurrentWindowsIdentityInfoLogsFailureWhenUserCannotResolveLikeRubyResolver(t *testing.T) {
 	debugMessages := []string{}
-	SetDebugHandler(func(message string) { debugMessages = append(debugMessages, message) })
-	t.Cleanup(func() { SetDebugHandler(nil) })
+	logger := captureLogger(&debugMessages, nil, nil)
 
 	got := currentWindowsIdentityInfo(func(name string, args ...string) string {
 		if name != "whoami" || len(args) != 0 {
 			t.Fatalf("run = %s %v, want only whoami", name, args)
 		}
 		return ""
-	})
+	}, logger)
 
 	if got.User != "" {
 		t.Fatalf("User = %q, want empty", got.User)
@@ -508,12 +507,10 @@ func TestNetworkingInterfacesIncludesAddresslessTunnelsLikeRubyResolver(t *testi
 
 func TestNetworkingInterfacesWindowsLogsFailureLikeRubyResolver(t *testing.T) {
 	var messages []string
-	SetDebugHandler(func(message string) {
-		messages = append(messages, message)
-	})
-	t.Cleanup(func() { SetDebugHandler(nil) })
+	s := NewSession()
+	s.logger = captureLogger(&messages, nil, nil)
 
-	got := networkingInterfacesForPlatform(testSession, "windows", func() ([]networkInterfaceSnapshot, error) {
+	got := networkingInterfacesForPlatform(s, "windows", func() ([]networkInterfaceSnapshot, error) {
 		return nil, errors.New("adapter failure")
 	})
 
@@ -930,7 +927,7 @@ func TestCurrentWindowsOSDescriptionMatchesRubyResolver(t *testing.T) {
 func TestCurrentWindowsKernelFactsMatchRubyResolver(t *testing.T) {
 	t.Parallel()
 
-	got := currentWindowsKernelFacts("OtherTypeDescription=\r\nProductType=1\r\nVersion=10.0.22631\r\n")
+	got := currentWindowsKernelFacts("OtherTypeDescription=\r\nProductType=1\r\nVersion=10.0.22631\r\n", discardLog())
 	want := []ResolvedFact{
 		{Name: "kernel", Value: "windows"},
 		{Name: "kernelmajversion", Value: "10.0"},
@@ -944,10 +941,9 @@ func TestCurrentWindowsKernelFactsMatchRubyResolver(t *testing.T) {
 
 func TestCurrentWindowsKernelFactsLogsFailureLikeRubyResolver(t *testing.T) {
 	debugMessages := []string{}
-	SetDebugHandler(func(message string) { debugMessages = append(debugMessages, message) })
-	t.Cleanup(func() { SetDebugHandler(nil) })
+	logger := captureLogger(&debugMessages, nil, nil)
 
-	if got := currentWindowsKernelFacts(""); got != nil {
+	if got := currentWindowsKernelFacts("", logger); got != nil {
 		t.Fatalf("currentWindowsKernelFacts(empty) = %#v, want nil", got)
 	}
 	want := []string{"Calling Windows RtlGetVersion failed"}
@@ -1036,7 +1032,7 @@ func TestCurrentWindowsDMIMatchesRubyResolvers(t *testing.T) {
 		return ""
 	}
 
-	got := currentWindowsDMI("windows", run)
+	got := currentWindowsDMI("windows", run, discardLog())
 	want := windowsDMI{
 		Manufacturer: "VMware, Inc.",
 		SerialNumber: "VMware-42 1a 38 c5 9d 35 5b f1-7a 62 4b 6e cb a0 79 de",
@@ -1050,10 +1046,9 @@ func TestCurrentWindowsDMIMatchesRubyResolvers(t *testing.T) {
 
 func TestCurrentWindowsDMILogsNoResultDiagnosticsLikeRubyResolvers(t *testing.T) {
 	debugMessages := []string{}
-	SetDebugHandler(func(message string) { debugMessages = append(debugMessages, message) })
-	t.Cleanup(func() { SetDebugHandler(nil) })
+	logger := captureLogger(&debugMessages, nil, nil)
 
-	got := currentWindowsDMI("windows", func(string, ...string) string { return "" })
+	got := currentWindowsDMI("windows", func(string, ...string) string { return "" }, logger)
 	if got != (windowsDMI{}) {
 		t.Fatalf("currentWindowsDMI(empty WMI) = %#v, want empty DMI", got)
 	}
@@ -1076,7 +1071,7 @@ func TestParseWindowsProcessorsMatchesRubyResolver(t *testing.T) {
 		"NumberOfCores=2",
 	}, "\r\n")
 
-	got := parseWindowsProcessors(input)
+	got := parseWindowsProcessors(input, discardLog())
 	want := processorInfo{
 		ISA:            "x86",
 		Models:         []string{"Pretty_Name"},
@@ -1116,7 +1111,7 @@ func TestParseWindowsProcessorsUsesRubyISATable(t *testing.T) {
 				"NumberOfCores=2",
 			}, "\r\n")
 
-			got := parseWindowsProcessors(input)
+			got := parseWindowsProcessors(input, discardLog())
 			if got.ISA != tt.want {
 				t.Fatalf("ISA = %q, want %q", got.ISA, tt.want)
 			}
@@ -1139,7 +1134,7 @@ func TestParseWindowsProcessorsFallsBackWhenLogicalCountIsZero(t *testing.T) {
 		"NumberOfCores=2",
 	}, "\r\n")
 
-	got := parseWindowsProcessors(input)
+	got := parseWindowsProcessors(input, discardLog())
 	want := processorInfo{
 		ISA:            "x86",
 		Models:         []string{"Pretty_Name", "Awesome_Name"},
@@ -1155,10 +1150,9 @@ func TestParseWindowsProcessorsFallsBackWhenLogicalCountIsZero(t *testing.T) {
 
 func TestParseWindowsProcessorsLogsUnknownArchitectureLikeRubyResolver(t *testing.T) {
 	debugMessages := []string{}
-	SetDebugHandler(func(message string) { debugMessages = append(debugMessages, message) })
-	t.Cleanup(func() { SetDebugHandler(nil) })
+	logger := captureLogger(&debugMessages, nil, nil)
 
-	got := parseWindowsProcessors("Name=Pretty_Name\r\nArchitecture=10\r\nNumberOfLogicalProcessors=2\r\nNumberOfCores=2\r\n")
+	got := parseWindowsProcessors("Name=Pretty_Name\r\nArchitecture=10\r\nNumberOfLogicalProcessors=2\r\nNumberOfCores=2\r\n", logger)
 	if got.ISA != "" {
 		t.Fatalf("ISA = %q, want empty for unknown architecture", got.ISA)
 	}
@@ -1180,7 +1174,7 @@ func TestCurrentWindowsProcessorsQueriesWMIC(t *testing.T) {
 			t.Fatalf("wmic args = %#v, want %#v", args, wantArgs)
 		}
 		return "Name=Pretty_Name\r\nArchitecture=0\r\nNumberOfLogicalProcessors=2\r\nNumberOfCores=2\r\n"
-	})
+	}, discardLog())
 
 	if got.LogicalCount != 2 || got.PhysicalCount != 1 || got.CoresPerSocket != 2 || got.ThreadsPerCore != 1 {
 		t.Fatalf("currentWindowsProcessors() = %#v, want Ruby-compatible counts", got)
@@ -1195,10 +1189,9 @@ func TestCurrentWindowsProcessorsQueriesWMIC(t *testing.T) {
 
 func TestCurrentWindowsProcessorsLogsNoResultDiagnosticsLikeRubyResolver(t *testing.T) {
 	debugMessages := []string{}
-	SetDebugHandler(func(message string) { debugMessages = append(debugMessages, message) })
-	t.Cleanup(func() { SetDebugHandler(nil) })
+	logger := captureLogger(&debugMessages, nil, nil)
 
-	got := currentWindowsProcessors("windows", func(string, ...string) string { return "" })
+	got := currentWindowsProcessors("windows", func(string, ...string) string { return "" }, logger)
 	if !reflect.DeepEqual(got, processorInfo{}) {
 		t.Fatalf("currentWindowsProcessors(empty WMI) = %#v, want empty processor info", got)
 	}
@@ -1211,7 +1204,7 @@ func TestCurrentWindowsProcessorsLogsNoResultDiagnosticsLikeRubyResolver(t *test
 func TestParseWindowsProcessorsOmitsUnknownISA(t *testing.T) {
 	t.Parallel()
 
-	got := parseWindowsProcessors("Name=Pretty_Name\r\nArchitecture=10\r\nNumberOfLogicalProcessors=2\r\nNumberOfCores=2\r\n")
+	got := parseWindowsProcessors("Name=Pretty_Name\r\nArchitecture=10\r\nNumberOfLogicalProcessors=2\r\nNumberOfCores=2\r\n", discardLog())
 	if got.ISA != "" {
 		t.Fatalf("ISA = %q, want empty for unknown architecture", got.ISA)
 	}
@@ -1223,7 +1216,7 @@ func TestCurrentWindowsProcessorsSkipsNonWindows(t *testing.T) {
 	got := currentWindowsProcessors("linux", func(string, ...string) string {
 		t.Fatal("currentWindowsProcessors(non-windows) ran command")
 		return ""
-	})
+	}, discardLog())
 	if !reflect.DeepEqual(got, processorInfo{}) {
 		t.Fatalf("currentWindowsProcessors(linux) = %#v, want empty", got)
 	}
@@ -1382,7 +1375,7 @@ func TestParseWindowsMemoryMatchesRubyResolver(t *testing.T) {
 		"TotalVisibleMemorySize=4096",
 	}, "\n")
 
-	got := parseWindowsMemory(input)
+	got := parseWindowsMemory(input, discardLog())
 	want := windowsMemory{
 		TotalBytes:     4096 * 1024,
 		AvailableBytes: 1024 * 1024,
@@ -1402,7 +1395,7 @@ func TestParseWindowsMemoryRejectsZeroValues(t *testing.T) {
 		"FreePhysicalMemory=0\nTotalVisibleMemorySize=4096\n",
 		"FreePhysicalMemory=bad\nTotalVisibleMemorySize=4096\n",
 	} {
-		if got := parseWindowsMemory(input); got != (windowsMemory{}) {
+		if got := parseWindowsMemory(input, discardLog()); got != (windowsMemory{}) {
 			t.Fatalf("parseWindowsMemory(%q) = %#v, want empty", input, got)
 		}
 	}
@@ -1410,12 +1403,9 @@ func TestParseWindowsMemoryRejectsZeroValues(t *testing.T) {
 
 func TestParseWindowsMemoryLogsZeroValueDiagnosticLikeRubyResolver(t *testing.T) {
 	var messages []string
-	SetDebugHandler(func(message string) {
-		messages = append(messages, message)
-	})
-	t.Cleanup(func() { SetDebugHandler(nil) })
+	logger := captureLogger(&messages, nil, nil)
 
-	got := parseWindowsMemory("FreePhysicalMemory=1024\nTotalVisibleMemorySize=0\n")
+	got := parseWindowsMemory("FreePhysicalMemory=1024\nTotalVisibleMemorySize=0\n", logger)
 	if got != (windowsMemory{}) {
 		t.Fatalf("parseWindowsMemory() = %#v, want empty", got)
 	}
@@ -1428,12 +1418,9 @@ func TestParseWindowsMemoryLogsZeroValueDiagnosticLikeRubyResolver(t *testing.T)
 
 func TestParseWindowsMemoryLogsFailureDiagnosticLikeRubyResolver(t *testing.T) {
 	var messages []string
-	SetDebugHandler(func(message string) {
-		messages = append(messages, message)
-	})
-	t.Cleanup(func() { SetDebugHandler(nil) })
+	logger := captureLogger(&messages, nil, nil)
 
-	got := parseWindowsMemory("")
+	got := parseWindowsMemory("", logger)
 	if got != (windowsMemory{}) {
 		t.Fatalf("parseWindowsMemory() = %#v, want empty", got)
 	}
@@ -1451,7 +1438,7 @@ func TestCurrentWindowsMemoryRunsOnlyOnWindows(t *testing.T) {
 	got := currentWindowsMemory("linux", func(name string, args ...string) string {
 		called = true
 		return ""
-	})
+	}, discardLog())
 	if got != (windowsMemory{}) {
 		t.Fatalf("currentWindowsMemory(non-windows) = %#v, want empty", got)
 	}
@@ -1854,7 +1841,7 @@ func TestCurrentProcessorInfoWiresFreeBSDSysctlOutput(t *testing.T) {
 		}
 	}
 
-	got := currentProcessorInfo("freebsd", run)
+	got := currentProcessorInfo("freebsd", run, discardLog())
 	wantModels := []string{
 		"Intel(r) Xeon(r) Gold 6138 CPU @ 2.00GHz",
 		"Intel(r) Xeon(r) Gold 6138 CPU @ 2.00GHz",
@@ -3225,12 +3212,11 @@ func TestHostnameFactValuesExposeNilDomainForShortLinuxHostnameLikeRubyResolver(
 
 func TestHostNameFromLookupReturnsNilValueWhenLookupFailsLikeRubyResolver(t *testing.T) {
 	debugMessages := []string{}
-	SetDebugHandler(func(message string) { debugMessages = append(debugMessages, message) })
-	t.Cleanup(func() { SetDebugHandler(nil) })
+	logger := captureLogger(&debugMessages, nil, nil)
 
 	hostname, value := hostNameFromLookup(func() (string, error) {
 		return "", errors.New("hostname unavailable")
-	})
+	}, logger)
 
 	if hostname != "" {
 		t.Fatalf("hostname = %q, want empty internal fallback", hostname)
@@ -3248,6 +3234,7 @@ func TestLinuxHostNameFromLookupsFallsBackWhenPrimaryLookupIsEmptyLikeRubyResolv
 	hostname, value := linuxHostNameFromLookups(
 		func() (string, error) { return "", nil },
 		func() string { return "kernel-host" },
+		discardLog(),
 	)
 
 	if hostname != "kernel-host" {
@@ -3262,6 +3249,7 @@ func TestLinuxHostNameFromLookupsFallsBackWhenPrimaryLookupReturnsZeroAddressLik
 	hostname, value := linuxHostNameFromLookups(
 		func() (string, error) { return "0.0.0.0", nil },
 		func() string { return "kernel-host" },
+		discardLog(),
 	)
 
 	if hostname != "kernel-host" {
@@ -3455,7 +3443,7 @@ func TestCurrentProcessorInfoDarwinMatchesRubyMacOSResolver(t *testing.T) {
 			t.Fatalf("command = %s %#v, want sysctl %#v", name, args, wantArgs)
 		}
 		return output
-	})
+	}, discardLog())
 
 	want := processorInfo{
 		SpeedHz:        2_300_000_000,
@@ -6165,10 +6153,10 @@ func TestCurrentWindowsUptimeInfoMarksInvalidWMITimesUnknown(t *testing.T) {
 
 func TestCurrentWindowsUptimeInfoLogsNoResultDiagnosticsLikeRubyResolver(t *testing.T) {
 	debugMessages := []string{}
-	SetDebugHandler(func(message string) { debugMessages = append(debugMessages, message) })
-	t.Cleanup(func() { SetDebugHandler(nil) })
+	s := NewSession()
+	s.logger = captureLogger(&debugMessages, nil, nil)
 
-	got := currentUptimeInfo(testSession, "windows", func(string) ([]byte, error) {
+	got := currentUptimeInfo(s, "windows", func(string) ([]byte, error) {
 		t.Fatal("currentUptimeInfo(testSession, windows) read file, want WMI only")
 		return nil, os.ErrNotExist
 	}, func(string, ...string) string {
@@ -6189,10 +6177,10 @@ func TestCurrentWindowsUptimeInfoLogsNoResultDiagnosticsLikeRubyResolver(t *test
 
 func TestCurrentWindowsUptimeInfoLogsInvalidDurationLikeRubyResolver(t *testing.T) {
 	debugMessages := []string{}
-	SetDebugHandler(func(message string) { debugMessages = append(debugMessages, message) })
-	t.Cleanup(func() { SetDebugHandler(nil) })
+	s := NewSession()
+	s.logger = captureLogger(&debugMessages, nil, nil)
 
-	got := currentUptimeInfo(testSession, "windows", func(string) ([]byte, error) {
+	got := currentUptimeInfo(s, "windows", func(string) ([]byte, error) {
 		t.Fatal("currentUptimeInfo(testSession, windows) read file, want WMI only")
 		return nil, os.ErrNotExist
 	}, func(string, ...string) string {

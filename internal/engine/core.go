@@ -8,6 +8,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
+	"log/slog"
 	"math"
 	"net"
 	"os"
@@ -163,7 +164,7 @@ func buildCoreFacts(s *Session) []ResolvedFact {
 	kernelVersion := kernelVersionFact(runtime.GOOS, kernelRelease, "")
 	kernelMajorVersion := kernelMajorVersionFact(runtime.GOOS, kernelRelease, osRelease)
 	if runtime.GOOS == "windows" {
-		kernelFacts := currentWindowsKernelFacts(s.cachedWindowsOSVersionInput())
+		kernelFacts := currentWindowsKernelFacts(s.cachedWindowsOSVersionInput(), s.logr())
 		for _, fact := range kernelFacts {
 			switch fact.Name {
 			case "kernelrelease":
@@ -297,7 +298,7 @@ func buildCoreFacts(s *Session) []ResolvedFact {
 	facts = append(facts, macOSSystemProfilerEthernetFacts(s.cachedMacOSSystemProfilerEthernet())...)
 	facts = append(facts, windowsSystem32Facts(currentWindowsSystem32(runtime.GOOS, os.Getenv("SystemRoot"), currentWindowsProcessWOW64))...)
 	facts = append(facts, windowsProductReleaseFacts(currentWindowsProductRelease(runtime.GOOS, s.commandOutput))...)
-	facts = append(facts, windowsDMIFacts(currentWindowsDMI(runtime.GOOS, s.commandOutput))...)
+	facts = append(facts, windowsDMIFacts(currentWindowsDMI(runtime.GOOS, s.commandOutput, s.logr()))...)
 	facts = append(facts, currentWindowsHypervisorFacts(s)...)
 	facts = append(facts, sshFactsForPlatformWithPrivilege(runtime.GOOS, identityPrivileged(identity), func() []sshHostKey {
 		return discoverSSHHostKeys(s.readFile)
@@ -1524,7 +1525,7 @@ func networkingInterfacesForPlatform(s *Session, goos string, snapshotProvider f
 	snapshots, err := snapshotProvider()
 	if err != nil {
 		if goos == "windows" {
-			debug("Unable to retrieve networking facts!")
+			s.debug("Unable to retrieve networking facts!")
 		}
 		return nil
 	}
@@ -2721,7 +2722,7 @@ type identityInfo struct {
 
 func identityFact(s *Session) map[string]any {
 	if runtime.GOOS == "windows" {
-		return identityFactFromInfo(runtime.GOOS, currentWindowsIdentityInfo(s.commandOutput))
+		return identityFactFromInfo(runtime.GOOS, currentWindowsIdentityInfo(s.commandOutput, s.logr()))
 	}
 
 	privileged := os.Geteuid() == 0
@@ -2739,14 +2740,14 @@ func identityFact(s *Session) map[string]any {
 	return identityFactFromInfo(runtime.GOOS, info)
 }
 
-func currentWindowsIdentityInfo(run commandRunner) identityInfo {
+func currentWindowsIdentityInfo(run commandRunner, log *slog.Logger) identityInfo {
 	info := identityInfo{}
 	if run == nil {
 		return info
 	}
 	info.User = strings.TrimSpace(run("whoami"))
 	if info.User == "" {
-		debug("failure resolving identity facts: ")
+		log.Debug("failure resolving identity facts: ")
 		return info
 	}
 	if privileged, ok := parseWindowsAdministratorGroups(run("whoami", "/groups")); ok {
@@ -3196,10 +3197,10 @@ func currentWindowsOSDescription(input string) *windowsOSDescription {
 	}
 }
 
-func currentWindowsKernelFacts(input string) []ResolvedFact {
+func currentWindowsKernelFacts(input string, log *slog.Logger) []ResolvedFact {
 	info := parseWindowsOSVersionInfo(input)
 	if info.Version == "" {
-		debug("Calling Windows RtlGetVersion failed")
+		log.Debug("Calling Windows RtlGetVersion failed")
 		return nil
 	}
 	return []ResolvedFact{
@@ -4076,27 +4077,27 @@ type windowsMemory struct {
 	Capacity       string
 }
 
-func currentWindowsMemory(goos string, run commandRunner) windowsMemory {
+func currentWindowsMemory(goos string, run commandRunner, log *slog.Logger) windowsMemory {
 	if goos != "windows" {
 		return windowsMemory{}
 	}
-	return parseWindowsMemory(windowsWMIOutput(run, "os", "FreePhysicalMemory,TotalVisibleMemorySize"))
+	return parseWindowsMemory(windowsWMIOutput(run, "os", "FreePhysicalMemory,TotalVisibleMemorySize"), log)
 }
 
-func parseWindowsMemory(input string) windowsMemory {
+func parseWindowsMemory(input string, log *slog.Logger) windowsMemory {
 	if strings.TrimSpace(input) == "" {
-		debug("Resolving memory facts failed")
+		log.Debug("Resolving memory facts failed")
 		return windowsMemory{}
 	}
 	values := parseWindowsWMIValues(input)
 	totalKB, err := strconv.Atoi(values["TotalVisibleMemorySize"])
 	if err != nil || totalKB <= 0 {
-		debug("Available or Total bytes are zero could not proceed further")
+		log.Debug("Available or Total bytes are zero could not proceed further")
 		return windowsMemory{}
 	}
 	availableKB, err := strconv.Atoi(values["FreePhysicalMemory"])
 	if err != nil || availableKB <= 0 {
-		debug("Available or Total bytes are zero could not proceed further")
+		log.Debug("Available or Total bytes are zero could not proceed further")
 		return windowsMemory{}
 	}
 	totalBytes := totalKB * 1024
@@ -4110,17 +4111,17 @@ func parseWindowsMemory(input string) windowsMemory {
 	}
 }
 
-func currentWindowsProcessors(goos string, run commandRunner) processorInfo {
+func currentWindowsProcessors(goos string, run commandRunner, log *slog.Logger) processorInfo {
 	if goos != "windows" {
 		return processorInfo{}
 	}
-	return parseWindowsProcessors(windowsWMIOutput(run, "cpu", "Name,Architecture,NumberOfLogicalProcessors,NumberOfCores"))
+	return parseWindowsProcessors(windowsWMIOutput(run, "cpu", "Name,Architecture,NumberOfLogicalProcessors,NumberOfCores"), log)
 }
 
-func parseWindowsProcessors(input string) processorInfo {
+func parseWindowsProcessors(input string, log *slog.Logger) processorInfo {
 	records := parseWindowsWMIRecords(input)
 	if len(records) == 0 {
-		debug("WMI query returned no resultsfor Win32_Processor with values Name, Architecture and NumberOfLogicalProcessors.")
+		log.Debug("WMI query returned no resultsfor Win32_Processor with values Name, Architecture and NumberOfLogicalProcessors.")
 		return processorInfo{}
 	}
 
@@ -4133,7 +4134,7 @@ func parseWindowsProcessors(input string) processorInfo {
 	for _, record := range records {
 		info.Models = append(info.Models, record["Name"])
 		if info.ISA == "" {
-			info.ISA = windowsProcessorISA(record["Architecture"])
+			info.ISA = windowsProcessorISA(record["Architecture"], log)
 		}
 		logical, err := strconv.Atoi(record["NumberOfLogicalProcessors"])
 		if err == nil && logical > 0 {
@@ -4158,7 +4159,7 @@ func parseWindowsProcessors(input string) processorInfo {
 	return info
 }
 
-func windowsProcessorISA(architecture string) string {
+func windowsProcessorISA(architecture string, log *slog.Logger) string {
 	switch strings.TrimSpace(architecture) {
 	case "0":
 		return "x86"
@@ -4175,7 +4176,7 @@ func windowsProcessorISA(architecture string) string {
 	case "9":
 		return "x64"
 	default:
-		debug("Unable to determine processor type: unknown architecture")
+		log.Debug("Unable to determine processor type: unknown architecture")
 		return ""
 	}
 }
@@ -4238,17 +4239,17 @@ type windowsDMI struct {
 	ProductUUID  string
 }
 
-func currentWindowsDMI(goos string, run commandRunner) windowsDMI {
+func currentWindowsDMI(goos string, run commandRunner, log *slog.Logger) windowsDMI {
 	if goos != "windows" {
 		return windowsDMI{}
 	}
 	bios := parseWindowsWMIValues(windowsWMIOutput(run, "bios", "Manufacturer,SerialNumber"))
 	product := parseWindowsWMIValues(windowsWMIOutput(run, "computersystemproduct", "Name,UUID"))
 	if len(bios) == 0 {
-		debug("WMI query returned no results for Win32_BIOS with values Manufacturer and SerialNumber.")
+		log.Debug("WMI query returned no results for Win32_BIOS with values Manufacturer and SerialNumber.")
 	}
 	if len(product) == 0 {
-		debug("WMI query returned no results for Win32_ComputerSystemProduct with values Name and UUID.")
+		log.Debug("WMI query returned no results for Win32_ComputerSystemProduct with values Name and UUID.")
 	}
 	return windowsDMI{
 		Manufacturer: bios["Manufacturer"],
@@ -4922,7 +4923,7 @@ func probeSwapEncrypted(s *Session) bool {
 }
 
 func probeWindowsMemory(s *Session) windowsMemory {
-	return currentWindowsMemory(runtime.GOOS, s.commandOutput)
+	return currentWindowsMemory(runtime.GOOS, s.commandOutput, s.logr())
 }
 
 type darwinSwapUsage struct {
@@ -5232,10 +5233,10 @@ func probeProcessorTopology(s *Session) (int, int) {
 }
 
 func probePlatformProcessorInfo(s *Session) processorInfo {
-	return currentProcessorInfo(runtime.GOOS, s.commandOutput)
+	return currentProcessorInfo(runtime.GOOS, s.commandOutput, s.logr())
 }
 
-func currentProcessorInfo(goos string, run func(string, ...string) string) processorInfo {
+func currentProcessorInfo(goos string, run func(string, ...string) string, log *slog.Logger) processorInfo {
 	switch goos {
 	case "darwin":
 		return parseDarwinProcessors(run("sysctl",
@@ -5253,7 +5254,7 @@ func currentProcessorInfo(goos string, run func(string, ...string) string) proce
 			run("sysctl", "-n", "hw.clockrate"),
 		)
 	case "windows":
-		return currentWindowsProcessors(goos, run)
+		return currentWindowsProcessors(goos, run, log)
 	default:
 		return processorInfo{}
 	}
@@ -5538,7 +5539,7 @@ func currentUptime(s *Session, goos string, readFile fileReader, run commandRunn
 
 func currentUptimeInfo(s *Session, goos string, readFile fileReader, run commandRunner, now func() time.Time) uptimeInfo {
 	if goos == "windows" {
-		return currentWindowsUptime(goos, run)
+		return currentWindowsUptime(goos, run, s.logr())
 	}
 	if goos == "linux" {
 		virtual := detectLinuxVirtualization(currentLinuxVirtualizationInputWithCommands(s, run))
@@ -5573,29 +5574,29 @@ func currentPosixUptime(readFile fileReader, run commandRunner, now func() time.
 	return uptimeInfo{}
 }
 
-func currentWindowsUptime(goos string, run commandRunner) uptimeInfo {
+func currentWindowsUptime(goos string, run commandRunner, log *slog.Logger) uptimeInfo {
 	if goos != "windows" {
 		return uptimeInfo{}
 	}
 	values := parseWindowsWMIValues(windowsWMIOutput(run, "os", "LocalDateTime,LastBootUpTime"))
 	if len(values) == 0 {
-		debug("WMI query returned no resultsfor Win32_OperatingSystem with values LocalDateTime and LastBootUpTime.")
-		debug("Unable to determine system uptime!")
+		log.Debug("WMI query returned no resultsfor Win32_OperatingSystem with values LocalDateTime and LastBootUpTime.")
+		log.Debug("Unable to determine system uptime!")
 		return uptimeInfo{}
 	}
 	local, ok := parseWindowsWMITime(values["LocalDateTime"])
 	if !ok {
-		debug("Unable to determine system uptime!")
+		log.Debug("Unable to determine system uptime!")
 		return uptimeInfo{}
 	}
 	boot, ok := parseWindowsWMITime(values["LastBootUpTime"])
 	if !ok {
-		debug("Unable to determine system uptime!")
+		log.Debug("Unable to determine system uptime!")
 		return uptimeInfo{}
 	}
 	uptime := local.Sub(boot)
 	if uptime <= 0 {
-		debug("Unable to determine system uptime!")
+		log.Debug("Unable to determine system uptime!")
 		return uptimeInfo{}
 	}
 	return uptimeInfo{Duration: uptime, Known: true}
@@ -5907,18 +5908,18 @@ func emptyLoadAverages() map[string]any {
 func hostName(s *Session) (string, any) {
 	return hostNameForPlatform(runtime.GOOS, os.Hostname, func() string {
 		return readLinuxKernelHostname(s.readFile)
-	})
+	}, s.logr())
 }
 
-func hostNameForPlatform(goos string, lookup func() (string, error), linuxFallback func() string) (string, any) {
+func hostNameForPlatform(goos string, lookup func() (string, error), linuxFallback func() string, log *slog.Logger) (string, any) {
 	if goos == "linux" {
-		return linuxHostNameFromLookups(lookup, linuxFallback)
+		return linuxHostNameFromLookups(lookup, linuxFallback, log)
 	}
-	return hostNameFromLookup(lookup)
+	return hostNameFromLookup(lookup, log)
 }
 
-func linuxHostNameFromLookups(lookup func() (string, error), fallback func() string) (string, any) {
-	hostname, value := hostNameFromLookup(lookup)
+func linuxHostNameFromLookups(lookup func() (string, error), fallback func() string, log *slog.Logger) (string, any) {
+	hostname, value := hostNameFromLookup(lookup, log)
 	if linuxHostnameUsable(hostname) {
 		return hostname, value
 	}
@@ -5948,10 +5949,10 @@ func readLinuxKernelHostname(readFiles ...fileReader) string {
 	return strings.TrimSpace(string(data))
 }
 
-func hostNameFromLookup(lookup func() (string, error)) (string, any) {
+func hostNameFromLookup(lookup func() (string, error), log *slog.Logger) (string, any) {
 	hostname, err := lookup()
 	if err != nil {
-		debug("Socket.gethostname failed to return hostname")
+		log.Debug("Socket.gethostname failed to return hostname")
 		return "", nil
 	}
 	return hostname, hostname

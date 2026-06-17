@@ -61,7 +61,7 @@ func Run(stdout, stderr io.Writer, args []string) error {
 func factGroups(args []string) ([]engine.FactGroup, error) {
 	groups := engine.BuiltinFactGroups()
 	configPath := configPathFromArgs(args)
-	config, err := engine.ParseConfig(configPath)
+	config, err := engine.ParseConfig(configPath, slog.New(slog.DiscardHandler))
 	if err != nil {
 		return nil, err
 	}
@@ -235,12 +235,6 @@ Format facts as JSON:
 }
 
 func runQuery(stdout, stderr io.Writer, args []string) error {
-	colorWarnings := false
-	engine.SetWarningHandler(func(message string) {
-		writeWarn(stderr, message, colorWarnings)
-	})
-	defer engine.SetWarningHandler(nil)
-
 	flags := flag.NewFlagSet("query", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	jsonOutput := flags.Bool("json", false, "render facts as JSON")
@@ -279,9 +273,14 @@ func runQuery(stdout, stderr io.Writer, args []string) error {
 	}
 	colorOutput := resolveColor(*color, *noColor, stdout)
 	colorDiagnostics := resolveColor(*color, *noColor, stderr)
-	colorWarnings = colorDiagnostics
+	// One diagnostics sink for the whole run: engine diagnostics (config, cache,
+	// collection, …) and CLI diagnostics share this handler. debug/verbose are
+	// set once resolved below; warn-class (the only level ParseConfig emits) is
+	// always enabled, so config diagnostics render identically before that.
+	logHandler := &stderrLogHandler{stderr: stderr, color: colorDiagnostics}
+	logger := slog.New(logHandler)
 	configFile := firstNonEmpty(*configPath, *configPathShort)
-	configOptions, configErr := engine.ParseConfig(configFile)
+	configOptions, configErr := engine.ParseConfig(configFile, logger)
 	if configErr != nil {
 		return configErr
 	}
@@ -317,12 +316,8 @@ func runQuery(stdout, stderr io.Writer, args []string) error {
 		return optionError(stdout, errors.New("debug, verbose, and log-level options conflict: please specify only one."))
 	}
 	debugDiagnostics := debugEnabled || logLevelEnablesDebug(logLevel)
-	if debugDiagnostics {
-		engine.SetDebugHandler(func(message string) {
-			writeDebug(stderr, message, colorDiagnostics)
-		})
-		defer engine.SetDebugHandler(nil)
-	}
+	logHandler.debug = debugDiagnostics
+	logHandler.verbose = verboseEnabled || strings.EqualFold(logLevel, "info")
 	if debugDiagnostics {
 		writeDebug(stderr, "resolving facts", colorDiagnostics)
 	} else if verboseEnabled || strings.EqualFold(logLevel, "info") {
@@ -334,18 +329,12 @@ func runQuery(stdout, stderr io.Writer, args []string) error {
 	}
 	resolutionStart := time.Now()
 
-	logHandler := &stderrLogHandler{
-		stderr:  stderr,
-		color:   colorDiagnostics,
-		debug:   debugDiagnostics,
-		verbose: verboseEnabled || strings.EqualFold(logLevel, "info"),
-	}
 	eng, err := engine.NewEngine(engine.EngineConfig{
 		CLICompat:       true,
 		ExternalDirs:    externalDirs,
 		NoExternalFacts: *noExternalFacts,
 		BlockedFacts:    blockedFacts,
-		Logger:          slog.New(logHandler),
+		Logger:          logger,
 	})
 	if err != nil {
 		return err
@@ -359,7 +348,7 @@ func runQuery(stdout, stderr io.Writer, args []string) error {
 	projection := engine.NewProjection(facts, mergeDottedFacts)
 	facts = projection.Select(flags.Args())
 	if !*noCache {
-		cache := engine.NewFactCache(engine.DefaultCachePath(), configOptions.TTLs, configOptions.FactGroups)
+		cache := engine.NewFactCache(engine.DefaultCachePath(), configOptions.TTLs, configOptions.FactGroups, logger)
 		remaining, cached := cache.ResolveFacts(facts)
 		if err := cache.CacheFacts(remaining); err != nil {
 			return err

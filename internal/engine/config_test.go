@@ -34,7 +34,7 @@ fact-groups : {
 		t.Fatal(err)
 	}
 
-	got, err := ParseConfig(path)
+	got, err := ParseConfig(path, discardLog())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +68,7 @@ cli : {
 		t.Fatal(err)
 	}
 
-	got, err := ParseConfig(path)
+	got, err := ParseConfig(path, discardLog())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,10 +89,9 @@ func TestParseConfig_ignoresRetiredCustomFactKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 	var warnings []string
-	SetWarningHandler(func(message string) { warnings = append(warnings, message) })
-	t.Cleanup(func() { SetWarningHandler(nil) })
+	logger := captureLogger(nil, &warnings, nil)
 
-	got, err := ParseConfig(path)
+	got, err := ParseConfig(path, logger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -311,7 +310,7 @@ func TestParseConfig_nativeDefaultConfigDiscovery(t *testing.T) {
 				DefaultConfigPath = oldCompat
 			})
 
-			got, err := ParseConfig("")
+			got, err := ParseConfig("", discardLog())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -331,7 +330,7 @@ func TestParseConfig_acceptsBareDirectoryPaths(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := ParseConfig(path)
+	got, err := ParseConfig(path, discardLog())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -343,12 +342,9 @@ func TestParseConfig_acceptsBareDirectoryPaths(t *testing.T) {
 func TestParseConfig_warnsAndIgnoresUnreadableConfig(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "missing.conf")
 	warnings := []string{}
-	SetWarningHandler(func(message string) {
-		warnings = append(warnings, message)
-	})
-	t.Cleanup(func() { SetWarningHandler(nil) })
+	logger := captureLogger(nil, &warnings, nil)
 
-	got, err := ParseConfig(path)
+	got, err := ParseConfig(path, logger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -369,12 +365,9 @@ func TestParseConfig_warnsAndIgnoresInvalidConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	warnings := []string{}
-	SetWarningHandler(func(message string) {
-		warnings = append(warnings, message)
-	})
-	t.Cleanup(func() { SetWarningHandler(nil) })
+	logger := captureLogger(nil, &warnings, nil)
 
-	got, err := ParseConfig(path)
+	got, err := ParseConfig(path, logger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -395,12 +388,9 @@ func TestParseConfig_emptyReadableConfigReturnsEmptySections(t *testing.T) {
 		t.Fatal(err)
 	}
 	warnings := []string{}
-	SetWarningHandler(func(message string) {
-		warnings = append(warnings, message)
-	})
-	t.Cleanup(func() { SetWarningHandler(nil) })
+	logger := captureLogger(nil, &warnings, nil)
 
-	options, err := ParseConfig(path)
+	options, err := ParseConfig(path, logger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -408,7 +398,7 @@ func TestParseConfig_emptyReadableConfigReturnsEmptySections(t *testing.T) {
 		t.Fatalf("ParseConfig() = %#v, want empty options", options)
 	}
 
-	config, err := ParseConfig(path)
+	config, err := ParseConfig(path, discardLog())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -441,7 +431,7 @@ cli : {
 		t.Fatal(err)
 	}
 
-	got, err := ParseConfig(path)
+	got, err := ParseConfig(path, discardLog())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -463,10 +453,9 @@ func TestParseConfig_retiredShowLegacyKeyIsInert(t *testing.T) {
 	}
 
 	warnings := []string{}
-	SetWarningHandler(func(message string) { warnings = append(warnings, message) })
-	t.Cleanup(func() { SetWarningHandler(nil) })
+	logger := captureLogger(nil, &warnings, nil)
 
-	got, err := ParseConfig(path)
+	got, err := ParseConfig(path, logger)
 	if err != nil {
 		t.Fatalf("ParseConfig() error = %v, want nil for retired show-legacy key", err)
 	}
@@ -487,7 +476,7 @@ func TestParseConfig_readsConfiguredSequentialLikeRubyOptionStore(t *testing.T) 
 		t.Fatal(err)
 	}
 
-	got, err := ParseConfig(path)
+	got, err := ParseConfig(path, discardLog())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -511,7 +500,7 @@ cli : {
 		t.Fatal(err)
 	}
 
-	config, err := ParseConfig(path)
+	config, err := ParseConfig(path, discardLog())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -530,7 +519,7 @@ func TestParseConfig_acceptsBareEntries(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	config, err := ParseConfig(path)
+	config, err := ParseConfig(path, discardLog())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -557,7 +546,7 @@ facts : {
 		t.Fatal(err)
 	}
 
-	options, err := ParseConfig(path)
+	options, err := ParseConfig(path, discardLog())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -568,7 +557,7 @@ facts : {
 		t.Fatal("NoExternalFacts = true, want commented true value ignored")
 	}
 
-	config, err := ParseConfig(path)
+	config, err := ParseConfig(path, discardLog())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -591,7 +580,7 @@ func TestParseConfig_returnsConfiguredFactTTLs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	config, err := ParseConfig(path)
+	config, err := ParseConfig(path, discardLog())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -618,7 +607,7 @@ func TestParseConfig_acceptsBareFactNamesAndValues(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	config, err := ParseConfig(path)
+	config, err := ParseConfig(path, discardLog())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -652,7 +641,7 @@ func TestGroupTTLSeconds_convertsRubyCompatibleUnits(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, ok := GroupTTLSeconds(tt.ttls, tt.fact)
+			got, ok := GroupTTLSeconds(tt.ttls, tt.fact, discardLog())
 			if !ok {
 				t.Fatalf("GroupTTLSeconds(%q) did not find TTL", tt.fact)
 			}
@@ -704,7 +693,7 @@ func TestGroupTTLSeconds_returnsFalseForMissingOrInvalidTTL(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got, ok := GroupTTLSeconds(tt.ttls, tt.fact); ok {
+			if got, ok := GroupTTLSeconds(tt.ttls, tt.fact, discardLog()); ok {
 				t.Fatalf("GroupTTLSeconds(%q) = %d, true; want false", tt.fact, got)
 			}
 		})
@@ -713,12 +702,9 @@ func TestGroupTTLSeconds_returnsFalseForMissingOrInvalidTTL(t *testing.T) {
 
 func TestGroupTTLSeconds_logsRubyCompatibleInvalidUnitError(t *testing.T) {
 	errors := []string{}
-	SetErrorHandler(func(message string) {
-		errors = append(errors, message)
-	})
-	t.Cleanup(func() { SetErrorHandler(nil) })
+	logger := captureLogger(nil, nil, &errors)
 
-	if got, ok := GroupTTLSeconds([]FactTTL{{Fact: "hostname", TTL: "30 invalid_unit"}}, "hostname"); ok {
+	if got, ok := GroupTTLSeconds([]FactTTL{{Fact: "hostname", TTL: "30 invalid_unit"}}, "hostname", logger); ok {
 		t.Fatalf("GroupTTLSeconds(hostname) = %d, true; want false", got)
 	}
 	if len(errors) != 1 {
@@ -781,7 +767,7 @@ func TestParseConfig_returnsConfiguredFactGroups(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	config, err := ParseConfig(path)
+	config, err := ParseConfig(path, discardLog())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -804,7 +790,7 @@ func TestParseConfig_acceptsQuotedGroupNamesWithSpaces(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	config, err := ParseConfig(path)
+	config, err := ParseConfig(path, discardLog())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -824,7 +810,7 @@ func TestParseConfig_acceptsBareFactNames(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	config, err := ParseConfig(path)
+	config, err := ParseConfig(path, discardLog())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -844,7 +830,7 @@ func TestParseConfig_acceptsScalarFactGroupValue(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	config, err := ParseConfig(path)
+	config, err := ParseConfig(path, discardLog())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -873,7 +859,7 @@ func TestConfigParser_pinnedSubsetBoundary(t *testing.T) {
 		path := writeConfig(t, `global = {
   external-dir = [ "/json/external" ]
 }`)
-		got, err := ParseConfig(path)
+		got, err := ParseConfig(path, discardLog())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -886,7 +872,7 @@ func TestConfigParser_pinnedSubsetBoundary(t *testing.T) {
 		path := writeConfig(t, `cli : {
   log-level : 'trace',
 }`)
-		got, err := ParseConfig(path)
+		got, err := ParseConfig(path, discardLog())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -900,7 +886,7 @@ func TestConfigParser_pinnedSubsetBoundary(t *testing.T) {
 global : {
   external-dir : [ "${base-dir}" ],
 }`)
-		got, err := ParseConfig(path)
+		got, err := ParseConfig(path, discardLog())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -923,7 +909,7 @@ global : {
 			t.Fatal(err)
 		}
 
-		got, err := ParseConfig(path)
+		got, err := ParseConfig(path, discardLog())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -935,10 +921,9 @@ global : {
 	t.Run("config without key separators warns and is ignored", func(t *testing.T) {
 		path := writeConfig(t, "this is not hocon at all")
 		var warnings []string
-		SetWarningHandler(func(message string) { warnings = append(warnings, message) })
-		t.Cleanup(func() { SetWarningHandler(nil) })
+		logger := captureLogger(nil, &warnings, nil)
 
-		got, err := ParseConfig(path)
+		got, err := ParseConfig(path, logger)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -955,7 +940,7 @@ global : {
   external-dir : [ "/kept" ], # comment with , and : inside
   no-external-facts : true // trailing comment
 }`)
-		got, err := ParseConfig(path)
+		got, err := ParseConfig(path, discardLog())
 		if err != nil {
 			t.Fatal(err)
 		}

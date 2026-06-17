@@ -1,24 +1,25 @@
 package engine
 
 import (
+	"log/slog"
 	"os"
 	"sort"
 	"strings"
 )
 
-func safeRead(path string, defaultValue string) (string, bool) {
+func safeRead(path string, defaultValue string, log *slog.Logger) (string, bool) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		debugFileNotAccessible(path)
+		debugFileNotAccessible(path, log)
 		return defaultValue, false
 	}
 	return string(data), true
 }
 
-func safeReadLines(path string, defaultValue []string) ([]string, bool) {
+func safeReadLines(path string, defaultValue []string, log *slog.Logger) ([]string, bool) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		debugFileNotAccessible(path)
+		debugFileNotAccessible(path, log)
 		return defaultValue, false
 	}
 	if len(data) == 0 {
@@ -31,8 +32,11 @@ func safeReadLines(path string, defaultValue []string) ([]string, bool) {
 	return lines, true
 }
 
-func debugFileNotAccessible(path string) {
-	debug("File at: " + path + " is not accessible.")
+func debugFileNotAccessible(path string, log *slog.Logger) {
+	if log == nil {
+		log = slog.New(slog.DiscardHandler)
+	}
+	log.Debug("File at: " + path + " is not accessible.")
 }
 
 func dirChildren(path string) ([]string, error) {
