@@ -79,10 +79,10 @@ func runFacts(t *testing.T, args ...string) (stdout, stderr *bytes.Buffer, exitC
 }
 
 // releaseGateFactSet is the cross-platform core of the per-platform release
-// gates (tools/windows-release-gate.ps1, tools/freebsd-release-gate.sh, and
-// the Linux/macOS CI smokes): structured facts and scalars that must resolve
-// on every supported platform. Legacy aliases are removed entirely (openspec
-// change remove-legacy-facts); the gates assert structured names only.
+// gates (tools/*release-gate*, and the Linux/macOS CI smokes): structured
+// facts and scalars that must resolve on every supported platform. Legacy
+// aliases are removed entirely (openspec change remove-legacy-facts); the
+// gates assert structured names only.
 var releaseGateFactSet = []string{
 	"os.name",
 	"os.family",

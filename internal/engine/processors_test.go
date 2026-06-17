@@ -206,6 +206,46 @@ func TestCurrentProcessorInfoWiresFreeBSDSysctlOutput(t *testing.T) {
 	}
 }
 
+func TestCurrentProcessorInfoWiresGenericBSDSysctlOutput(t *testing.T) {
+	t.Parallel()
+
+	for _, goos := range []string{"netbsd", "openbsd"} {
+		t.Run(goos, func(t *testing.T) {
+			t.Parallel()
+
+			seen := map[string]bool{}
+			run := func(path string, args ...string) string {
+				if path != "sysctl" || len(args) != 2 || args[0] != "-n" {
+					t.Fatalf("run(%q, %#v), want sysctl -n <name>", path, args)
+				}
+				seen[args[1]] = true
+				switch args[1] {
+				case "hw.ncpu":
+					return "2\n"
+				case "hw.model":
+					return "netbsd,generic-acpi\n"
+				case "hw.cpuspeed":
+					return "2400\n"
+				default:
+					t.Fatalf("unexpected sysctl name %q", args[1])
+					return ""
+				}
+			}
+
+			got := currentProcessorInfo(goos, run, discardLog())
+			wantModels := []string{"netbsd,generic-acpi", "netbsd,generic-acpi"}
+			if got.LogicalCount != 2 || got.SpeedHz != 2400000000 || !reflect.DeepEqual(got.Models, wantModels) {
+				t.Fatalf("currentProcessorInfo(%s) = %#v", goos, got)
+			}
+			for _, name := range []string{"hw.ncpu", "hw.model", "hw.cpuspeed"} {
+				if !seen[name] {
+					t.Fatalf("currentProcessorInfo(%s) did not query %s", goos, name)
+				}
+			}
+		})
+	}
+}
+
 func TestCurrentProcessorISAUsesOpenBSDUnameProcessor(t *testing.T) {
 	got := currentProcessorISA(testSession, "openbsd", "amd64", func(name string, args ...string) string {
 		if name != "uname" || !reflect.DeepEqual(args, []string{"-p"}) {

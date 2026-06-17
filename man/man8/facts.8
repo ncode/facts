@@ -10,13 +10,16 @@
 \fBfacts\fR [options] [query] [query] [\.\.\.]
 .
 .SH "DESCRIPTION"
-\fBfacts\fR is a command\-line tool that gathers basic facts about nodes (systems) such as hardware details, network settings, OS type and version, and more\. These facts are made available as variables in your Puppet manifests and can be used to inform conditional expressions in Puppet\.
+\fBfacts\fR gathers structured facts about the current system, such as hardware details, network settings, OS type and version, cloud metadata, and storage state\. The same canonical fact tree is available through the command line and the Go library\.
 .
 .P
 If no queries are given, then all facts will be returned\.
 .
 .P
 Many of the command line options can also be set via the HOCON config file\. This file can also be used to block or cache certain fact groups\.
+.
+.P
+Supported release targets are Linux, macOS/Darwin, Windows, FreeBSD, OpenBSD, and NetBSD\. The supported fact contract is documented in \fIdocs/schema/facts\.yaml\fR and rendered by platform under \fIdocs/supported\-facts/\fR\.
 .
 .SH "OPTIONS"
 .
@@ -155,8 +158,8 @@ Display this manual\.
 .SH "EXIT STATUS"
 \fBfacts\fR exits 0 on success, including queries for facts that do not exist (which print nothing)\. It exits 1 when an option is invalid, when \fB\-\-strict\fR is given and a queried fact does not exist, or on any other runtime error\.
 .
-.SH "GO PORT NOTES"
-This manual describes the Go implementation of Facter\. Behavior differences from Ruby Facter 4:
+.SH "COMPATIBILITY"
+Facts keeps Ruby Facter compatibility at the CLI process boundary and for operator\-supplied fact sources such as external facts and \fBfacter\.conf\fR\. The Go API is Facts\-native\. Important compatibility boundaries:
 .
 .IP "\(bu" 4
 Ruby DSL fact files (\fB\.rb\fR) are not read from any source: there is no \fB\-\-custom\-dir\fR option, no \fBFACTERLIB\fR lookup, and no Ruby evaluation\. A \fB\.rb\fR file in an external\-fact directory is skipped with a warning\. Rewrite Ruby custom facts as external facts; see \fIdocs/CUSTOM_FACT_MIGRATION\.md\fR\.

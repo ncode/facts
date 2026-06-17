@@ -121,12 +121,14 @@ make build   # builds ./facts from the project root
 
 Every release target is a blocking CI gate — unit tests, the race detector over the engine, a built-binary smoke, and per-platform release-gate fact checks.
 
-| Platform | Architectures | Gate |
-| --- | --- | --- |
-| Linux | x64, arm64 | native runners + container distro matrix |
-| macOS | arm64, x64 | native runners |
-| Windows | Server 2022, 2025 | native runners + release-gate fact set |
-| FreeBSD | 14 | VM job + release-gate fact set |
+| Platform | Architectures | Gate | Supported facts |
+| --- | --- | --- | --- |
+| Linux | x64, arm64 | native runners + container distro matrix | [Linux facts](docs/supported-facts/linux.md) |
+| macOS | arm64, x64 | native runners | [macOS / Darwin facts](docs/supported-facts/darwin.md) |
+| Windows | Server 2022, 2025 | native runners + release-gate fact set | [Windows facts](docs/supported-facts/windows.md) |
+| FreeBSD | amd64 | VM job + release-gate fact set | [FreeBSD facts](docs/supported-facts/freebsd.md) |
+| OpenBSD | amd64 | VM job + release-gate fact set | [OpenBSD facts](docs/supported-facts/openbsd.md) |
+| NetBSD | amd64 | VM job + release-gate fact set | [NetBSD facts](docs/supported-facts/netbsd.md) |
 
 Requires Go 1.26+.
 
@@ -140,6 +142,7 @@ Requires Go 1.26+.
 | --- | --- |
 | [pkg.go.dev/github.com/ncode/facts](https://pkg.go.dev/github.com/ncode/facts) | API reference |
 | [docs/schema/facts.yaml](docs/schema/facts.yaml) | every supported fact, with types, platforms, and descriptions — enforced in CI |
+| [docs/supported-facts/](docs/supported-facts/) | generated per-platform supported fact pages with production-shaped examples |
 | [CONTEXT.md](CONTEXT.md) · [docs/adr/](docs/adr/) | the project's language and architectural decisions |
 | [docs/HISTORY.md](docs/HISTORY.md) | how the port happened, the verification record, and how to recover the full porting docs from git history |
 | [docs/CUSTOM_FACT_MIGRATION.md](docs/CUSTOM_FACT_MIGRATION.md) | migrating Ruby custom facts to external facts (no `.rb` files are read) |

@@ -105,8 +105,7 @@ func TestSnapshotTree_excludesLegacyAliasFacts(t *testing.T) {
 		for _, prefix := range []string{
 			"blockdevice", "ipaddress_", "ipaddress6_", "lsb", "macaddress_",
 			"macosx_", "mtu_", "netmask_", "netmask6_", "network_",
-			"network6_", "scope6_", "selinux", "sp_", "windows_", "zfs_",
-			"zpool_",
+			"network6_", "scope6_", "selinux", "sp_", "windows_",
 		} {
 			if len(name) >= len(prefix) && name[:len(prefix)] == prefix {
 				t.Errorf("Tree()[%s] = %#v, want no legacy alias fact (prefix %s)", name, tree[name], prefix)

@@ -40,7 +40,7 @@ Every supported fact is documented in
 patterns for dynamic key segments), value type, description, platforms, and a
 `conditional` marker for facts whose presence depends on host state. New or
 renamed facts MUST get a schema entry: `TestFactsSchemaConformance` runs on
-all four platform gates and fails on any emitted fact the schema does not
+all platform gates and fails on any emitted fact the schema does not
 describe, and on any non-conditional entry the platform does not emit.
 
 To see exactly what still needs documenting, run the report mode:
@@ -56,10 +56,10 @@ tools).
 
 ## Platform scope
 
-Release targets: **Linux, macOS/Darwin, Windows, and FreeBSD**. Solaris, AIX,
-OpenBSD, NetBSD, DragonFly, and generic BSD-family paths are out of scope —
-do not start work for them until a repeatable validation target exists, and
-do not treat their gaps as blockers.
+Release targets: **Linux, macOS/Darwin, Windows, FreeBSD, OpenBSD, and
+NetBSD**. Solaris, AIX, DragonFly, and generic BSD-family paths are out of
+scope — do not start work for them until a repeatable validation target
+exists, and do not treat their gaps as blockers.
 
 ## Benchmark discipline
 
@@ -89,9 +89,14 @@ the pipeline (`.github/workflows/unit_tests.yaml`):
 - **FreeBSD**: a hosted VM job runs the platform-sensitive packages and
   `tools/freebsd-release-gate.sh` — the same fact-set definition as the local
   `make lima-freebsd-smoke` target.
+- **OpenBSD** and **NetBSD**: hosted VM jobs run the platform-sensitive
+  packages and `tools/openbsd-release-gate.sh` /
+  `tools/netbsd-release-gate.sh`. Local QEMU guests under `.local/bsd-vms`
+  can run the same checks through `make local-bsd-smoke`.
 
 Local equivalents: `make lima-freebsd-smoke`, `make lima-linux-flavor-smoke`,
-and running `tools/windows-release-gate.ps1` on a Windows host.
+`make local-bsd-smoke`, and running `tools/windows-release-gate.ps1` on a
+Windows host.
 
 ## The change workflow
 
@@ -116,7 +121,7 @@ behavior question comes down to "what does Ruby Facter do?":
   `./facts --json` side by side on the same host.
 - Match Ruby unless there is a recorded reason not to. A deliberate deviation
   must be documented — an ADR under `docs/adr/` for contract-level decisions,
-  or a GO PORT NOTES entry in `man/man8/facts.8` for fact-level ones — and
+  or a COMPATIBILITY entry in `man/man8/facts.8` for fact-level ones — and
   pinned by a test.
 
 The porting-era verification record (parity ledger, migration log) is

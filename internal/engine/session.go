@@ -73,6 +73,7 @@ type Session struct {
 	swapEncrypted                memo[bool]
 	windowsMemory                memo[windowsMemory]
 	freeBSDMemoryInfo            memo[freeBSDMemoryInfo]
+	bsdMemoryInfo                memo[bsdMemoryInfo]
 	darwinSwapUsage              memo[darwinSwapUsage]
 	linuxMeminfo                 memo[string]
 	processorSpeed               memo[string]
@@ -217,6 +218,9 @@ func (s *Session) cachedWindowsMemory() windowsMemory {
 }
 func (s *Session) cachedFreeBSDMemoryInfo() freeBSDMemoryInfo {
 	return s.freeBSDMemoryInfo.get(func() freeBSDMemoryInfo { return probeFreeBSDMemoryInfo(s) })
+}
+func (s *Session) cachedBSDMemoryInfo() bsdMemoryInfo {
+	return s.bsdMemoryInfo.get(func() bsdMemoryInfo { return probeBSDMemoryInfo(s) })
 }
 func (s *Session) cachedDarwinSwapUsage() darwinSwapUsage {
 	return s.darwinSwapUsage.get(func() darwinSwapUsage { return probeDarwinSwapUsage(s) })

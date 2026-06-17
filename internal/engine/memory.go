@@ -12,6 +12,11 @@ type freeBSDMemoryInfo struct {
 	Swap   map[string]any
 }
 
+type bsdMemoryInfo struct {
+	System map[string]any
+	Swap   map[string]any
+}
+
 type windowsMemory struct {
 	TotalBytes     int
 	AvailableBytes int
@@ -67,6 +72,8 @@ func probeTotalPhysicalMemoryBytes(s *Session) int {
 		return int(value)
 	case "freebsd":
 		return freeBSDMemoryValue(s.cachedFreeBSDMemoryInfo().System, "total_bytes")
+	case "netbsd", "openbsd":
+		return freeBSDMemoryValue(s.cachedBSDMemoryInfo().System, "total_bytes")
 	case "linux":
 		return parseLinuxMeminfoBytes(s.cachedLinuxMeminfo(), "MemTotal")
 	case "windows":
@@ -85,6 +92,8 @@ func probeAvailablePhysicalMemoryBytes(s *Session) int {
 		return parseDarwinVMStatAvailableBytes(out)
 	case "freebsd":
 		return freeBSDMemoryValue(s.cachedFreeBSDMemoryInfo().System, "available_bytes")
+	case "netbsd", "openbsd":
+		return freeBSDMemoryValue(s.cachedBSDMemoryInfo().System, "available_bytes")
 	case "linux":
 		return parseLinuxMeminfoBytes(s.cachedLinuxMeminfo(), "MemAvailable")
 	case "windows":
@@ -100,6 +109,8 @@ func probeTotalSwapMemoryBytes(s *Session) int {
 		return s.cachedDarwinSwapUsage().TotalBytes
 	case "freebsd":
 		return freeBSDMemoryValue(s.cachedFreeBSDMemoryInfo().Swap, "total_bytes")
+	case "netbsd", "openbsd":
+		return freeBSDMemoryValue(s.cachedBSDMemoryInfo().Swap, "total_bytes")
 	case "linux":
 		return parseLinuxMeminfoBytes(s.cachedLinuxMeminfo(), "SwapTotal")
 	default:
@@ -113,6 +124,8 @@ func probeAvailableSwapMemoryBytes(s *Session) int {
 		return s.cachedDarwinSwapUsage().AvailableBytes
 	case "freebsd":
 		return freeBSDMemoryValue(s.cachedFreeBSDMemoryInfo().Swap, "available_bytes")
+	case "netbsd", "openbsd":
+		return freeBSDMemoryValue(s.cachedBSDMemoryInfo().Swap, "available_bytes")
 	case "linux":
 		return parseLinuxMeminfoBytes(s.cachedLinuxMeminfo(), "SwapFree")
 	default:
@@ -154,12 +167,37 @@ func probeFreeBSDMemoryInfo(s *Session) freeBSDMemoryInfo {
 	}, s.commandOutput("swapinfo", "-k"))
 }
 
+func probeBSDMemoryInfo(s *Session) bsdMemoryInfo {
+	switch runtime.GOOS {
+	case "netbsd", "openbsd":
+	default:
+		return bsdMemoryInfo{}
+	}
+	values := map[string]int{
+		"hw.physmem": bsdSysctlInt(s, "hw.physmem64", "hw.physmem"),
+	}
+	for key, value := range parseBSDVMStatCounters(s.commandOutput("vmstat", "-s")) {
+		values[key] = value
+	}
+	return parseBSDMemory(values, s.commandOutput("swapctl", "-sk"))
+}
+
 func freeBSDSysctlInt(s *Session, name string) int {
 	value, err := strconv.Atoi(strings.TrimSpace(s.commandOutput("sysctl", "-n", name)))
 	if err != nil {
 		return 0
 	}
 	return value
+}
+
+func bsdSysctlInt(s *Session, names ...string) int {
+	for _, name := range names {
+		value, err := strconv.Atoi(strings.TrimSpace(s.commandOutput("sysctl", "-n", name)))
+		if err == nil && value > 0 {
+			return value
+		}
+	}
+	return 0
 }
 
 func freeBSDMemoryValue(values map[string]any, key string) int {
@@ -237,6 +275,87 @@ func parseFreeBSDSwapMemory(input string) map[string]any {
 		"available_bytes": available,
 		"capacity":        capacity,
 		"encrypted":       encrypted,
+		"total_bytes":     total,
+		"used_bytes":      used,
+	}
+}
+
+func parseBSDMemory(sysctlValues map[string]int, swapOutput string) bsdMemoryInfo {
+	return bsdMemoryInfo{
+		System: parseBSDSystemMemory(sysctlValues),
+		Swap:   parseBSDSwapMemory(swapOutput),
+	}
+}
+
+func parseBSDSystemMemory(values map[string]int) map[string]any {
+	total := values["hw.physmem"]
+	pagesize, okPagesize := values["vmstat.bytes_per_page"]
+	active, okActive := values["vmstat.pages_active"]
+	wired, okWired := values["vmstat.pages_wired"]
+	if total <= 0 || !okPagesize || !okActive || !okWired || pagesize <= 0 || active < 0 || wired < 0 {
+		return nil
+	}
+	used := (active + wired) * pagesize
+	available := max(0, total-used)
+	return map[string]any{
+		"available_bytes": available,
+		"capacity":        memoryCapacity(used, total),
+		"total_bytes":     total,
+		"used_bytes":      used,
+	}
+}
+
+func parseBSDVMStatCounters(input string) map[string]int {
+	values := map[string]int{}
+	for line := range strings.Lines(input) {
+		fields := strings.Fields(line)
+		if len(fields) < 3 {
+			continue
+		}
+		value, err := strconv.Atoi(fields[0])
+		if err != nil {
+			continue
+		}
+		if len(fields) >= 4 && fields[1] == "bytes" && fields[2] == "per" && fields[3] == "page" {
+			values["vmstat.bytes_per_page"] = value
+			continue
+		}
+		if fields[1] != "pages" {
+			continue
+		}
+		switch fields[2] {
+		case "active":
+			values["vmstat.pages_active"] = value
+		case "wired":
+			values["vmstat.pages_wired"] = value
+		}
+	}
+	return values
+}
+
+func parseBSDSwapMemory(input string) map[string]any {
+	fields := strings.Fields(input)
+	if len(fields) < 7 || fields[0] != "total:" {
+		return nil
+	}
+	total, err := strconv.Atoi(fields[1])
+	if err != nil {
+		return nil
+	}
+	used, err := strconv.Atoi(fields[4])
+	if err != nil {
+		return nil
+	}
+	available, err := strconv.Atoi(fields[6])
+	if err != nil {
+		return nil
+	}
+	total *= 1024
+	used *= 1024
+	available *= 1024
+	return map[string]any{
+		"available_bytes": available,
+		"capacity":        memoryCapacity(used, total),
 		"total_bytes":     total,
 		"used_bytes":      used,
 	}

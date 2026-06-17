@@ -93,7 +93,7 @@ var legacyAliasPrefixes = []string{
 	"lsb", "macaddress_", "mtu_", "netmask_", "netmask6_", "network_",
 	"network6_", "processor0", "processor1", "processor2", "processor3",
 	"processor4", "processor5", "processor6", "processor7", "processor8",
-	"processor9", "scope6_", "selinux", "sp_", "windows_", "zfs_", "zpool_",
+	"processor9", "scope6_", "selinux", "sp_", "windows_",
 }
 
 func assertNoLegacyAliases(t *testing.T, collection map[string]any) {

@@ -66,5 +66,8 @@ acceptance/vendor
 # Go binary build artifact in cmd
 cmd/facts/facts
 
+# Local scratch files and VMs
+.local/
+
 # Personal Claude Code settings (permission allowlist)
 .claude/settings.local.json

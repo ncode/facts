@@ -102,3 +102,50 @@ jobs:
             go test . ./internal/engine ./internal/app ./tests/acceptance
             go build -o /tmp/facts ./cmd/facts
             sh tools/freebsd-release-gate.sh /tmp/facts
+
+  openbsd_tests:
+    name: OpenBSD 7.9 (VM)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout current PR
+        uses: actions/checkout@v4
+
+      - name: Test and smoke in OpenBSD VM
+        uses: vmactions/openbsd-vm@v1
+        with:
+          release: "7.9"
+          usesh: true
+          prepare: |
+            pkg_add go git
+          run: |
+            set -e
+            export GOFLAGS=-buildvcs=false
+            go version
+            go test . ./internal/engine ./internal/app ./tests/acceptance
+            go build -o /tmp/facts ./cmd/facts
+            sh tools/openbsd-release-gate.sh /tmp/facts
+
+  netbsd_tests:
+    name: NetBSD 10.1 (VM)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout current PR
+        uses: actions/checkout@v4
+
+      - name: Test and smoke in NetBSD VM
+        uses: vmactions/netbsd-vm@v1
+        with:
+          release: "10.1"
+          usesh: true
+          prepare: |
+            /usr/sbin/pkg_add -u go git
+          run: |
+            set -e
+            export PATH=/usr/pkg/bin:/usr/pkg/sbin:/usr/sbin:/sbin:/usr/bin:/bin
+            export GOFLAGS=-buildvcs=false
+            go version
+            go test . ./internal/engine ./internal/app ./tests/acceptance
+            go build -o /tmp/facts ./cmd/facts
+            sh tools/netbsd-release-gate.sh /tmp/facts

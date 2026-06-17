@@ -523,8 +523,13 @@ func TestDetectOpenBSDVirtualization(t *testing.T) {
 		},
 		{
 			name:  "vmm product name",
-			input: openBSDVirtualizationInput{ProductName: "OpenBSD"},
+			input: openBSDVirtualizationInput{ProductName: "VMM"},
 			want:  virtualization{Name: "vmm", IsVirtual: true},
+		},
+		{
+			name:  "qemu product name is physical like Facter",
+			input: openBSDVirtualizationInput{ProductName: "QEMU Virtual Machine"},
+			want:  virtualization{Name: "physical"},
 		},
 	}
 

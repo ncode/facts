@@ -233,6 +233,214 @@ func TestParseFreeBSDGeomDisks_returnsRubyCompatibleDiskFacts(t *testing.T) {
 	}
 }
 
+const openBSDDisklabelSD0 = `# /dev/rsd0c:
+type: SCSI
+disk: SCSI disk
+label: Block Device
+duid: 942d2f143e47054f
+flags:
+bytes/sector: 512
+sectors/track: 63
+tracks/cylinder: 255
+sectors/cylinder: 16065
+cylinders: 1305
+total sectors: 20971520
+boundstart: 565248
+boundend: 20971520
+16 partitions:
+#                size           offset  fstype [fsize bsize   cpg]
+  a:          2409248           565248  4.2BSD   2048 16384 12960 # /
+  b:           524288          2974496    swap                    # none
+  c:         20971520                0  unused
+  d:          6291456          3498784  4.2BSD   2048 16384 12960 # /usr
+  e:          4194304          9790240  4.2BSD   2048 16384 12960 # /home
+  i:           532480            32768   MSDOS
+`
+
+const netBSDDisklabelLD4 = `# /dev/rld4:
+type: ld
+disk: ld4
+label: fictitious
+flags:
+bytes/sector: 512
+sectors/track: 63
+tracks/cylinder: 16
+sectors/cylinder: 1008
+cylinders: 16383
+total sectors: 20971520
+rpm: 3600
+interleave: 1
+trackskew: 0
+cylinderskew: 0
+headswitch: 0		# microseconds
+track-to-track seek: 0	# microseconds
+drivedata: 0
+6 partitions:
+#        size    offset     fstype [fsize bsize cpg/sgs]
+ c:  20971520         0     unused      0     0        # (Cyl.      0 -  20805*)
+ e:    163840     32768      MSDOS                     # (Cyl.     32*-    195*)
+ f:     32767         1    unknown                     # (Cyl.      0*-     32*)
+disklabel: boot block size 0
+disklabel: super block size 0
+`
+
+const netBSDWedgesLD4 = `/dev/rld4: 2 wedges:
+dk0: EFI, 163840 blocks at 32768, type: msdos
+dk1: netbsd-root, 20766720 blocks at 196608, type: ffs
+`
+
+func TestParseBSDDisklabelDisk_returnsSizeFacts(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		input string
+	}{
+		{name: "openbsd", input: openBSDDisklabelSD0},
+		{name: "netbsd", input: netBSDDisklabelLD4},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseBSDDisklabelDisk(tt.input)
+			want := map[string]any{"size": "10.00 GiB", "size_bytes": 10_737_418_240}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("parseBSDDisklabelDisk() = %#v, want %#v", got, want)
+			}
+		})
+	}
+}
+
+func TestParseOpenBSDDisklabelPartitions_returnsDevicePartitions(t *testing.T) {
+	got := parseBSDDisklabelPartitions("sd0", openBSDDisklabelSD0)
+	want := map[string]any{
+		"/dev/sd0a": map[string]any{"filesystem": "4.2BSD", "size": "1.15 GiB", "size_bytes": 1_233_534_976},
+		"/dev/sd0b": map[string]any{"filesystem": "swap", "size": "256.00 MiB", "size_bytes": 268_435_456},
+		"/dev/sd0d": map[string]any{"filesystem": "4.2BSD", "size": "3.00 GiB", "size_bytes": 3_221_225_472},
+		"/dev/sd0e": map[string]any{"filesystem": "4.2BSD", "size": "2.00 GiB", "size_bytes": 2_147_483_648},
+		"/dev/sd0i": map[string]any{"filesystem": "MSDOS", "size": "260.00 MiB", "size_bytes": 272_629_760},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("parseBSDDisklabelPartitions() = %#v, want %#v", got, want)
+	}
+}
+
+func TestParseBSDDiskNamesSplitsOpenBSDCommaSeparatedNames(t *testing.T) {
+	got := parseBSDDiskNames("openbsd", "hw.disknames=sd0:942d2f143e47054f,sd1:1111111111111111,cd0:\n")
+	want := []string{"sd0", "sd1", "cd0"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("parseBSDDiskNames() = %#v, want %#v", got, want)
+	}
+}
+
+func TestCurrentOpenBSDPartitionsReadsEveryDiskName(t *testing.T) {
+	got := currentOpenBSDPartitions(func(name string, args ...string) string {
+		switch strings.Join(append([]string{name}, args...), " ") {
+		case "sysctl -n hw.disknames":
+			return "sd0:942d2f143e47054f,sd1:1111111111111111\n"
+		case "disklabel sd0":
+			return openBSDDisklabelSD0
+		case "disklabel sd1":
+			return strings.ReplaceAll(openBSDDisklabelSD0, "sd0", "sd1")
+		default:
+			t.Fatalf("unexpected command %q %#v", name, args)
+			return ""
+		}
+	})
+	for _, key := range []string{"/dev/sd0a", "/dev/sd1a"} {
+		if _, ok := got[key]; !ok {
+			t.Fatalf("currentOpenBSDPartitions() = %#v, want key %q", got, key)
+		}
+	}
+}
+
+func TestParseNetBSDDkctlWedges_returnsDevicePartitions(t *testing.T) {
+	got := parseNetBSDDkctlWedges(netBSDWedgesLD4, 512)
+	want := map[string]any{
+		"/dev/dk0": map[string]any{"filesystem": "msdos", "partlabel": "EFI", "size": "80.00 MiB", "size_bytes": 83_886_080},
+		"/dev/dk1": map[string]any{"filesystem": "ffs", "partlabel": "netbsd-root", "size": "9.90 GiB", "size_bytes": 10_632_560_640},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("parseNetBSDDkctlWedges() = %#v, want %#v", got, want)
+	}
+}
+
+func TestPartitionsFactJoinsAllOpenBSDMountpointsFromMountpointDevices(t *testing.T) {
+	partitions := parseBSDDisklabelPartitions("sd0", openBSDDisklabelSD0)
+	mountpoints := openBSDMountpointsFact(`/dev/sd0a on / type ffs (local)
+/dev/sd0d on /usr type ffs (local, nodev)
+/dev/sd0e on /home type ffs (local, nodev, nosuid)
+`, "")
+
+	got := partitionsFact(partitions, mountpoints)
+	for _, tt := range []struct {
+		device string
+		mount  string
+	}{
+		{"/dev/sd0a", "/"},
+		{"/dev/sd0d", "/usr"},
+		{"/dev/sd0e", "/home"},
+	} {
+		partition, ok := got[tt.device].(map[string]any)
+		if !ok {
+			t.Fatalf("partitionsFact() = %#v, want partition %q", got, tt.device)
+		}
+		if partition["mount"] != tt.mount {
+			t.Fatalf("%s mount = %#v, want %#v", tt.device, partition["mount"], tt.mount)
+		}
+	}
+}
+
+func TestCurrentDisksUsesBSDDisklabel(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		goos         string
+		disknames    string
+		device       string
+		disklabelCmd string
+		disklabel    string
+		wantDiskKey  string
+	}{
+		{
+			goos:         "openbsd",
+			disknames:    "sd0:942d2f143e47054f\n",
+			device:       "sd0",
+			disklabelCmd: "disklabel sd0",
+			disklabel:    openBSDDisklabelSD0,
+			wantDiskKey:  "sd0",
+		},
+		{
+			goos:         "netbsd",
+			disknames:    "ld4 dk0 dk1\n",
+			device:       "ld4",
+			disklabelCmd: "sh -c disklabel ld4 2>/dev/null || true",
+			disklabel:    netBSDDisklabelLD4,
+			wantDiskKey:  "ld4",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.goos, func(t *testing.T) {
+			t.Parallel()
+
+			got := currentDisks(tt.goos, func(name string, args ...string) string {
+				switch strings.Join(append([]string{name}, args...), " ") {
+				case "sysctl -n hw.disknames":
+					return tt.disknames
+				case tt.disklabelCmd:
+					return tt.disklabel
+				default:
+					t.Fatalf("unexpected command %q %#v", name, args)
+					return ""
+				}
+			})
+			want := map[string]any{
+				tt.wantDiskKey: map[string]any{"size": "10.00 GiB", "size_bytes": 10_737_418_240},
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("currentDisks(%q) = %#v, want %#v", tt.goos, got, want)
+			}
+		})
+	}
+}
+
 func TestDisksFacts_omittedWhenNoDevicesEnumerate(t *testing.T) {
 	t.Parallel()
 
@@ -265,6 +473,80 @@ func TestPartitionsFacts_omittedWhenNoDevicesEnumerate(t *testing.T) {
 	if got := partitionsFacts(partitions); !reflect.DeepEqual(got, want) {
 		t.Fatalf("partitionsFacts() = %#v, want %#v", got, want)
 	}
+}
+
+func TestParseZFSPoolFacts_matchesRubyFacterFixtures(t *testing.T) {
+	zfsOutput, err := os.ReadFile(filepath.Join("testdata", "zfs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	zpoolOutput, err := os.ReadFile(filepath.Join("testdata", "zpool"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	zpoolFeatureOutput, err := os.ReadFile(filepath.Join("testdata", "zpool-with-featureflags"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name  string
+		facts []ResolvedFact
+		want  map[string]any
+	}{
+		{
+			name:  "zfs versions",
+			facts: zfsFactsFromUpgradeOutput(string(zfsOutput)),
+			want: map[string]any{
+				"zfs_featurenumbers": "1,2,3,4,5,6",
+				"zfs_version":        "6",
+			},
+		},
+		{
+			name:  "zpool legacy versions",
+			facts: zpoolFactsFromUpgradeOutput(string(zpoolOutput)),
+			want: map[string]any{
+				"zpool_featurenumbers": "1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34",
+				"zpool_version":        "34",
+			},
+		},
+		{
+			name:  "zpool feature flags",
+			facts: zpoolFactsFromUpgradeOutput(string(zpoolFeatureOutput)),
+			want: map[string]any{
+				"zpool_featurenumbers": "1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28",
+				"zpool_featureflags":   "async_destroy,empty_bpobj,lz4_compress,multi_vdev_crash_dump,spacemap_histogram,enabled_txg,hole_birth,extensible_dataset,embedded_data,bookmarks,filesystem_limits,large_blocks,large_dnode,sha512,skein,device_removal,obsolete_counts,zpool_checkpoint,spacemap_v2",
+				"zpool_version":        "5000",
+			},
+		},
+		{
+			name:  "zfs invalid output omitted",
+			facts: zfsFactsFromUpgradeOutput("internal error: failed to initialize ZFS library\n"),
+			want:  map[string]any{},
+		},
+		{
+			name:  "zpool invalid output omitted",
+			facts: zpoolFactsFromUpgradeOutput("internal error: failed to initialize ZFS library\n"),
+			want:  map[string]any{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := factsByName(tt.facts)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("facts = %#v, want %#v", got, tt.want)
+			}
+		})
+	}
+}
+
+func factsByName(facts []ResolvedFact) map[string]any {
+	values := make(map[string]any, len(facts))
+	for _, fact := range facts {
+		values[fact.Name] = fact.Value
+	}
+	return values
 }
 
 func TestFilesystemsFacts_omittedWhenUnresolved(t *testing.T) {
@@ -737,6 +1019,23 @@ func TestOpenBSDMountpointsFactParsesMountAndDFOutput(t *testing.T) {
 
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("openBSDMountpointsFact() = %#v, want %#v", got, want)
+	}
+}
+
+func TestParseNetBSDMountEntries(t *testing.T) {
+	input := `/dev/dk1 on / type ffs (noatime, local)
+/dev/dk0 on /boot type msdos (local)
+ptyfs on /dev/pts type ptyfs (local)
+`
+
+	got := parseBSDMountEntries(input)
+	want := []mountEntry{
+		{Device: "/dev/dk1", Path: "/", Filesystem: "ffs", Options: []string{"noatime", "local"}},
+		{Device: "/dev/dk0", Path: "/boot", Filesystem: "msdos", Options: []string{"local"}},
+		{Device: "ptyfs", Path: "/dev/pts", Filesystem: "ptyfs", Options: []string{"local"}},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("parseBSDMountEntries() = %#v, want %#v", got, want)
 	}
 }
 

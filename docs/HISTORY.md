@@ -31,7 +31,8 @@ tree until completion:
   gate (Linux and macOS native runners, Windows Server 2022/2025 runners with
   `tools/windows-release-gate.ps1`, and a FreeBSD VM job running
   `tools/freebsd-release-gate.sh`); a gate failure fails the pipeline. The
-  gates are still live — see [CONTRIBUTING.md](../CONTRIBUTING.md).
+  current release-target matrix has since expanded — see
+  [CONTRIBUTING.md](../CONTRIBUTING.md).
 
 ## Final parity-ledger accounting
 
@@ -111,6 +112,10 @@ OpenSpec change with an ADR where it changed a contract:
   binary, man page, dist artifacts, and diagnostics token all became `facts`;
   no `facter` alias ships. Facter-named inputs remain as the compat tier
   under the facts-native ones.
+- **OpenBSD and NetBSD support** (`add-openbsd-netbsd-support`, 2026-06-17):
+  the supported release-target matrix expanded from the original four
+  port-completion targets to include OpenBSD and NetBSD, with VM release
+  gates and schema-backed supported-fact documentation.
 
 The migration log's append-only discipline ended with the log itself: future
 behavior changes are recorded in [CHANGELOG.md](../CHANGELOG.md) entries and

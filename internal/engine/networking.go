@@ -195,7 +195,10 @@ func networkingInterfacesFromSnapshots(snapshots []networkInterfaceSnapshot, goo
 			bindings6 = append(bindings6, binding)
 		}
 
-		value := map[string]any{"mtu": iface.MTU}
+		value := make(map[string]any)
+		if iface.MTU > 0 {
+			value["mtu"] = iface.MTU
+		}
 		if mac := formatInterfaceMAC(goos, iface.HardwareAddr); mac != "" {
 			value["mac"] = mac
 		}
@@ -206,7 +209,7 @@ func networkingInterfacesFromSnapshots(snapshots []networkInterfaceSnapshot, goo
 			value["bindings6"] = bindings6
 		}
 		// Address-less interfaces (for example macOS gif0/stf0 tunnels) still
-		// appear with their MTU, matching Ruby's getifaddrs-driven map.
+		// appear with their reported MTU, matching Ruby's getifaddrs-driven map.
 		values[networkInterfaceName(goos, iface.Name)] = value
 	}
 	return values
@@ -263,7 +266,7 @@ func currentNetworkingData(goos string, interfaces map[string]any, run commandRu
 		addDarwinDHCPServers(interfaces, run)
 		expandInterfaceBindings(interfaces)
 		return primaryInterfaceFromRoute(run("route", "-n", "get", "default")), interfaces
-	case "freebsd":
+	case "freebsd", "netbsd":
 		expandInterfaceBindings(interfaces)
 		return primaryInterfaceFromRoute(run("route", "-n", "get", "default")), interfaces
 	case "openbsd":
@@ -568,11 +571,34 @@ func expandInterfaceBindings(interfaces map[string]any) {
 
 func expandFirstInterfaceBinding(iface map[string]any, bindingKey string, factKeys map[string]string) {
 	binding := firstInterfaceBinding(iface, bindingKey)
+	if bindingKey == "bindings6" {
+		if preferred := preferredIPv6InterfaceBinding(iface); preferred != nil {
+			binding = preferred
+		}
+	}
 	for bindingFact, ifaceFact := range factKeys {
 		if value := binding[bindingFact]; value != nil && value != "" {
 			iface[ifaceFact] = value
 		}
 	}
+}
+
+func preferredIPv6InterfaceBinding(iface map[string]any) map[string]any {
+	bindings, ok := iface["bindings6"].([]any)
+	if !ok {
+		return nil
+	}
+	for _, raw := range bindings {
+		binding, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		scope, _ := binding["scope6"].(string)
+		if scope != "link" {
+			return binding
+		}
+	}
+	return nil
 }
 
 func addLinuxRouteSourceBindings(s *Session, interfaces map[string]any) {

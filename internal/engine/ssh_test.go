@@ -83,6 +83,16 @@ func TestDiscoverSSHHostKeysFreeBSDSearchesRubyPathsAndOrder(t *testing.T) {
 	assertDiscoverSSHHostKeysPOSIXSearchesRubyPathsAndOrder(t, "freebsd")
 }
 
+func TestDiscoverSSHHostKeysOpenBSDSearchesRubyPathsAndOrder(t *testing.T) {
+	t.Parallel()
+	assertDiscoverSSHHostKeysPOSIXSearchesRubyPathsAndOrder(t, "openbsd")
+}
+
+func TestDiscoverSSHHostKeysNetBSDSearchesRubyPathsAndOrder(t *testing.T) {
+	t.Parallel()
+	assertDiscoverSSHHostKeysPOSIXSearchesRubyPathsAndOrder(t, "netbsd")
+}
+
 func assertDiscoverSSHHostKeysPOSIXSearchesRubyPathsAndOrder(t *testing.T, goos string) {
 	t.Helper()
 
