@@ -160,7 +160,6 @@ Options
 	    -t [--timing]                     Show how much time it took to resolve each fact.
 	       [--sequential]                 Resolve facts sequentially.
 	       [--http-debug]                 Write HTTP request and responses to stderr.
-	    -p [--puppet]                     Load Puppet plugin external facts.
 	    -h [--help]                       Help for all arguments
 	       --version, -v                  Print the version
 	       --man                          Display manual.
@@ -204,7 +203,6 @@ OPTIONS
   * -t, --timing: Show how much time it took to resolve each fact.
   * --sequential: Resolve facts sequentially.
   * --http-debug: Write HTTP request and responses to stderr.
-  * -p, --puppet: Search Puppet's plugin-fact destinations for external facts only; synced Ruby plugin custom facts are not loaded and a warning is emitted (see docs/CUSTOM_FACT_MIGRATION.md).
   * --version, -v: Print the version.
   * --man: Display manual.
   * --list-block-groups: List block groups.
@@ -270,24 +268,18 @@ func runQuery(stdout, stderr io.Writer, args []string) error {
 	verbose := flags.Bool("verbose", false, "write info logs")
 	flags.Bool("sequential", false, "accepted for Facter compatibility")
 	flags.Bool("http-debug", false, "accepted for Facter compatibility")
-	puppet := flags.Bool("puppet", false, "accepted for Facter compatibility")
-	flags.Bool("no-puppet", false, "accepted for Facter compatibility")
 	noExternalFacts := flags.Bool("no-external-facts", false, "accepted for Facter compatibility")
 	var externalDirs []string
 	flags.Func("external-dir", "load external facts from directory", func(value string) error {
 		externalDirs = append(externalDirs, value)
 		return nil
 	})
-	puppetShort := flags.Bool("p", false, "accepted for Facter compatibility")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
 	colorOutput := resolveColor(*color, *noColor, stdout)
 	colorDiagnostics := resolveColor(*color, *noColor, stderr)
 	colorWarnings = colorDiagnostics
-	if *puppet && *puppetShort {
-		return optionError(stdout, errors.New("option --puppet cannot be specified more than once."))
-	}
 	configFile := firstNonEmpty(*configPath, *configPathShort)
 	configOptions, configErr := engine.ParseConfig(configFile)
 	if configErr != nil {
@@ -337,15 +329,11 @@ func runQuery(stdout, stderr io.Writer, args []string) error {
 		writeInfo(stderr, "executed with command line: "+strings.Join(args, " "), colorDiagnostics)
 		writeInfo(stderr, "resolving facts", colorDiagnostics)
 	}
-	if canUseVersionQueryFastPath(flags.Args(), externalDirs, blockedFacts, *noExternalFacts, *puppet || *puppetShort, *timing || *timingShort) {
+	if canUseVersionQueryFastPath(flags.Args(), externalDirs, blockedFacts, *noExternalFacts, *timing || *timingShort) {
 		return writeVersionQuery(stdout, *jsonOutput || *jsonOutputShort, *yamlOutput || *yamlOutputShort, *hoconOutput)
 	}
 	resolutionStart := time.Now()
 
-	if *puppet || *puppetShort {
-		externalDirs = append(externalDirs, engine.PuppetPluginFactDirs()...)
-		engine.WarnPuppetRubyPluginFacts()
-	}
 	logHandler := &stderrLogHandler{
 		stderr:  stderr,
 		color:   colorDiagnostics,
@@ -356,7 +344,6 @@ func runQuery(stdout, stderr io.Writer, args []string) error {
 		CLICompat:       true,
 		ExternalDirs:    externalDirs,
 		NoExternalFacts: *noExternalFacts,
-		Puppet:          *puppet || *puppetShort,
 		BlockedFacts:    blockedFacts,
 		Logger:          slog.New(logHandler),
 	})
@@ -519,8 +506,8 @@ func missingFactQueries(facts []engine.ResolvedFact) []string {
 	return missing
 }
 
-func canUseVersionQueryFastPath(queries, externalDirs []string, blockedFacts map[string]bool, noExternalFacts, puppet, timing bool) bool {
-	if len(queries) != 1 || queries[0] != "facterversion" || puppet || timing || blockedFacts["facterversion"] {
+func canUseVersionQueryFastPath(queries, externalDirs []string, blockedFacts map[string]bool, noExternalFacts, timing bool) bool {
+	if len(queries) != 1 || queries[0] != "facterversion" || timing || blockedFacts["facterversion"] {
 		return false
 	}
 	if !noExternalFacts && len(externalDirs) > 0 {

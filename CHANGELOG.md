@@ -63,9 +63,16 @@
   `docs/CUSTOM_FACT_MIGRATION.md` for the pattern mapping.
 - **BREAKING**: Removed Ruby runtime and Puppet package-version built-in facts.
   Core discovery no longer emits `ruby` or `aio_agent_version`, and
-  `facts --puppet` no longer resolves `puppetversion` by executing Puppet.
-  `--puppet` remains for Puppet plugin `facts.d` external facts and the
-  synced Ruby plugin-fact migration warning.
+  `puppetversion` is no longer resolved by executing Puppet.
+- **BREAKING**: Removed the `--puppet`/`-p`/`--no-puppet` CLI flags (ADR-0009).
+  Facts implements Facter's input/output contract, not Puppet's runtime
+  behavior: it no longer auto-discovers Puppet's agent plugin-fact destination
+  (`vardir/facts.d`) or warns about pluginsync'd Ruby plugin facts. The flags
+  now fail as unknown options. Facter's own external-fact directories (the
+  `…/puppetlabs/facter/facts.d` defaults and the rest of the default set) are
+  unchanged; to load Puppet's agent-synced module facts, pass `--external-dir
+  /opt/puppetlabs/puppet/cache/facts.d` (platform/user equivalent). The inert
+  `EngineConfig.Puppet` field is also removed.
 - **BREAKING (Go API only)**: Removed the Ruby-compatible Go API — the ~58
   package-level exports (`Value`, `ToHash`, `Resolve`, `Add`, `Flush`,
   `Search`, message and option toggles, …) and all package-global mutable

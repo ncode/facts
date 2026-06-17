@@ -123,12 +123,6 @@ Resolve facts sequentially
 Whether to write HTTP request and responses to stderr\. This should never be used in production\.
 .
 .TP
-\fB\-p\fR, \fB\-\-puppet\fR:
-.
-.IP
-Search Puppet plugin fact destinations for external facts\.
-.
-.TP
 \fB\-\-version, \-v\fR:
 .
 .IP
@@ -168,7 +162,7 @@ This manual describes the Go implementation of Facter\. Behavior differences fro
 Ruby DSL fact files (\fB\.rb\fR) are not read from any source: there is no \fB\-\-custom\-dir\fR option, no \fBFACTERLIB\fR lookup, and no Ruby evaluation\. A \fB\.rb\fR file in an external\-fact directory is skipped with a warning\. Rewrite Ruby custom facts as external facts; see \fIdocs/CUSTOM_FACT_MIGRATION\.md\fR\.
 .
 .IP "\(bu" 4
-\fB\-\-puppet\fR searches Puppet's default plugin\-fact destination paths for external facts, but it does not resolve Puppet package versions or load Puppet Ruby plugin custom facts; a warning is emitted for synced Ruby plugin facts instead (see \fIdocs/CUSTOM_FACT_MIGRATION\.md\fR)\.
+\fB\-\-puppet\fR, \fB\-p\fR, and \fB\-\-no\-puppet\fR are removed and fail as unknown options: Facts follows Facter's input/output contract, not Puppet's runtime behavior\. Facter's own external\-fact directories (including \fI/opt/puppetlabs/facter/facts\.d\fR) are still read; to load Puppet's agent\-synced module facts pass \fB\-\-external\-dir /opt/puppetlabs/puppet/cache/facts\.d\fR (see \fIdocs/adr/0009\-facter\-contract\-not\-puppet\-runtime\.md\fR)\.
 .
 .IP "\(bu" 4
 \fB\-\-sequential\fR is accepted for compatibility; the Go engine resolves facts deterministically\. \fB\-\-trace\fR is removed along with the Ruby DSL layer (its only function was Ruby custom\-fact backtraces) and fails as an unknown option\.

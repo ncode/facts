@@ -73,12 +73,12 @@ func TestValidateOptions_rejectsRepeatedNonRepeatableFlag(t *testing.T) {
 }
 
 func TestValidateOptions_rejectsRepeatedShortLongAlias(t *testing.T) {
-	err := ValidateOptions([]string{"query", "--puppet", "-p", "os.name"})
+	err := ValidateOptions([]string{"query", "--json", "-j", "os.name"})
 	if err == nil {
 		t.Fatal("ValidateOptions() err = nil, want duplicate option error")
 	}
-	if !strings.Contains(err.Error(), "option --puppet cannot be specified more than once") {
-		t.Fatalf("ValidateOptions() err = %q, want duplicate --puppet error", err)
+	if !strings.Contains(err.Error(), "option --json cannot be specified more than once") {
+		t.Fatalf("ValidateOptions() err = %q, want duplicate --json error", err)
 	}
 }
 
@@ -100,7 +100,7 @@ func TestValidateOptions_rejectsMissingRequiredOptionValue(t *testing.T) {
 }
 
 func TestValidateOptions_rejectsUnknownConcatenatedShortFlag(t *testing.T) {
-	args := PrepareArguments([]string{"-pjdtz"})
+	args := PrepareArguments([]string{"-jdtz"})
 	err := ValidateOptions(args)
 	if err == nil {
 		t.Fatal("ValidateOptions() err = nil, want unknown option error")
@@ -141,12 +141,6 @@ func TestValidateOptions_rejectsConflictingColorOptions(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "--color and --no-color options conflict") {
 		t.Fatalf("ValidateOptions() err = %q, want color option conflict", err)
-	}
-}
-
-func TestValidateOptions_allowsPuppetWithoutExternalFacts(t *testing.T) {
-	if err := ValidateOptions([]string{"query", "--puppet", "--no-external-facts", "os.name"}); err != nil {
-		t.Fatalf("ValidateOptions() err = %v, want nil", err)
 	}
 }
 

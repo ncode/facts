@@ -160,7 +160,7 @@ func TestFactsCommand_strictMissingFactLogsMissingFactErrorLikeRubyCLI(t *testin
 func TestFactsCommand_invalidConcatenatedShortFlagReportsOptionsValidatorError(t *testing.T) {
 	bin := buildFactsCommand(t)
 
-	stdout, stderr, status := runFactsCommandStatus(t, bin, "-pjdtz")
+	stdout, stderr, status := runFactsCommandStatus(t, bin, "-jdtz")
 	if status == 0 {
 		t.Fatal("exit status = 0, want non-zero")
 	}

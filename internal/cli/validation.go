@@ -84,8 +84,6 @@ func validateOptions(args []string) error {
 		{option: "--hocon", conflicts: []string{"--no-hocon"}},
 		{option: "-j", conflicts: []string{"--no-json", "--hocon"}},
 		{option: "-y", conflicts: []string{"--no-yaml", "-j", "--hocon"}},
-		{option: "--puppet", conflicts: []string{"--no-puppet"}},
-		{option: "-p", conflicts: []string{"--no-puppet"}},
 		{option: "--no-external-facts", conflicts: []string{"--external-dir"}},
 	}
 	for _, invalid := range invalid {
@@ -138,8 +136,6 @@ func shortOptionAlias(arg string) string {
 		return "--json"
 	case "-y":
 		return "--yaml"
-	case "-p":
-		return "--puppet"
 	case "-h":
 		return "--help"
 	case "-v":
@@ -169,7 +165,7 @@ func knownOption(arg string) bool {
 		"--force-dot-resolution", "--help", "--hocon", "--http-debug", "--json", "--list-block-groups",
 		"--list-cache-groups", "--log-level", "--no-block", "--no-cache",
 		"--no-color", "--no-external-facts", "--no-hocon",
-		"--no-json", "--no-puppet", "--no-yaml", "--man", "--puppet",
+		"--no-json", "--no-yaml", "--man",
 		"--sequential", "--strict", "--timing",
 		"--verbose", "--version", "--yaml":
 		return true

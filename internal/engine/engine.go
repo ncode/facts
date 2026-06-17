@@ -55,8 +55,6 @@ type EngineConfig struct {
 	CLICompat bool
 	// NoExternalFacts skips external-fact loading (--no-external-facts).
 	NoExternalFacts bool
-	// Puppet appends Puppet facts to the core set (--puppet).
-	Puppet bool
 	// BlockedFacts overrides the config-derived blocklist when non-nil.
 	BlockedFacts map[string]bool
 }

@@ -72,15 +72,6 @@ directory; `.ps1` files run through PowerShell automatically.
 External facts win precedence over registered and core facts, exactly as in
 Ruby Facter.
 
-## Deviation: `facts --puppet` and Ruby plugin facts
-
-Ruby Facter under `--puppet` loads Ruby *custom* facts synced by Puppet
-pluginsync (`vardir/lib/facter`). Facts does not: `facts --puppet` searches
-Puppet's plugin-fact destinations (`vardir/facts.d`) for **external** facts
-only, and emits a warning when synced Ruby plugin facts are present that they
-are not loaded. Rewrite those plugin facts as external facts using the
-mapping above. This is a documented, permanent deviation (ADR-0006).
-
 ## Cutover checklist
 
 1. Inventory the `.rb` fact files your fleet ships (including gem- and

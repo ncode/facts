@@ -1,0 +1,17 @@
+# Facts speaks Facter's input/output contract, not Puppet's runtime behavior
+
+Facts is a fact-discovery library and CLI that implements Facter's input and output *contract* — the shapes of facts in and out — but it is not bound to Puppet or to what Puppet does at runtime. The `--puppet` (`-p`) flag was the one feature that crossed that line: it appended Puppet's agent plugin-fact destination (`vardir/facts.d`, e.g. `/opt/puppetlabs/puppet/cache/facts.d`) to the external-fact directories, and it warned when Puppet had pluginsync'd Ruby custom facts into `vardir/lib/facter`. Both re-enact what a running `puppet agent` arranges on a host, not a Facter-shaped input. We remove `--puppet`, `-p`, and `--no-puppet` entirely; they now fail as unknown options. This builds on ADR-0006 (no Ruby DSL) and ADR-0001 (the CLI process edge is the only compatibility boundary).
+
+The boundary this draws, stated so it is not re-crossed by accident:
+
+- **In the input contract (kept):** Facter's own external-fact directories, including the ones that live under a `puppetlabs/` path — `/opt/puppetlabs/facter/facts.d`, `/etc/puppetlabs/facter/facts.d`, `~/.puppetlabs/opt/facter/facts.d` — which stay in the always-on default set (`internal/engine/config.go`). These are Facter's directories, not Puppet's runtime; "no Puppet" must not be read as a license to delete them.
+- **Out of scope (removed):** Puppet's agent-runtime surface — the pluginfactdest/vardir cache (`…/puppet/cache/facts.d`), pluginsync, and `.rb` plugin loading.
+
+Puppet's agent cache is still reachable like any other directory through the explicit external-fact inputs: `--external-dir /opt/puppetlabs/puppet/cache/facts.d` (or the platform/user equivalent). A `.rb` file in any external directory is still skipped with a warning by the general loader (ADR-0006); only the `--puppet`-specific warning about `vardir/lib/facter` is gone, because that directory was never loaded as an external dir to begin with. The inert `EngineConfig.Puppet` field and `internal/engine/puppet.go` are deleted, so the engine carries no notion of Puppet.
+
+## Considered Options
+
+- **Keep `--puppet` as a convenience bridge** — rejected: it is the only feature that reaches into Puppet's runtime rather than Facter's contract, which is precisely the coupling this project no longer wants. Auto-discovering an agent's on-disk cache is Puppet-runtime behavior, not a Facter input shape.
+- **Hide the CLI flag but keep the engine helper** — rejected: the `EngineConfig.Puppet` field was already inert (set by the CLI, read by no engine code) and `PuppetPluginFactDirs` was CLI-only; a library that claims no Puppet coupling should not ship a Puppet path-resolver. Full delete to the engine.
+- **Emit a bespoke `--puppet is removed; use --external-dir` error** — rejected: the validator already fails unknown flags with `unrecognised option '--puppet'`; a special-cased hint for one flag is inconsistent with every other removed flag (ADR-0006's `--custom-dir`, ADR-0007's `--show-legacy`) and keeps a Puppet-shaped stub. The migration guidance lives in the CHANGELOG.
+- **Remove `--puppet` (chosen)** — breaking only on paper; the project is pre-1.0 (v0.0.x, no compatibility guarantee yet), so the input-contract amendment is cheap now and expensive after 1.0. Facter-configured hosts are unaffected — their `facts.d` directories are Facter's, which we keep.
