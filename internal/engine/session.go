@@ -83,6 +83,8 @@ type Session struct {
 	uptime                       memo[uptimeInfo]
 	loadAverages                 memo[map[string]any]
 	filesystems                  memo[any]
+	identity                     memo[map[string]any]
+	dmi                          memo[map[string]any]
 }
 
 // NewSession returns an empty Session; probes run on first use.
@@ -245,4 +247,18 @@ func (s *Session) cachedLoadAverages() map[string]any {
 }
 func (s *Session) cachedFilesystems() any {
 	return s.filesystems.get(func() any { return probeFilesystems(s) })
+}
+
+// cachedIdentity memoizes identityFact so the emitted identity fact and the
+// SSH privilege gate share one probe result, as buildCoreFacts did before the
+// per-category split (ADR-0010).
+func (s *Session) cachedIdentity() map[string]any {
+	return s.identity.get(func() map[string]any { return identityFact(s) })
+}
+
+// cachedDMI memoizes dmiFact so the emitted dmi fact and GCE BIOS-vendor
+// detection share one read of /sys/class/dmi/id, as buildCoreFacts did before
+// the per-category split (ADR-0010).
+func (s *Session) cachedDMI() map[string]any {
+	return s.dmi.get(func() map[string]any { return dmiFact("/sys/class/dmi/id", s.readFile) })
 }

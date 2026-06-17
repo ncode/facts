@@ -102,6 +102,6 @@ func numericIdentityValue(value string) any {
 // group, and privilege state) for the current host.
 func identityCoreFacts(s *Session) []ResolvedFact {
 	return []ResolvedFact{
-		{Name: "identity", Value: identityFact(s)},
+		{Name: "identity", Value: s.cachedIdentity()},
 	}
 }

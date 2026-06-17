@@ -32,6 +32,8 @@ The 2026-06-17 deepen-engine-internals change routed host I/O through the Sessio
 - **A GOOS-suffix slip** reintroducing an implicit build constraint → guarded by `GOOS=linux|darwin|windows|freebsd go build ./...` and by running the full test suite (cross-platform parse tests must still execute on the host CI).
 - **Merge churn against in-flight work on `core.go`** → do the carve as pure cut/paste per category with a green `go test ./...` after each, so each category move is an isolated, revertable step.
 - **Large diff** → unavoidable for a 6,256-line file; mitigated by per-category commits and the no-signature-change rule keeping each move mechanical.
+- **Raw `CoreFacts` slice order changes** (grouped by category now, vs the old hand-maintained literal) → accepted, non-contractual. The output contract (JSON/YAML/HOCON/legacy) and `Snapshot.All()` are name-sorted and unchanged (golden `./facts --json` diff is clean); the only observable difference is `facts --timing` with no query, whose ordering is not pinned. Per-category composition keeps each category's facts contiguous, which is the point of the split.
+- **Compute-once values must stay shared across categories** → `identity` (emitted fact + SSH privilege gate) and `dmi` (emitted fact + GCE BIOS-vendor detection) were each computed once in the old `buildCoreFacts`. After the split they are reached from two category sites, so they are memoized on the `Session` (`cachedIdentity`/`cachedDMI`, matching the existing `cached*` probes) to preserve the single-probe, single-value behavior. Caught by the deep review; without the memo the probes would run twice and could disagree.
 
 ## Migration Plan
 

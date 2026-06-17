@@ -307,7 +307,7 @@ func macOSDMIFacts(model string) []ResolvedFact {
 // chassis/product facts plus the platform-specific FreeBSD, OpenBSD, Windows,
 // and macOS DMI facts) for the current host.
 func dmiCoreFacts(s *Session) []ResolvedFact {
-	dmi := dmiFact("/sys/class/dmi/id", s.readFile)
+	dmi := s.cachedDMI()
 	facts := dmiFacts(dmi)
 	facts = append(facts, macOSDMIFacts(s.cachedMacOSModel())...)
 	facts = append(facts, windowsDMIFacts(currentWindowsDMI(runtime.GOOS, s.commandOutput, s.logr()))...)

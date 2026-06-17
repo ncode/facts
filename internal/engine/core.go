@@ -33,7 +33,7 @@ func CoreFacts(s *Session) []ResolvedFact {
 func buildCoreFacts(s *Session) []ResolvedFact {
 	virtualization := detectVirtualization(s)
 	virtualFact, isVirtualFact := virtualizationFactValues(virtualization)
-	dmi := dmiFact("/sys/class/dmi/id", s.readFile)
+	dmi := s.cachedDMI()
 	facts := []ResolvedFact{
 		{Name: "facterversion", Value: Version},
 		{Name: "is_virtual", Value: isVirtualFact},

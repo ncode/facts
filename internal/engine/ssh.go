@@ -147,7 +147,7 @@ func identityPrivileged(identity map[string]any) bool {
 // sshCoreFacts assembles the ssh category fact (the discovered host-key
 // fingerprints) for the current host, honoring the Windows privilege gate.
 func sshCoreFacts(s *Session) []ResolvedFact {
-	identity := identityFact(s)
+	identity := s.cachedIdentity()
 	return sshFactsForPlatformWithPrivilege(runtime.GOOS, identityPrivileged(identity), func() []sshHostKey {
 		return discoverSSHHostKeys(s.readFile)
 	})
