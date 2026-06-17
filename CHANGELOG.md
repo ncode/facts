@@ -15,6 +15,10 @@
 
 ### Changed
 
+- **BREAKING**: Linux disk serial numbers now emit as
+  `disks.*.serial_number` instead of `disks.*.serial`, matching the
+  schema-owned canonical spelling used for disk serials across supported
+  targets (ADR-0011).
 - Engine diagnostics now flow through a single seam — the per-Engine
   `log/slog` logger. The package-global diagnostic handlers
   (`SetWarningHandler`/`SetDebugHandler`/`SetErrorHandler`) and the

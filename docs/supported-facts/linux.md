@@ -11,6 +11,7 @@ $ facts --json
 {
   "disks": {
     "sda": {
+      "serial_number": "S250NXAG959927J",
       "size": "64.00 GiB",
       "size_bytes": 68719476736,
       "type": "ssd"
@@ -57,7 +58,7 @@ $ facts --json
 | `cloud.provider` | `string` | yes | The cloud provider hosting the machine: aws, azure, or gce. |
 | `disks.*` | `map` | yes | A block device attached to the system, keyed by device name. |
 | `disks.*.model` | `string` | yes | The model of the disk. |
-| `disks.*.serial` | `string` | yes | The serial number of the disk. |
+| `disks.*.serial_number` | `string` | yes | The serial number of the disk. |
 | `disks.*.size` | `string` | yes | The display size of the disk, such as 1.00 GiB. |
 | `disks.*.size_bytes` | `integer` | yes | The size of the disk, in bytes. |
 | `disks.*.type` | `string` | yes | The kind of disk: ssd or hdd. |

@@ -610,7 +610,7 @@ func TestDisksFact_readsLinuxSysfsBlockDevices(t *testing.T) {
 	}
 }
 
-func TestCurrentLinuxDisksAddsSerialAndWWNLikeRubyResolver(t *testing.T) {
+func TestCurrentLinuxDisksAddsSerialNumberAndWWN(t *testing.T) {
 	dir := t.TempDir()
 	for _, name := range []string{"sda", "sr0"} {
 		disk := filepath.Join(dir, name)
@@ -655,13 +655,13 @@ func TestCurrentLinuxDisksAddsSerialAndWWNLikeRubyResolver(t *testing.T) {
 	got := currentLinuxDisks(dir, run)
 	want := map[string]any{
 		"sda": map[string]any{
-			"model":      "model2",
-			"serial":     "B2EI34F1AL",
-			"size":       "115.50 KiB",
-			"size_bytes": 118_272,
-			"type":       "hdd",
-			"vendor":     "vendor2",
-			"wwn":        "29429191.0",
+			"model":         "model2",
+			"serial_number": "B2EI34F1AL",
+			"size":          "115.50 KiB",
+			"size_bytes":    118_272,
+			"type":          "hdd",
+			"vendor":        "vendor2",
+			"wwn":           "29429191.0",
 		},
 		"sr0": map[string]any{
 			"model":      "model1",

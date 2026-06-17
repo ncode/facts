@@ -158,7 +158,7 @@ func exampleOutput(platform string) string {
 
 var exampleJSON = map[string]string{
 	"linux": `{
-		"disks": {"sda": {"size": "64.00 GiB", "size_bytes": 68719476736, "type": "ssd"}},
+		"disks": {"sda": {"serial_number": "S250NXAG959927J", "size": "64.00 GiB", "size_bytes": 68719476736, "type": "ssd"}},
 		"kernel": "Linux",
 		"networking": {"hostname": "linux01", "interfaces": {"eth0": {"ip": "192.0.2.10", "mac": "52:54:00:12:34:56", "mtu": 1500}}},
 		"os": {"family": "Debian", "name": "Ubuntu", "release": {"major": "24", "full": "24.04"}},
@@ -177,7 +177,7 @@ var exampleJSON = map[string]string{
 		"os": {"family": "windows", "name": "windows", "windows": {"system32": "C:\\Windows\\System32"}}
 	}`,
 	"freebsd": `{
-		"disks": {"ada0": {"model": "Virtual Disk", "size": "64.00 GiB", "size_bytes": 68719476736}},
+		"disks": {"ada0": {"model": "Virtual Disk", "serial_number": "S250NXAG959927J", "size": "64.00 GiB", "size_bytes": 68719476736}},
 		"kernel": "FreeBSD",
 		"networking": {"hostname": "freebsd01", "interfaces": {"vtnet0": {"ip": "192.0.2.40", "mac": "58:9c:fc:00:00:01", "mtu": 1500}}},
 		"os": {"family": "FreeBSD", "name": "FreeBSD", "release": {"major": "14", "full": "14.3-RELEASE"}},

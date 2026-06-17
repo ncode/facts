@@ -12,6 +12,7 @@ $ facts --json
   "disks": {
     "ada0": {
       "model": "Virtual Disk",
+      "serial_number": "S250NXAG959927J",
       "size": "64.00 GiB",
       "size_bytes": 68719476736
     }
