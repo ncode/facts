@@ -26,6 +26,14 @@ The Go port SHALL pass a defined verification matrix before release completion.
 - **WHEN** maintainers validate FreeBSD behavior
 - **THEN** Lima FreeBSD build/smoke coverage MUST pass and MUST be broad enough to exercise the FreeBSD release-gate fact set defined by the supported-platform facts capability
 
+#### Scenario: OpenBSD validation gates
+- **WHEN** maintainers validate OpenBSD behavior
+- **THEN** OpenBSD CI or an approved OpenBSD VM runner MUST pass platform-sensitive Go tests and CLI fact smoke checks for OS, networking, memory, processors, DMI when supported, disks, partitions, mountpoints, uptime, virtualization, SSH, and timezone, using structured fact names only
+
+#### Scenario: NetBSD validation gates
+- **WHEN** maintainers validate NetBSD behavior
+- **THEN** NetBSD CI or an approved NetBSD VM runner MUST pass platform-sensitive Go tests and CLI fact smoke checks for OS, networking, memory, processors, DMI when supported, disks, partitions, mountpoints, uptime, virtualization, SSH, and timezone, using structured fact names only
+
 ### Requirement: Benchmark and performance evidence
 The Go port SHALL preserve performance discipline for hot-path changes.
 

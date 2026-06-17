@@ -211,6 +211,8 @@ func currentOSRelease(s *Session, goos string, readFile fileReader, run commandR
 		}
 	case "openbsd":
 		return parseOpenBSDOSRelease(run("uname", "-r"))
+	case "netbsd":
+		return parseOpenBSDOSRelease(run("uname", "-r"))
 	case "darwin":
 		return parseDarwinOSRelease(run("uname", "-r"))
 	case "windows":
@@ -1712,6 +1714,8 @@ func osName(goos string, distro linuxDistro) string {
 		return "Linux"
 	case "freebsd":
 		return "FreeBSD"
+	case "netbsd":
+		return "NetBSD"
 	case "openbsd":
 		return "OpenBSD"
 	default:
@@ -1729,6 +1733,8 @@ func kernelName(goos string) string {
 		return "Linux"
 	case "freebsd":
 		return "FreeBSD"
+	case "netbsd":
+		return "NetBSD"
 	case "openbsd":
 		return "OpenBSD"
 	default:

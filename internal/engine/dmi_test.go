@@ -260,6 +260,37 @@ func TestOpenBSDDMIFacts_returnsStructuredFacts(t *testing.T) {
 	}
 }
 
+func TestNetBSDDMIFacts_returnsStructuredFacts(t *testing.T) {
+	values := map[string]string{
+		"machdep.dmi.system-vendor":    "QEMU",
+		"machdep.dmi.system-product":   "QEMU Virtual Machine",
+		"machdep.dmi.system-version":   "virt-11.0",
+		"machdep.dmi.system-serial":    "",
+		"machdep.dmi.system-uuid":      "00000000-0000-0000-0000-000000000000",
+		"machdep.dmi.system-unrelated": "ignored",
+	}
+
+	facts := netBSDDMIFacts(values)
+	collection := Collection(facts)
+
+	want := map[string]any{
+		"dmi": map[string]any{
+			"bios": map[string]any{
+				"vendor":  "QEMU",
+				"version": "virt-11.0",
+			},
+			"manufacturer": "QEMU",
+			"product": map[string]any{
+				"name": "QEMU Virtual Machine",
+				"uuid": "00000000-0000-0000-0000-000000000000",
+			},
+		},
+	}
+	if !reflect.DeepEqual(collection, want) {
+		t.Fatalf("netBSDDMIFacts() = %#v, want %#v", collection, want)
+	}
+}
+
 func TestMacOSDMIFacts_returnsProductName(t *testing.T) {
 	core := macOSDMIFacts("MacBookPro11,4")
 

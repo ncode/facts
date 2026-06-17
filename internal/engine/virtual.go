@@ -50,6 +50,14 @@ var dmiProductHypervisors = []struct {
 	{"BHYVE", "bhyve"},
 }
 
+var openBSDProductHypervisors = map[string]string{
+	"VMM":     "vmm",
+	"vServer": "vserver",
+	"oracle":  "virtualbox",
+	"xen":     "xenu",
+	"none":    "",
+}
+
 type dmiDecodeHypervisorInfo struct {
 	VirtualBoxVersion  string
 	VirtualBoxRevision string
@@ -157,7 +165,7 @@ func currentOpenBSDVirtualizationInput(run func(string, ...string) string) openB
 }
 
 func detectOpenBSDVirtualization(input openBSDVirtualizationInput) virtualization {
-	if name := dmiProductHypervisor(input.ProductName); name != "" {
+	if name, ok := openBSDProductHypervisors[input.ProductName]; ok && name != "" {
 		return virtualization{Name: name, IsVirtual: true}
 	}
 	return virtualization{Name: "physical"}

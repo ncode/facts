@@ -8,7 +8,7 @@ The Go port SHALL produce versioned, installable release artifacts for all suppo
 
 #### Scenario: dist target builds the artifact matrix
 - **WHEN** `make dist` runs
-- **THEN** it MUST produce checksummed archives named `facts-<version>-<os>-<arch>` for linux/amd64, linux/arm64, darwin/amd64, darwin/arm64, windows/amd64, windows/arm64, and freebsd/amd64, with the version embedded in the binary and reported by `facts --version`
+- **THEN** it MUST produce checksummed archives named `facts-<version>-<os>-<arch>` for linux/amd64, linux/arm64, darwin/amd64, darwin/arm64, windows/amd64, windows/arm64, freebsd/amd64, openbsd/amd64, and netbsd/amd64, with the version embedded in the binary and reported by `facts --version`
 
 #### Scenario: install target
 - **WHEN** `make install` runs with an optional `PREFIX`
@@ -26,7 +26,7 @@ The Go port SHALL have end-to-end acceptance verification that exercises the rea
 - **THEN** it MUST build the real `cmd/facts` binary, execute it with representative flag combinations (default, single query, dotted query, `--json`, `--yaml`, `--strict`), and assert the release-gate fact set and exit codes against the live host using structured fact names only
 
 #### Scenario: Beaker suite marked historical
-- **WHEN** the Go acceptance suite is in place for the four supported platforms
+- **WHEN** the Go acceptance suite is in place for the supported Linux, macOS/Darwin, Windows, FreeBSD, OpenBSD, and NetBSD platforms
 - **THEN** the Ruby `acceptance/` Beaker suite MUST be documented as historical for the Go port and excluded from Go release gates
 
 ### Requirement: End-user documentation matches the Go CLI

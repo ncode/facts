@@ -14,7 +14,7 @@ names win when both are present; semantics are identical for both tiers.
   first and the facter-compatible path second; the first *existing* file
   wins and the other is ignored. `--config` overrides both.
 
-  | Tier | Linux/macOS/FreeBSD | Windows |
+  | Tier | Unix-like targets | Windows |
   | --- | --- | --- |
   | native | `/etc/facts/facts.conf` | `C:/ProgramData/facts/facts.conf` |
   | compat | `/etc/puppetlabs/facter/facter.conf` | `C:/ProgramData/PuppetLabs/facter/etc/facter.conf` |

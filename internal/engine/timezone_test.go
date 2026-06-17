@@ -71,6 +71,16 @@ func TestCurrentTimezoneFreeBSDMatchesRubyResolverFormat(t *testing.T) {
 	assertCurrentTimezonePOSIXMatchesRubyResolverFormat(t, "freebsd")
 }
 
+func TestCurrentTimezoneOpenBSDMatchesRubyResolverFormat(t *testing.T) {
+	t.Parallel()
+	assertCurrentTimezonePOSIXMatchesRubyResolverFormat(t, "openbsd")
+}
+
+func TestCurrentTimezoneNetBSDMatchesRubyResolverFormat(t *testing.T) {
+	t.Parallel()
+	assertCurrentTimezonePOSIXMatchesRubyResolverFormat(t, "netbsd")
+}
+
 func assertCurrentTimezonePOSIXMatchesRubyResolverFormat(t *testing.T, goos string) {
 	t.Helper()
 

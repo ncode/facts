@@ -203,6 +203,35 @@ func TestCurrentUptimeInfoMarksMissingSourcesUnknown(t *testing.T) {
 	}
 }
 
+func TestCurrentUptimeInfoBSDsFallBackToUptimeCommand(t *testing.T) {
+	t.Parallel()
+
+	readFile := func(string) ([]byte, error) {
+		return nil, os.ErrNotExist
+	}
+	for _, goos := range []string{"openbsd", "netbsd"} {
+		t.Run(goos, func(t *testing.T) {
+			t.Parallel()
+
+			got := currentUptimeInfo(testSession, goos, readFile, func(name string, args ...string) string {
+				switch name {
+				case "sysctl":
+					return ""
+				case "uptime":
+					return "10:00AM up 1 day, 2:03, 1 user, load averages: 0.01, 0.02, 0.03"
+				default:
+					t.Fatalf("run = %s %#v, want sysctl or uptime", name, args)
+					return ""
+				}
+			}, time.Now)
+			want := uptimeInfo{Duration: 26*time.Hour + 3*time.Minute, Known: true}
+			if got != want {
+				t.Fatalf("currentUptimeInfo(%s) = %#v, want %#v", goos, got, want)
+			}
+		})
+	}
+}
+
 func TestCurrentUptimeUsesWindowsWMITimes(t *testing.T) {
 	t.Parallel()
 
@@ -351,7 +380,7 @@ func TestParseMacOSLoadAverages(t *testing.T) {
 }
 
 func TestCurrentLoadAverages_wiresBSDVMLoadavg(t *testing.T) {
-	for _, goos := range []string{"freebsd", "openbsd"} {
+	for _, goos := range []string{"freebsd", "openbsd", "netbsd"} {
 		t.Run(goos, func(t *testing.T) {
 			got := currentLoadAverages(goos, nil, func(path string, args ...string) string {
 				if path != "sysctl" || !reflect.DeepEqual(args, []string{"-n", "vm.loadavg"}) {

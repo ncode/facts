@@ -128,6 +128,8 @@ func probeProcessorSpeed(s *Session) string {
 		return parseLinuxProcessorSpeed(string(data))
 	case "freebsd":
 		return hertzToHumanReadable(s.cachedPlatformProcessorInfo().SpeedHz)
+	case "netbsd", "openbsd":
+		return hertzToHumanReadable(s.cachedPlatformProcessorInfo().SpeedHz)
 	}
 	return ""
 }
@@ -148,7 +150,7 @@ func probeProcessorModels(s *Session) []string {
 				return models
 			}
 		}
-	case "freebsd", "windows":
+	case "freebsd", "netbsd", "openbsd", "windows":
 		models := s.cachedPlatformProcessorInfo().Models
 		if len(models) > 0 {
 			return append([]string(nil), models...)
@@ -176,7 +178,7 @@ func probeProcessorTopology(s *Session) (int, int) {
 				return cores, threads
 			}
 		}
-	case "freebsd", "windows":
+	case "freebsd", "netbsd", "openbsd", "windows":
 		processors := s.cachedPlatformProcessorInfo()
 		if processors.CoresPerSocket > 0 && processors.ThreadsPerCore > 0 {
 			return processors.CoresPerSocket, processors.ThreadsPerCore
@@ -205,6 +207,12 @@ func currentProcessorInfo(goos string, run func(string, ...string) string, log *
 			run("sysctl", "-n", "hw.ncpu"),
 			run("sysctl", "-n", "hw.model"),
 			run("sysctl", "-n", "hw.clockrate"),
+		)
+	case "netbsd", "openbsd":
+		return parseFreeBSDProcessors(
+			run("sysctl", "-n", "hw.ncpu"),
+			run("sysctl", "-n", "hw.model"),
+			run("sysctl", "-n", "hw.cpuspeed"),
 		)
 	case "windows":
 		return currentWindowsProcessors(goos, run, log)
@@ -488,7 +496,7 @@ func hertzToHumanReadable(hz any) string {
 func processorsCoreFacts(s *Session) []ResolvedFact {
 	architecture := s.cachedArchitectureName()
 	platformProcessors := processorInfo{}
-	if runtime.GOOS == "darwin" || runtime.GOOS == "freebsd" || runtime.GOOS == "windows" {
+	if runtime.GOOS == "darwin" || runtime.GOOS == "freebsd" || runtime.GOOS == "netbsd" || runtime.GOOS == "openbsd" || runtime.GOOS == "windows" {
 		platformProcessors = s.cachedPlatformProcessorInfo()
 	}
 	if runtime.GOOS == "linux" {

@@ -172,6 +172,26 @@ func TestNetworkingInterfacesWindowsReplacesInvalidFriendlyNameLikeRubyResolver(
 	}
 }
 
+func TestNetworkingInterfacesOmitsZeroMTUFromAddresslessPOSIXInterfaces(t *testing.T) {
+	t.Parallel()
+
+	got := networkingInterfacesFromSnapshots([]networkInterfaceSnapshot{
+		{
+			Interface: net.Interface{Name: "enc0"},
+		},
+		{
+			Interface: net.Interface{Name: "gif0", MTU: 1280},
+		},
+	}, "openbsd")
+
+	if got := got["enc0"].(map[string]any)["mtu"]; got != nil {
+		t.Fatalf("enc0 mtu = %#v, want omitted", got)
+	}
+	if got := got["gif0"].(map[string]any)["mtu"]; got != 1280 {
+		t.Fatalf("gif0 mtu = %#v, want 1280", got)
+	}
+}
+
 func TestFormatInterfaceMACUppercasesWindowsLikeRubyNetworkUtils(t *testing.T) {
 	t.Parallel()
 
@@ -593,7 +613,7 @@ func TestCurrentNetworkingDataFreeBSDPreservesDHCPForPrimaryInterface(t *testing
 func TestCurrentNetworkingDataUsesBSDAndDarwinRoutePrimaryInterface(t *testing.T) {
 	t.Parallel()
 
-	for _, goos := range []string{"darwin", "freebsd", "openbsd"} {
+	for _, goos := range []string{"darwin", "freebsd", "netbsd", "openbsd"} {
 		t.Run(goos, func(t *testing.T) {
 			t.Parallel()
 
@@ -659,6 +679,80 @@ func TestCurrentNetworkingDataExpandsOpenBSDInterfaceBindings(t *testing.T) {
 		"ip6":      "::1",
 		"netmask6": "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
 		"network6": "::1",
+	} {
+		if lo0[key] != want {
+			t.Fatalf("lo0[%s] = %#v, want %#v", key, lo0[key], want)
+		}
+	}
+}
+
+func TestCurrentNetworkingDataOpenBSDSummaryPrefersRoutableIPv6Binding(t *testing.T) {
+	t.Parallel()
+
+	interfaces := map[string]any{
+		"vio0": map[string]any{
+			"bindings6": []any{
+				map[string]any{
+					"address": "fe80::5054:ff:fe12:3422",
+					"netmask": "ffff:ffff:ffff:ffff::",
+					"network": "fe80::",
+					"scope6":  "link",
+				},
+				map[string]any{
+					"address": "fec0::533d:e3fd:7582:e611",
+					"netmask": "ffff:ffff:ffff:ffff::",
+					"network": "fec0::",
+					"scope6":  "site",
+				},
+			},
+		},
+	}
+
+	_, got := currentNetworkingData("openbsd", interfaces, func(string, ...string) string { return "" })
+
+	vio0 := got["vio0"].(map[string]any)
+	for key, want := range map[string]any{
+		"ip6":      "fec0::533d:e3fd:7582:e611",
+		"netmask6": "ffff:ffff:ffff:ffff::",
+		"network6": "fec0::",
+		"scope6":   "site",
+	} {
+		if vio0[key] != want {
+			t.Fatalf("vio0[%s] = %#v, want %#v", key, vio0[key], want)
+		}
+	}
+}
+
+func TestCurrentNetworkingDataOpenBSDSummaryKeepsHostIPv6Binding(t *testing.T) {
+	t.Parallel()
+
+	interfaces := map[string]any{
+		"lo0": map[string]any{
+			"bindings6": []any{
+				map[string]any{
+					"address": "::1",
+					"netmask": "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
+					"network": "::1",
+					"scope6":  "host",
+				},
+				map[string]any{
+					"address": "fe80::1",
+					"netmask": "ffff:ffff:ffff:ffff::",
+					"network": "fe80::",
+					"scope6":  "link",
+				},
+			},
+		},
+	}
+
+	_, got := currentNetworkingData("openbsd", interfaces, func(string, ...string) string { return "" })
+
+	lo0 := got["lo0"].(map[string]any)
+	for key, want := range map[string]any{
+		"ip6":      "::1",
+		"netmask6": "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
+		"network6": "::1",
+		"scope6":   "host",
 	} {
 		if lo0[key] != want {
 			t.Fatalf("lo0[%s] = %#v, want %#v", key, lo0[key], want)

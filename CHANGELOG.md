@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Added
+
+- OpenBSD and NetBSD are being promoted to supported targets with core fact
+  resolvers, schema metadata, local smoke targets, release-gate scripts, and
+  GitHub VM/cross-compile coverage.
+- Conditional ZFS and zpool facts are now emitted on FreeBSD and NetBSD when
+  usable `zfs upgrade -v`/`zpool upgrade -v` output is available.
+- Added generated per-platform supported fact pages under
+  `docs/supported-facts/`, derived from `docs/schema/facts.yaml` and checked
+  by `go test ./...`.
+
 ### Changed
 
 - Engine diagnostics now flow through a single seam — the per-Engine
@@ -111,9 +122,10 @@
   Silicon), `fips_enabled` resolves only on Linux and Windows, `os.selinux`
   resolves only on Linux, and `dmi` and `filesystems` are absent when their
   probes resolve nothing. `processors.extensions` is kept as
-  accurate additional data and documented as a deliberate deviation in the
-  man page GO PORT NOTES. Operator-supplied external facts with empty values
-  are unaffected — the change is in the core resolvers, not the formatter.
+  accurate additional data and documented as a deliberate deviation in the man
+  page COMPATIBILITY section. Operator-supplied external facts with empty
+  values are unaffected — the change is in the core resolvers, not the
+  formatter.
 
 ### Added
 
@@ -121,7 +133,7 @@
   every supported fact as a dotted path (with `*` patterns for dynamic key
   segments) carrying its type, description, platforms, and a `conditional`
   marker for facts whose presence depends on host state. A conformance test
-  (`TestFactsSchemaConformance`) rides all four platform CI gates and fails
+  (`TestFactsSchemaConformance`) rides all platform CI gates and fails
   on undocumented facts and on non-conditional entries the platform does not
   emit; its `-schema-report` mode lists exactly what a new fact still needs
   documented. `CONTRIBUTING.md` gains the matching "Adding facts" rule and
@@ -189,4 +201,4 @@
   where Ruby reports the first-bound address (on macOS often the `fe80::`
   link-local). A primary interface carrying only link-local IPv6 still
   reports it with `scope6` `link`, matching Ruby. Documented in the man page
-  GO PORT NOTES.
+  COMPATIBILITY section.

@@ -1183,18 +1183,20 @@ func runtimeOSName() string {
 	switch runtime.GOOS {
 	case "darwin":
 		return "Darwin"
-	case "linux":
-		collection := engine.Collection(engine.CoreFacts(engine.NewSession()))
-		osFact, _ := collection["os"].(map[string]any)
+	case "windows":
+		return "windows"
+	}
+	// Linux distro names and the BSD os.name values come straight from the
+	// resolved fact, so the assertion matches whatever the binary actually
+	// prints rather than the lowercase GOOS (which only matched on BSDs by
+	// accident when the host's hostname happened to equal the OS name).
+	collection := engine.Collection(engine.CoreFacts(engine.NewSession()))
+	if osFact, ok := collection["os"].(map[string]any); ok {
 		if name, ok := osFact["name"].(string); ok && name != "" {
 			return name
 		}
-		return "Linux"
-	case "windows":
-		return "windows"
-	default:
-		return runtime.GOOS
 	}
+	return runtime.GOOS
 }
 
 func TestRun_rejectsRemovedShowLegacyOptions(t *testing.T) {

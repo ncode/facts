@@ -374,3 +374,67 @@ func TestParseFreeBSDMemory_returnsRubyCompatibleSystemAndSwapFacts(t *testing.T
 		t.Fatalf("parseFreeBSDMemory() = %#v, want %#v", got, want)
 	}
 }
+
+func TestParseBSDMemory_returnsSystemAndSwapFacts(t *testing.T) {
+	sysctlValues := map[string]int{
+		"hw.physmem":            1_049_231_360,
+		"vmstat.bytes_per_page": 4096,
+		"vmstat.pages_active":   19_007,
+		"vmstat.pages_wired":    4_424,
+		"vmstat.pages_free":     210_994,
+		"vmstat.pages_inactive": 0,
+		"vmstat.pages_managed":  247_459,
+	}
+
+	got := parseBSDMemory(sysctlValues, "total: 262144 1K-blocks allocated, 12664 used, 249480 available")
+	systemUsed := (19_007 + 4_424) * 4096
+	want := bsdMemoryInfo{
+		System: map[string]any{
+			"available_bytes": 1_049_231_360 - systemUsed,
+			"capacity":        memoryCapacity(systemUsed, 1_049_231_360),
+			"total_bytes":     1_049_231_360,
+			"used_bytes":      systemUsed,
+		},
+		Swap: map[string]any{
+			"available_bytes": 255_467_520,
+			"capacity":        "4.83%",
+			"total_bytes":     268_435_456,
+			"used_bytes":      12_967_936,
+		},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("parseBSDMemory() = %#v, want %#v", got, want)
+	}
+}
+
+func TestParseBSDVMStatCounters(t *testing.T) {
+	input := `       4096 bytes per page
+     241757 pages managed
+      50327 pages free
+       7715 pages active
+     117925 pages inactive
+          2 pages wired
+`
+
+	got := parseBSDVMStatCounters(input)
+	want := map[string]int{
+		"vmstat.bytes_per_page": 4096,
+		"vmstat.pages_active":   7715,
+		"vmstat.pages_wired":    2,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("parseBSDVMStatCounters() = %#v, want %#v", got, want)
+	}
+}
+
+func TestParseBSDMemory_omitsSwapWhenNoneConfigured(t *testing.T) {
+	got := parseBSDMemory(map[string]int{
+		"hw.physmem":            1024,
+		"vmstat.bytes_per_page": 1,
+		"vmstat.pages_active":   256,
+		"vmstat.pages_wired":    128,
+	}, "no swap devices configured")
+	if got.Swap != nil {
+		t.Fatalf("parseBSDMemory().Swap = %#v, want nil", got.Swap)
+	}
+}

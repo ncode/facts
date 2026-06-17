@@ -17,6 +17,8 @@ LIMA_DEV_TEMPLATE ?= ubuntu-lts
 LIMA_DEV_INSTANCE ?= $(LIMA_INSTANCE_PREFIX)-dev
 LIMA_DOCKER_INSTANCE ?= $(LIMA_INSTANCE_PREFIX)-docker
 LIMA_FREEBSD_INSTANCE ?= $(LIMA_INSTANCE_PREFIX)-freebsd
+LOCAL_OPENBSD_SSH ?= .local/bsd-vms/ssh-openbsd.sh
+LOCAL_NETBSD_SSH ?= .local/bsd-vms/ssh-netbsd.sh
 
 LIMA_DEV_FLAGS ?= --vm-type=vz --rosetta --mount-writable --cpus $(LIMA_CPUS) --memory $(LIMA_MEMORY) --disk $(LIMA_DISK)
 LIMA_DOCKER_FLAGS ?= --vm-type=vz --rosetta --mount-writable --cpus $(LIMA_CPUS) --memory $(LIMA_MEMORY) --disk $(LIMA_DISK)
@@ -27,10 +29,12 @@ LIMA_FREEBSD_FLAGS ?= --mount-none --cpus 2 --memory 4 --disk 40
 LIMA_GO_CONTAINER_IMAGES ?= golang:1.26-bookworm golang:1.26-alpine
 LIMA_DISTRO_IMAGES ?= debian:12-slim ubuntu:24.04 archlinux:latest oraclelinux:9
 LIMA_LINUX_FLAVORS ?= ubuntu-lts debian fedora opensuse oraclelinux rocky almalinux alpine archlinux
-LIMA_CROSS_TARGETS ?= linux/amd64 linux/arm64 windows/amd64 windows/arm64 darwin/amd64 darwin/arm64 freebsd/amd64
+LIMA_CROSS_TARGETS ?= linux/amd64 linux/arm64 windows/amd64 windows/arm64 darwin/amd64 darwin/arm64 freebsd/amd64 openbsd/amd64 netbsd/amd64
 
 LIMA_LINUX_BINARY ?= dist/facts-linux-$(LIMA_GOARCH)
 LIMA_FREEBSD_BINARY ?= dist/facts-freebsd-$(LIMA_GOARCH)
+LOCAL_OPENBSD_BINARY ?= dist/facts-openbsd-$(LIMA_GOARCH)
+LOCAL_NETBSD_BINARY ?= dist/facts-netbsd-$(LIMA_GOARCH)
 
 # VERSION is the exact git tag at HEAD (release builds); dev builds with no tag
 # at HEAD fall back to dev-<short-commit>. Override with `make VERSION=...`.
@@ -39,15 +43,16 @@ LDFLAGS ?= -X github.com/ncode/facts/internal/engine.Version=$(VERSION)
 PREFIX ?= /usr/local
 DESTDIR ?=
 DIST_DIR ?= dist
-DIST_TARGETS ?= linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64 freebsd/amd64
+DIST_TARGETS ?= linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64 freebsd/amd64 openbsd/amd64 netbsd/amd64
 SHA256 := $(shell command -v sha256sum >/dev/null 2>&1 && echo "sha256sum" || echo "shasum -a 256")
 
-.PHONY: test race bench bench-stable build clean dist install
+.PHONY: test race bench bench-stable build clean dist install docs
 .PHONY: lima-help lima-all lima-ci lima-dev-start lima-dev-bootstrap lima-dev-checks lima-dev-test
 .PHONY: lima-build-linux-binary lima-cross-compile lima-docker-start lima-docker-go-containers
 .PHONY: lima-docker-build-amd64 lima-docker-distro-facts lima-docker-workloads
 .PHONY: lima-linux-flavors lima-linux-flavor-smoke lima-build-freebsd-binary lima-freebsd-start
 .PHONY: lima-freebsd-smoke lima-stop
+.PHONY: local-build-openbsd-binary local-build-netbsd-binary local-openbsd-smoke local-netbsd-smoke local-bsd-smoke
 
 test:
 	$(GO) test $(PACKAGES)
@@ -63,6 +68,9 @@ bench-stable:
 
 build:
 	$(GO) build -ldflags '$(LDFLAGS)' -o facts ./cmd/facts
+
+docs:
+	$(GO) run ./tools/supportedfacts
 
 # dist builds checksummed release archives facts-$(VERSION)-<os>-<arch> for
 # every supported os/arch pair. The version is embedded in the binary
@@ -109,6 +117,7 @@ lima-help:
 	@printf '%s\n' '  make lima-docker-workloads# CI-like Go container and Linux distro fact smoke tests'
 	@printf '%s\n' '  make lima-linux-flavors   # Smoke the built Linux CLI in each Lima Linux flavor'
 	@printf '%s\n' '  make lima-freebsd-smoke   # Copy-built FreeBSD binary into Lima FreeBSD and smoke it'
+	@printf '%s\n' '  make local-bsd-smoke      # Smoke OpenBSD + NetBSD using .local/bsd-vms SSH wrappers'
 	@printf '%s\n' 'Set LIMA_KEEP_RUNNING=1 to leave flavor/FreeBSD VMs running after smoke tests.'
 
 lima-all: lima-ci lima-linux-flavors lima-freebsd-smoke
@@ -277,6 +286,30 @@ lima-freebsd-smoke: lima-build-freebsd-binary lima-freebsd-start
 		$(LIMACTL) copy tools/freebsd-release-gate.sh '$(LIMA_FREEBSD_INSTANCE):/tmp/freebsd-release-gate.sh'; \
 		$(LIMACTL) shell '$(LIMA_FREEBSD_INSTANCE)' -- chmod +x /tmp/facts; \
 		$(LIMACTL) shell '$(LIMA_FREEBSD_INSTANCE)' -- sh /tmp/freebsd-release-gate.sh /tmp/facts
+
+local-build-openbsd-binary:
+	@mkdir -p dist
+	CGO_ENABLED=0 GOOS=openbsd GOARCH=$(LIMA_GOARCH) $(GO) build -o "$(LOCAL_OPENBSD_BINARY)" ./cmd/facts
+
+local-build-netbsd-binary:
+	@mkdir -p dist
+	CGO_ENABLED=0 GOOS=netbsd GOARCH=$(LIMA_GOARCH) $(GO) build -o "$(LOCAL_NETBSD_BINARY)" ./cmd/facts
+
+local-openbsd-smoke: local-build-openbsd-binary
+	@test -x "$(LOCAL_OPENBSD_SSH)" || (echo "missing $(LOCAL_OPENBSD_SSH); start/provision .local/bsd-vms first" >&2; exit 2)
+	$(LOCAL_OPENBSD_SSH) 'cat > /tmp/facts' < "$(LOCAL_OPENBSD_BINARY)"
+	$(LOCAL_OPENBSD_SSH) 'cat > /tmp/openbsd-release-gate.sh' < tools/openbsd-release-gate.sh
+	$(LOCAL_OPENBSD_SSH) chmod +x /tmp/facts /tmp/openbsd-release-gate.sh
+	$(LOCAL_OPENBSD_SSH) sh /tmp/openbsd-release-gate.sh /tmp/facts
+
+local-netbsd-smoke: local-build-netbsd-binary
+	@test -x "$(LOCAL_NETBSD_SSH)" || (echo "missing $(LOCAL_NETBSD_SSH); start/provision .local/bsd-vms first" >&2; exit 2)
+	$(LOCAL_NETBSD_SSH) 'cat > /tmp/facts' < "$(LOCAL_NETBSD_BINARY)"
+	$(LOCAL_NETBSD_SSH) 'cat > /tmp/netbsd-release-gate.sh' < tools/netbsd-release-gate.sh
+	$(LOCAL_NETBSD_SSH) chmod +x /tmp/facts /tmp/netbsd-release-gate.sh
+	$(LOCAL_NETBSD_SSH) sh /tmp/netbsd-release-gate.sh /tmp/facts
+
+local-bsd-smoke: local-openbsd-smoke local-netbsd-smoke
 
 lima-stop:
 	@for instance in '$(LIMA_DEV_INSTANCE)' '$(LIMA_DOCKER_INSTANCE)' '$(LIMA_FREEBSD_INSTANCE)'; do \

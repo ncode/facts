@@ -37,6 +37,14 @@ A flat, pre-structured fact name (e.g. `operatingsystem`) from Ruby Facter's dep
 A fact whose preconditions don't hold on this host (e.g. EC2 metadata off-cloud). It is simply absent from the canonical tree — never an error. Only facts that were supposed to resolve and didn't count as failures.
 _Avoid_: failed fact, missing fact (that means "no such fact name")
 
+**Supported fact**:
+A fact documented in the schema as part of Facts' supported output contract for one or more supported release targets.
+_Avoid_: available fact (too host-specific), implemented fact (too code-centric)
+
+**Supported release target**:
+A platform that Facts builds, validates, and treats as release-blocking. Supported release targets are broader than the host running a single discovery and narrower than every OS family with some compatible code path.
+_Avoid_: supported OS, supported platform (unless the context is casual)
+
 ### Contracts
 
 **Output contract**:

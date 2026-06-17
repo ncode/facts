@@ -60,7 +60,7 @@ func TestSELinuxFactsForPlatform_omittedOutsideLinux(t *testing.T) {
 	writeFile(t, filepath.Join(dir, "mounts"), "none /sys/fs/selinux selinuxfs rw 0 0\n")
 	writeFile(t, filepath.Join(dir, "config"), "SELINUX=enforcing\nSELINUXTYPE=targeted\n")
 
-	for _, goos := range []string{"darwin", "freebsd", "openbsd", "windows"} {
+	for _, goos := range []string{"darwin", "freebsd", "openbsd", "netbsd", "windows"} {
 		if got := selinuxFactsForPlatform(goos, filepath.Join(dir, "mounts"), filepath.Join(dir, "config"), os.ReadFile); got != nil {
 			t.Fatalf("selinuxFactsForPlatform(%s) = %#v, want nil", goos, got)
 		}

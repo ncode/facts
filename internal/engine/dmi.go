@@ -94,6 +94,17 @@ func currentOpenBSDDMIFacts(s *Session) []ResolvedFact {
 	return openBSDDMIFacts(values)
 }
 
+func currentNetBSDDMIFacts(s *Session) []ResolvedFact {
+	if runtime.GOOS != "netbsd" {
+		return nil
+	}
+	values := make(map[string]string, len(netBSDDMIKeys))
+	for _, key := range netBSDDMIKeys {
+		values[key] = s.commandOutput("/sbin/sysctl", "-n", key)
+	}
+	return netBSDDMIFacts(values)
+}
+
 var freeBSDDMIKeys = []string{
 	"smbios.bios.reldate",
 	"smbios.bios.vendor",
@@ -110,6 +121,14 @@ var openBSDDMIKeys = []string{
 	"hw.version",
 	"hw.serialno",
 	"hw.uuid",
+}
+
+var netBSDDMIKeys = []string{
+	"machdep.dmi.system-vendor",
+	"machdep.dmi.system-product",
+	"machdep.dmi.system-version",
+	"machdep.dmi.system-serial",
+	"machdep.dmi.system-uuid",
 }
 
 func freeBSDDMIFacts(values map[string]string) []ResolvedFact {
@@ -157,6 +176,32 @@ func openBSDDMIFacts(values map[string]string) []ResolvedFact {
 		dmi["product"] = product
 	}
 	if manufacturer := strings.TrimSpace(values["hw.vendor"]); manufacturer != "" {
+		dmi["manufacturer"] = manufacturer
+	}
+	if len(dmi) == 0 {
+		return nil
+	}
+	return []ResolvedFact{{Name: "dmi", Value: dmi}}
+}
+
+func netBSDDMIFacts(values map[string]string) []ResolvedFact {
+	dmi := make(map[string]any, 3)
+	bios := mapFromValues(values, map[string]string{
+		"vendor":  "machdep.dmi.system-vendor",
+		"version": "machdep.dmi.system-version",
+	})
+	if len(bios) > 0 {
+		dmi["bios"] = bios
+	}
+	product := mapFromValues(values, map[string]string{
+		"name":          "machdep.dmi.system-product",
+		"serial_number": "machdep.dmi.system-serial",
+		"uuid":          "machdep.dmi.system-uuid",
+	})
+	if len(product) > 0 {
+		dmi["product"] = product
+	}
+	if manufacturer := strings.TrimSpace(values["machdep.dmi.system-vendor"]); manufacturer != "" {
 		dmi["manufacturer"] = manufacturer
 	}
 	if len(dmi) == 0 {
@@ -304,8 +349,8 @@ func macOSDMIFacts(model string) []ResolvedFact {
 }
 
 // dmiCoreFacts assembles the dmi category facts (the /sys/class/dmi bios/board/
-// chassis/product facts plus the platform-specific FreeBSD, OpenBSD, Windows,
-// and macOS DMI facts) for the current host.
+// chassis/product facts plus the platform-specific FreeBSD, OpenBSD, NetBSD,
+// Windows, and macOS DMI facts) for the current host.
 func dmiCoreFacts(s *Session) []ResolvedFact {
 	dmi := s.cachedDMI()
 	facts := dmiFacts(dmi)
@@ -313,5 +358,6 @@ func dmiCoreFacts(s *Session) []ResolvedFact {
 	facts = append(facts, windowsDMIFacts(currentWindowsDMI(runtime.GOOS, s.commandOutput, s.logr()))...)
 	facts = append(facts, currentFreeBSDDMIFacts(s)...)
 	facts = append(facts, currentOpenBSDDMIFacts(s)...)
+	facts = append(facts, currentNetBSDDMIFacts(s)...)
 	return facts
 }

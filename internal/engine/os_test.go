@@ -479,6 +479,20 @@ func TestCurrentOSReleaseOpenBSDUsesKernelReleaseMap(t *testing.T) {
 	}
 }
 
+func TestCurrentOSReleaseNetBSDUsesKernelReleaseMap(t *testing.T) {
+	got := currentOSRelease(testSession, "netbsd", nil, func(name string, args ...string) string {
+		if name != "uname" || !reflect.DeepEqual(args, []string{"-r"}) {
+			t.Fatalf("command = %s %#v, want uname -r", name, args)
+		}
+		return "10.1\n"
+	})
+
+	want := map[string]any{"full": "10.1", "major": "10", "minor": "1"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("currentOSRelease(testSession, netbsd) = %#v, want %#v", got, want)
+	}
+}
+
 func TestCoreFacts_includeOSHardware(t *testing.T) {
 	collection := Collection(CoreFacts(testSession))
 	osFact, ok := collection["os"].(map[string]any)
@@ -1026,6 +1040,52 @@ func TestOSFamily_mapsBSDLikeRubyFact(t *testing.T) {
 
 			if got := osFamily(tt.goos, linuxDistro{}); got != tt.want {
 				t.Fatalf("osFamily(%q) = %q, want %q", tt.goos, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestOSName_mapsBSDLikeRubyFact(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		goos string
+		want string
+	}{
+		{goos: "freebsd", want: "FreeBSD"},
+		{goos: "netbsd", want: "NetBSD"},
+		{goos: "openbsd", want: "OpenBSD"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.goos, func(t *testing.T) {
+			t.Parallel()
+
+			if got := osName(tt.goos, linuxDistro{}); got != tt.want {
+				t.Fatalf("osName(%q) = %q, want %q", tt.goos, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestKernelName_mapsBSDLikeRubyFact(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		goos string
+		want string
+	}{
+		{goos: "freebsd", want: "FreeBSD"},
+		{goos: "netbsd", want: "NetBSD"},
+		{goos: "openbsd", want: "OpenBSD"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.goos, func(t *testing.T) {
+			t.Parallel()
+
+			if got := kernelName(tt.goos); got != tt.want {
+				t.Fatalf("kernelName(%q) = %q, want %q", tt.goos, got, tt.want)
 			}
 		})
 	}

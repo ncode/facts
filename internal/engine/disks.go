@@ -101,10 +101,12 @@ func currentDisks(goos string, run commandRunner, hosts ...hostOS) map[string]an
 	switch goos {
 	case "freebsd":
 		return parseFreeBSDGeomDisks(run("sysctl", "-n", "kern.geom.confxml"))
+	case "openbsd", "netbsd":
+		return currentBSDDisks(goos, run)
 	case "linux":
 		return currentLinuxDisks("/sys/block", run, host)
 	default:
-		return disksFact("/sys/block", host)
+		return nil
 	}
 }
 
@@ -164,6 +166,10 @@ func currentPartitions(s *Session) map[string]any {
 	switch runtime.GOOS {
 	case "freebsd":
 		return parseFreeBSDGeomPartitions(s.commandOutput("sysctl", "-n", "kern.geom.confxml"))
+	case "openbsd":
+		return currentOpenBSDPartitions(s.commandOutput)
+	case "netbsd":
+		return currentNetBSDPartitions(s.commandOutput)
 	case "linux":
 		return currentLinuxPartitions("/sys/class/block", s.commandOutput, s.host)
 	default:
@@ -428,6 +434,244 @@ func addFreeBSDGeomSize(values map[string]any, mediaSize string) {
 	values["size"] = bytesToHumanReadable(sizeBytes)
 }
 
+func currentBSDDisks(goos string, run commandRunner) map[string]any {
+	if run == nil {
+		return nil
+	}
+	devices := parseBSDDiskNames(goos, run("sysctl", "-n", "hw.disknames"))
+	if len(devices) == 0 {
+		return nil
+	}
+
+	disks := make(map[string]any, len(devices))
+	for _, device := range devices {
+		disk := parseBSDDisklabelDisk(currentBSDDisklabel(goos, device, run))
+		if len(disk) > 0 {
+			disks[device] = disk
+		}
+	}
+	if len(disks) == 0 {
+		return nil
+	}
+	return disks
+}
+
+func currentBSDDisklabel(goos, device string, run commandRunner) string {
+	if goos == "netbsd" && isBSDDiskName(device) {
+		return run("sh", "-c", "disklabel "+device+" 2>/dev/null || true")
+	}
+	return run("disklabel", device)
+}
+
+func currentOpenBSDPartitions(run commandRunner) map[string]any {
+	if run == nil {
+		return nil
+	}
+	partitions := map[string]any{}
+	for _, device := range parseBSDDiskNames("openbsd", run("sysctl", "-n", "hw.disknames")) {
+		for name, partition := range parseBSDDisklabelPartitions(device, run("disklabel", device)) {
+			partitions[name] = partition
+		}
+	}
+	if len(partitions) == 0 {
+		return nil
+	}
+	return partitions
+}
+
+func currentNetBSDPartitions(run commandRunner) map[string]any {
+	if run == nil {
+		return nil
+	}
+	partitions := map[string]any{}
+	for _, device := range parseBSDDiskNames("netbsd", run("sysctl", "-n", "hw.disknames")) {
+		disklabel := currentBSDDisklabel("netbsd", device, run)
+		sectorSize := parseBSDDisklabelSectorSize(disklabel)
+		wedges := parseNetBSDDkctlWedges(run("dkctl", device, "listwedges"), sectorSize)
+		for name, partition := range wedges {
+			partitions[name] = partition
+		}
+		if len(wedges) == 0 {
+			for name, partition := range parseBSDDisklabelPartitions(device, disklabel) {
+				partitions[name] = partition
+			}
+		}
+	}
+	if len(partitions) == 0 {
+		return nil
+	}
+	return partitions
+}
+
+func parseBSDDiskNames(goos, output string) []string {
+	output = strings.TrimSpace(output)
+	if _, after, ok := strings.Cut(output, "="); ok {
+		output = strings.TrimSpace(after)
+	}
+
+	var devices []string
+	for _, field := range strings.FieldsFunc(output, func(r rune) bool {
+		return r == ',' || r == ' ' || r == '\t' || r == '\n' || r == '\r'
+	}) {
+		name := field
+		if before, _, ok := strings.Cut(name, ":"); ok {
+			name = before
+		}
+		name = strings.TrimSpace(name)
+		if name == "" || goos == "netbsd" && isNetBSDWedgeName(name) {
+			continue
+		}
+		devices = append(devices, name)
+	}
+	return devices
+}
+
+func isNetBSDWedgeName(name string) bool {
+	if !strings.HasPrefix(name, "dk") || len(name) == 2 {
+		return false
+	}
+	for _, r := range name[2:] {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func isBSDDiskName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for _, r := range name {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func parseBSDDisklabelDisk(input string) map[string]any {
+	sectorSize := parseBSDDisklabelSectorSize(input)
+	totalSectors := parseBSDDisklabelInt(input, "total sectors:")
+	if sectorSize <= 0 || totalSectors <= 0 {
+		return nil
+	}
+	sizeBytes := totalSectors * sectorSize
+	return map[string]any{
+		"size":       bytesToHumanReadable(sizeBytes),
+		"size_bytes": sizeBytes,
+	}
+}
+
+func parseBSDDisklabelSectorSize(input string) int {
+	sectorSize := parseBSDDisklabelInt(input, "bytes/sector:")
+	if sectorSize <= 0 {
+		return 512
+	}
+	return sectorSize
+}
+
+func parseBSDDisklabelInt(input, key string) int {
+	for line := range strings.Lines(input) {
+		line = strings.TrimSpace(line)
+		value, ok := strings.CutPrefix(line, key)
+		if !ok {
+			continue
+		}
+		fields := strings.Fields(value)
+		if len(fields) == 0 {
+			return 0
+		}
+		number, err := strconv.Atoi(fields[0])
+		if err != nil {
+			return 0
+		}
+		return number
+	}
+	return 0
+}
+
+func parseBSDDisklabelPartitions(device, input string) map[string]any {
+	sectorSize := parseBSDDisklabelSectorSize(input)
+	if sectorSize <= 0 {
+		return nil
+	}
+	partitions := map[string]any{}
+	for line := range strings.Lines(input) {
+		fields := strings.Fields(strings.TrimSpace(line))
+		if len(fields) < 4 || !strings.HasSuffix(fields[0], ":") {
+			continue
+		}
+		label := strings.TrimSuffix(fields[0], ":")
+		if len(label) != 1 || label == "c" {
+			continue
+		}
+		sizeSectors, err := strconv.Atoi(fields[1])
+		if err != nil || sizeSectors <= 0 {
+			continue
+		}
+		filesystem := fields[3]
+		if filesystem == "" || filesystem == "unused" {
+			continue
+		}
+		sizeBytes := sizeSectors * sectorSize
+		partitions["/dev/"+device+label] = map[string]any{
+			"filesystem": filesystem,
+			"size":       bytesToHumanReadable(sizeBytes),
+			"size_bytes": sizeBytes,
+		}
+	}
+	if len(partitions) == 0 {
+		return nil
+	}
+	return partitions
+}
+
+func parseNetBSDDkctlWedges(input string, sectorSize int) map[string]any {
+	if sectorSize <= 0 {
+		sectorSize = 512
+	}
+	partitions := map[string]any{}
+	for line := range strings.Lines(input) {
+		name, rest, ok := strings.Cut(strings.TrimSpace(line), ":")
+		if !ok || !isNetBSDWedgeName(name) {
+			continue
+		}
+		label, _, ok := strings.Cut(strings.TrimSpace(rest), ",")
+		if !ok {
+			continue
+		}
+		fields := strings.Fields(rest)
+		var blocks int
+		filesystem := ""
+		for i := 0; i < len(fields); i++ {
+			if i+1 < len(fields) && fields[i+1] == "blocks" {
+				if value, err := strconv.Atoi(strings.Trim(fields[i], ",")); err == nil {
+					blocks = value
+				}
+			}
+			if fields[i] == "type:" && i+1 < len(fields) {
+				filesystem = strings.Trim(fields[i+1], ",")
+			}
+		}
+		if blocks <= 0 || filesystem == "" {
+			continue
+		}
+		sizeBytes := blocks * sectorSize
+		partitions["/dev/"+name] = map[string]any{
+			"filesystem": filesystem,
+			"partlabel":  strings.TrimSpace(label),
+			"size":       bytesToHumanReadable(sizeBytes),
+			"size_bytes": sizeBytes,
+		}
+	}
+	if len(partitions) == 0 {
+		return nil
+	}
+	return partitions
+}
+
 func partitionsFact(partitions, mountpoints map[string]any) map[string]any {
 	return partitionsFactWithMountEntries(partitions, nil, mountpoints)
 }
@@ -534,6 +778,12 @@ func currentMountEntries(s *Session) []mountEntry {
 			return nil
 		}
 		return parseFreeBSDMountEntries(out)
+	case "netbsd":
+		out := s.commandOutput("mount")
+		if out == "" {
+			return nil
+		}
+		return parseBSDMountEntries(out)
 	case "linux":
 		data, err := s.readFile("/proc/self/mounts")
 		if err != nil {
@@ -654,7 +904,24 @@ func parseDarwinMountEntries(input string) []mountEntry {
 	return entries
 }
 
+func parseBSDMountOptions(rawOptions string) []string {
+	rawOptions = strings.TrimSuffix(rawOptions, ")")
+	fields := strings.Split(rawOptions, ",")
+	options := make([]string, 0, len(fields))
+	for _, field := range fields {
+		option := strings.TrimSpace(field)
+		if option != "" {
+			options = append(options, option)
+		}
+	}
+	return options
+}
+
 func parseFreeBSDMountEntries(input string) []mountEntry {
+	return parseBSDMountEntries(input)
+}
+
+func parseBSDMountEntries(input string) []mountEntry {
 	entries := make([]mountEntry, 0, strings.Count(input, "\n"))
 	for line := range strings.SplitSeq(input, "\n") {
 		device, rest, ok := strings.Cut(line, " on ")
@@ -663,6 +930,20 @@ func parseFreeBSDMountEntries(input string) []mountEntry {
 		}
 		path, rawOptions, ok := strings.Cut(rest, " (")
 		if !ok {
+			var afterType string
+			path, afterType, ok = strings.Cut(rest, " type ")
+			if !ok {
+				continue
+			}
+			filesystem, options, ok := strings.Cut(afterType, " (")
+			if !ok {
+				continue
+			}
+			entries = append(entries, mountEntry{Device: unescapeMountField(device), Path: unescapeMountField(path), Filesystem: strings.TrimSpace(filesystem), Options: parseBSDMountOptions(options)})
+			continue
+		}
+		if cleanPath, filesystem, ok := strings.Cut(path, " type "); ok {
+			entries = append(entries, mountEntry{Device: unescapeMountField(device), Path: unescapeMountField(cleanPath), Filesystem: strings.TrimSpace(filesystem), Options: parseBSDMountOptions(rawOptions)})
 			continue
 		}
 		rawOptions = strings.TrimSuffix(rawOptions, ")")
@@ -824,6 +1105,99 @@ func skipMountEntry(entry mountEntry) bool {
 	return (strings.HasPrefix(entry.Path, "/proc") || strings.HasPrefix(entry.Path, "/sys")) && entry.Filesystem != "tmpfs" || entry.Filesystem == "autofs"
 }
 
+func currentZFSFacts(goos string, run commandRunner) []ResolvedFact {
+	if run == nil || goos != "freebsd" && goos != "netbsd" {
+		return nil
+	}
+	facts := zfsFactsFromUpgradeOutput(run("zfs", "upgrade", "-v"))
+	facts = append(facts, zpoolFactsFromUpgradeOutput(run("zpool", "upgrade", "-v"))...)
+	return facts
+}
+
+func zfsFactsFromUpgradeOutput(output string) []ResolvedFact {
+	versions := zfsUpgradeNumbers(output)
+	if len(versions) == 0 {
+		return nil
+	}
+	return []ResolvedFact{
+		{Name: "zfs_featurenumbers", Value: strings.Join(versions, ",")},
+		{Name: "zfs_version", Value: versions[len(versions)-1]},
+	}
+}
+
+func zpoolFactsFromUpgradeOutput(output string) []ResolvedFact {
+	versions := zfsUpgradeNumbers(output)
+	if len(versions) == 0 {
+		return nil
+	}
+	featureFlags := zpoolFeatureFlags(output)
+	facts := []ResolvedFact{
+		{Name: "zpool_featurenumbers", Value: strings.Join(versions, ",")},
+	}
+	if len(featureFlags) > 0 {
+		facts = append(facts, ResolvedFact{Name: "zpool_featureflags", Value: strings.Join(featureFlags, ",")})
+		facts = append(facts, ResolvedFact{Name: "zpool_version", Value: "5000"})
+		return facts
+	}
+	facts = append(facts, ResolvedFact{Name: "zpool_version", Value: versions[len(versions)-1]})
+	return facts
+}
+
+func zfsUpgradeNumbers(output string) []string {
+	var versions []string
+	for line := range strings.Lines(output) {
+		fields := strings.Fields(line)
+		if len(fields) > 0 && isDecimalString(fields[0]) {
+			versions = append(versions, fields[0])
+		}
+	}
+	return versions
+}
+
+func zpoolFeatureFlags(output string) []string {
+	var flags []string
+	for line := range strings.Lines(output) {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		name, suffix, _ := strings.Cut(line, " ")
+		if !isZpoolFeatureFlagName(name) {
+			continue
+		}
+		suffix = strings.TrimSpace(suffix)
+		if suffix == "" || suffix == "(read-only compatible)" {
+			flags = append(flags, name)
+		}
+	}
+	return flags
+}
+
+func isZpoolFeatureFlagName(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, r := range value {
+		if r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '_' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func isDecimalString(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, r := range value {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
 // disksCoreFacts assembles the disks category facts (block devices, partitions,
 // and mountpoints) for the current host.
 func disksCoreFacts(s *Session) []ResolvedFact {
@@ -836,6 +1210,7 @@ func disksCoreFacts(s *Session) []ResolvedFact {
 	facts := []ResolvedFact{
 		{Name: "mountpoints", Value: mountpoints},
 	}
+	facts = append(facts, currentZFSFacts(runtime.GOOS, s.commandOutput)...)
 	facts = append(facts, disksFacts(disks)...)
 	facts = append(facts, partitionsFacts(partitionsFactWithMountEntries(currentPartitions(s), mountEntries, mountpoints))...)
 	return facts
