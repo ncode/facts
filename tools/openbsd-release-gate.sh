@@ -15,8 +15,8 @@ if [ "$(uname -s)" != "OpenBSD" ]; then
     exit 1
 fi
 
-FACT_SET="os.name os.family os.release os.architecture os.hardware kernel \
-kernelrelease kernelversion kernelmajversion virtual is_virtual networking \
+FACT_SET="os.name os.family os.release os.architecture os.hardware kernel.name \
+kernel.release.full kernel.version.full kernel.release.major virtual is_virtual networking \
 memory memory.system.total processors processors.count dmi system_uptime \
 load_averages mountpoints disks partitions"
 
@@ -31,13 +31,13 @@ fail() {
 
 printf '%s\n' "$out" | grep -Eq '"os.name"[[:space:]]*:[[:space:]]*"OpenBSD"' \
     || fail 'os.name != "OpenBSD"'
-printf '%s\n' "$out" | grep -Eq '"kernel"[[:space:]]*:[[:space:]]*"OpenBSD"' \
-    || fail 'kernel != "OpenBSD"'
+printf '%s\n' "$out" | grep -Eq '"kernel.name"[[:space:]]*:[[:space:]]*"OpenBSD"' \
+    || fail 'kernel.name != "OpenBSD"'
 printf '%s\n' "$out" | grep -Eq '"os.family"[[:space:]]*:[[:space:]]*"OpenBSD"' \
     || fail 'os.family != "OpenBSD"'
 
-for key in os.release os.architecture os.hardware kernelrelease kernelversion \
-    kernelmajversion virtual is_virtual networking memory memory.system.total \
+for key in os.release os.architecture os.hardware kernel.release.full kernel.version.full \
+    kernel.release.major virtual is_virtual networking memory memory.system.total \
     processors processors.count dmi system_uptime load_averages \
     mountpoints disks partitions; do
     printf '%s\n' "$out" | grep -Eq "\"$key\"[[:space:]]*:" \

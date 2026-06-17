@@ -6,9 +6,9 @@ These pages are generated from [`docs/schema/facts.yaml`](../schema/facts.yaml).
 
 | Platform | Supported facts |
 | --- | ---: |
-| [Linux](linux.md) | 173 |
-| [macOS / Darwin](darwin.md) | 105 |
-| [Windows](windows.md) | 99 |
-| [FreeBSD](freebsd.md) | 122 |
-| [OpenBSD](openbsd.md) | 109 |
-| [NetBSD](netbsd.md) | 107 |
+| [Linux](linux.md) | 175 |
+| [macOS / Darwin](darwin.md) | 107 |
+| [Windows](windows.md) | 101 |
+| [FreeBSD](freebsd.md) | 124 |
+| [OpenBSD](openbsd.md) | 111 |
+| [NetBSD](netbsd.md) | 109 |

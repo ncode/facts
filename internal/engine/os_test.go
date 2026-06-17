@@ -186,27 +186,37 @@ func TestCurrentWindowsOSDescriptionMatchesRubyResolver(t *testing.T) {
 	}
 }
 
-func TestCurrentWindowsKernelFactsMatchRubyResolver(t *testing.T) {
+func TestCurrentWindowsKernelReportsStructuredComponents(t *testing.T) {
 	t.Parallel()
 
-	got := currentWindowsKernelFacts("OtherTypeDescription=\r\nProductType=1\r\nVersion=10.0.22631\r\n", discardLog())
-	want := []ResolvedFact{
-		{Name: "kernel", Value: "windows"},
-		{Name: "kernelmajversion", Value: "10.0"},
-		{Name: "kernelrelease", Value: "10.0.22631"},
-		{Name: "kernelversion", Value: "10.0.22631"},
+	name, release, version, ok := currentWindowsKernel("OtherTypeDescription=\r\nProductType=1\r\nVersion=10.0.22631\r\n", discardLog())
+	if !ok {
+		t.Fatalf("currentWindowsKernel() ok = false, want true")
 	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("currentWindowsKernelFacts() = %#v, want %#v", got, want)
+	if name != "windows" || release != "10.0.22631" || version != "10.0.22631" {
+		t.Fatalf("currentWindowsKernel() = (%q, %q, %q), want (windows, 10.0.22631, 10.0.22631)", name, release, version)
+	}
+
+	facts := kernelFacts(name, release, version)
+	want := []ResolvedFact{
+		{Name: "kernel.name", Value: "windows"},
+		{Name: "kernel.release.full", Value: "10.0.22631"},
+		{Name: "kernel.version.full", Value: "10.0.22631"},
+		{Name: "kernel.release.major", Value: "10"},
+		{Name: "kernel.release.minor", Value: "0"},
+		{Name: "kernel.release.patch", Value: "22631"},
+	}
+	if !reflect.DeepEqual(facts, want) {
+		t.Fatalf("kernelFacts() = %#v, want %#v", facts, want)
 	}
 }
 
-func TestCurrentWindowsKernelFactsLogsFailureLikeRubyResolver(t *testing.T) {
+func TestCurrentWindowsKernelLogsFailureLikeRubyResolver(t *testing.T) {
 	debugMessages := []string{}
 	logger := captureLogger(&debugMessages, nil, nil)
 
-	if got := currentWindowsKernelFacts("", logger); got != nil {
-		t.Fatalf("currentWindowsKernelFacts(empty) = %#v, want nil", got)
+	if _, _, _, ok := currentWindowsKernel("", logger); ok {
+		t.Fatalf("currentWindowsKernel(empty) ok = true, want false")
 	}
 	want := []string{"Calling Windows RtlGetVersion failed"}
 	if !reflect.DeepEqual(debugMessages, want) {
@@ -1306,35 +1316,73 @@ func TestCurrentOSRelease_mapsDarwinKernelReleaseLikeRubyFact(t *testing.T) {
 	}
 }
 
-func TestKernelMajorVersionFact_matchesLinuxRubyFact(t *testing.T) {
+func TestKernelReleaseComponents(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name          string
 		kernelRelease string
-		want          string
+		major         string
+		minor         string
+		patch         string
+		patchOK       bool
 	}{
-		{name: "dot separated", kernelRelease: "4.15", want: "4.15"},
-		{name: "no dot delimiter", kernelRelease: "4test", want: "4test"},
-		{name: "package suffix", kernelRelease: "4.15.0-109-generic", want: "4.15"},
+		{name: "darwin three components", kernelRelease: "25.5.0", major: "25", minor: "5", patch: "0", patchOK: true},
+		{name: "linux package suffix", kernelRelease: "4.15.0-109-generic", major: "4", minor: "15", patch: "0", patchOK: true},
+		{name: "bsd release suffix without patch", kernelRelease: "12.1-RELEASE-p3", major: "12", minor: "1", patchOK: false},
+		{name: "two components only", kernelRelease: "7.9", major: "7", minor: "9", patchOK: false},
+		{name: "no dot delimiter", kernelRelease: "4test", major: "4", patchOK: false},
+		{name: "non numeric", kernelRelease: "generic", patchOK: false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := kernelMajorVersionFact("linux", tt.kernelRelease, nil); got != tt.want {
-				t.Fatalf("kernelMajorVersionFact(linux, %q) = %q, want %q", tt.kernelRelease, got, tt.want)
+			t.Parallel()
+
+			major, minor, patch, patchOK := kernelReleaseComponents(tt.kernelRelease)
+			if major != tt.major || minor != tt.minor || patch != tt.patch || patchOK != tt.patchOK {
+				t.Fatalf("kernelReleaseComponents(%q) = (%q, %q, %q, %v), want (%q, %q, %q, %v)",
+					tt.kernelRelease, major, minor, patch, patchOK, tt.major, tt.minor, tt.patch, tt.patchOK)
 			}
 		})
 	}
 }
 
-func TestKernelMajorVersionFact_matchesBSDRubyFact(t *testing.T) {
-	if got := kernelMajorVersionFact("freebsd", "12.1-RELEASE-p3", nil); got != "12" {
-		t.Fatalf("kernelMajorVersionFact(freebsd) = %q, want 12", got)
+func TestKernelFacts_structuredShape(t *testing.T) {
+	t.Parallel()
+
+	got := kernelFacts("Darwin", "25.5.0", "25.5.0")
+	want := []ResolvedFact{
+		{Name: "kernel.name", Value: "Darwin"},
+		{Name: "kernel.release.full", Value: "25.5.0"},
+		{Name: "kernel.version.full", Value: "25.5.0"},
+		{Name: "kernel.release.major", Value: "25"},
+		{Name: "kernel.release.minor", Value: "5"},
+		{Name: "kernel.release.patch", Value: "0"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("kernelFacts() = %#v, want %#v", got, want)
 	}
 }
 
-func TestKernelMajorVersionFact_matchesDarwinRubyFact(t *testing.T) {
-	if got := kernelMajorVersionFact("darwin", "18.7.0", nil); got != "18.7" {
-		t.Fatalf("kernelMajorVersionFact(darwin) = %q, want 18.7", got)
+func TestKernelFacts_omitsPatchWhenAbsent(t *testing.T) {
+	t.Parallel()
+
+	got := kernelFacts("FreeBSD", "12.1-RELEASE-p3", "12.1")
+	for _, fact := range got {
+		if fact.Name == "kernel.release.patch" {
+			t.Fatalf("kernelFacts(%q) emitted kernel.release.patch = %#v, want it omitted", "12.1-RELEASE-p3", fact.Value)
+		}
+	}
+	want := []ResolvedFact{
+		{Name: "kernel.name", Value: "FreeBSD"},
+		{Name: "kernel.release.full", Value: "12.1-RELEASE-p3"},
+		{Name: "kernel.version.full", Value: "12.1"},
+		{Name: "kernel.release.major", Value: "12"},
+		{Name: "kernel.release.minor", Value: "1"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("kernelFacts() = %#v, want %#v", got, want)
 	}
 }
 

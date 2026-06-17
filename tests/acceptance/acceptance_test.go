@@ -89,10 +89,10 @@ var releaseGateFactSet = []string{
 	"os.release",
 	"os.architecture",
 	"os.hardware",
-	"kernel",
-	"kernelrelease",
-	"kernelversion",
-	"kernelmajversion",
+	"kernel.name",
+	"kernel.release.full",
+	"kernel.release.major",
+	"kernel.version.full",
 	"virtual",
 	"is_virtual",
 	"networking",
@@ -142,8 +142,8 @@ func TestAcceptance_releaseGateFactSetJSON(t *testing.T) {
 		}
 	}
 	if want := expectedKernel(); want != "" {
-		if got := facts["kernel"]; got != want {
-			t.Errorf("kernel = %v, want %v", facts["kernel"], want)
+		if got := facts["kernel.name"]; got != want {
+			t.Errorf("kernel.name = %v, want %v", facts["kernel.name"], want)
 		}
 	}
 	if _, ok := facts["is_virtual"].(bool); !ok {
@@ -172,13 +172,13 @@ func TestAcceptance_defaultOutputPrintsStructuredFacts(t *testing.T) {
 }
 
 func TestAcceptance_singleQueryPrintsScalar(t *testing.T) {
-	stdout, _, code := runFacts(t, "kernel")
+	stdout, _, code := runFacts(t, "kernel.name")
 	if code != 0 {
 		t.Fatalf("exit = %d, want 0", code)
 	}
 	got := strings.TrimSpace(stdout.String())
 	if want := expectedKernel(); want != "" && got != want {
-		t.Fatalf("kernel = %q, want %q", got, want)
+		t.Fatalf("kernel.name = %q, want %q", got, want)
 	}
 }
 

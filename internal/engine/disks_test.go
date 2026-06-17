@@ -498,25 +498,25 @@ func TestParseZFSPoolFacts_matchesRubyFacterFixtures(t *testing.T) {
 			name:  "zfs versions",
 			facts: zfsFactsFromUpgradeOutput(string(zfsOutput)),
 			want: map[string]any{
-				"zfs_featurenumbers": "1,2,3,4,5,6",
-				"zfs_version":        "6",
+				"zfs.feature_numbers": []string{"1", "2", "3", "4", "5", "6"},
+				"zfs.version":         "6",
 			},
 		},
 		{
 			name:  "zpool legacy versions",
 			facts: zpoolFactsFromUpgradeOutput(string(zpoolOutput)),
 			want: map[string]any{
-				"zpool_featurenumbers": "1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34",
-				"zpool_version":        "34",
+				"zpool.feature_numbers": []string{"1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26", "27", "28", "29", "30", "31", "32", "33", "34"},
+				"zpool.version":         "34",
 			},
 		},
 		{
 			name:  "zpool feature flags",
 			facts: zpoolFactsFromUpgradeOutput(string(zpoolFeatureOutput)),
 			want: map[string]any{
-				"zpool_featurenumbers": "1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28",
-				"zpool_featureflags":   "async_destroy,empty_bpobj,lz4_compress,multi_vdev_crash_dump,spacemap_histogram,enabled_txg,hole_birth,extensible_dataset,embedded_data,bookmarks,filesystem_limits,large_blocks,large_dnode,sha512,skein,device_removal,obsolete_counts,zpool_checkpoint,spacemap_v2",
-				"zpool_version":        "5000",
+				"zpool.feature_numbers": []string{"1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26", "27", "28"},
+				"zpool.feature_flags":   []string{"async_destroy", "empty_bpobj", "lz4_compress", "multi_vdev_crash_dump", "spacemap_histogram", "enabled_txg", "hole_birth", "extensible_dataset", "embedded_data", "bookmarks", "filesystem_limits", "large_blocks", "large_dnode", "sha512", "skein", "device_removal", "obsolete_counts", "zpool_checkpoint", "spacemap_v2"},
+				"zpool.version":         "5000",
 			},
 		},
 		{
@@ -555,11 +555,11 @@ func TestFilesystemsFacts_omittedWhenUnresolved(t *testing.T) {
 	if got := filesystemsFacts(nil); got != nil {
 		t.Fatalf("filesystemsFacts(nil) = %#v, want nil", got)
 	}
-	if got := filesystemsFacts(""); got != nil {
-		t.Fatalf("filesystemsFacts(\"\") = %#v, want nil", got)
+	if got := filesystemsFacts([]string{}); got != nil {
+		t.Fatalf("filesystemsFacts([]) = %#v, want nil", got)
 	}
-	want := []ResolvedFact{{Name: "filesystems", Value: "apfs,autofs,devfs"}}
-	if got := filesystemsFacts("apfs,autofs,devfs"); !reflect.DeepEqual(got, want) {
+	want := []ResolvedFact{{Name: "filesystems", Value: []string{"apfs", "autofs", "devfs"}}}
+	if got := filesystemsFacts([]string{"apfs", "autofs", "devfs"}); !reflect.DeepEqual(got, want) {
 		t.Fatalf("filesystemsFacts() = %#v, want %#v", got, want)
 	}
 }
@@ -570,8 +570,9 @@ func TestCoreFacts_includeFilesystems(t *testing.T) {
 	}
 
 	collection := Collection(CoreFacts(testSession))
-	if got, ok := collection["filesystems"].(string); !ok || got == "" {
-		t.Fatalf("filesystems = %#v, want non-empty comma-separated string", collection["filesystems"])
+	got, ok := collection["filesystems"].([]string)
+	if !ok || len(got) == 0 {
+		t.Fatalf("filesystems = %#v, want non-empty array of filesystem names", collection["filesystems"])
 	}
 }
 
@@ -679,8 +680,8 @@ func TestCurrentLinuxDisksAddsSerialNumberAndWWN(t *testing.T) {
 func TestParseLinuxFilesystems_sortsAndSkipsPseudoEntries(t *testing.T) {
 	input := "nodev\tsysfs\nnodev\tproc\next4\nfuseblk\nxfs\n"
 
-	if got, want := parseLinuxFilesystems(input), "ext4,xfs"; got != want {
-		t.Fatalf("parseLinuxFilesystems() = %q, want %q", got, want)
+	if got, want := parseLinuxFilesystems(input), []string{"ext4", "xfs"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("parseLinuxFilesystems() = %#v, want %#v", got, want)
 	}
 }
 
@@ -700,8 +701,8 @@ func TestCurrentLinuxFilesystemsUnreadableProcMatchesRubyResolver(t *testing.T) 
 func TestParseDarwinFilesystems_sortsUniqueFilesystemTypes(t *testing.T) {
 	input := "/dev/disk3s1 on / (apfs, local, read-only)\nmap auto_home on /System/Volumes/Data/home (autofs, automounted)\n/dev/disk3s2 on /System/Volumes/Preboot (apfs, local)\n"
 
-	if got, want := parseDarwinFilesystems(input), "apfs,autofs"; got != want {
-		t.Fatalf("parseDarwinFilesystems() = %q, want %q", got, want)
+	if got, want := parseDarwinFilesystems(input), []string{"apfs", "autofs"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("parseDarwinFilesystems() = %#v, want %#v", got, want)
 	}
 }
 
@@ -715,8 +716,8 @@ func TestParseDarwinFilesystems_matchesRubyMacOSFixture(t *testing.T) {
 		".host:/VMware Shared Folders on /Volumes/VMware Shared Folders (vmhgfs)",
 	}, "\n")
 
-	if got, want := parseDarwinFilesystems(input), "apfs,autofs,devfs,vmhgfs"; got != want {
-		t.Fatalf("parseDarwinFilesystems() = %q, want %q", got, want)
+	if got, want := parseDarwinFilesystems(input), []string{"apfs", "autofs", "devfs", "vmhgfs"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("parseDarwinFilesystems() = %#v, want %#v", got, want)
 	}
 }
 

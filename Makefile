@@ -184,7 +184,7 @@ lima-dev-test: lima-dev-bootstrap
 		make test; \
 		make race; \
 		make build; \
-		./facts --json os.name kernel virtual'
+		./facts --json os.name kernel.name virtual'
 
 lima-build-linux-binary: lima-dev-bootstrap
 	$(LIMACTL) shell '$(LIMA_DEV_INSTANCE)' -- bash -lc 'set -eu; \
@@ -210,7 +210,7 @@ lima-docker-start:
 lima-docker-go-containers: lima-docker-start
 	@for image in $(LIMA_GO_CONTAINER_IMAGES); do \
 		echo "==> Go workload container $$image"; \
-		$(LIMACTL) shell '$(LIMA_DOCKER_INSTANCE)' -- sh -lc "set -eu; cd '$(CURDIR)'; docker run --rm -e CI=true -v \"\$$PWD:/workspace\" -w /workspace $$image sh -c 'go test ./... && go run ./cmd/facts --json os.name kernel virtual'" || exit $$?; \
+		$(LIMACTL) shell '$(LIMA_DOCKER_INSTANCE)' -- sh -lc "set -eu; cd '$(CURDIR)'; docker run --rm -e CI=true -v \"\$$PWD:/workspace\" -w /workspace $$image sh -c 'go test ./... && go run ./cmd/facts --json os.name kernel.name virtual'" || exit $$?; \
 	done
 
 lima-docker-build-amd64: lima-docker-start
@@ -230,7 +230,7 @@ lima-docker-distro-facts: lima-docker-build-amd64
 			*) echo "missing expected os.distro.id for $$image" >&2; exit 2 ;; \
 		esac; \
 		echo "==> distro fact smoke $$image"; \
-		$(LIMACTL) shell '$(LIMA_DOCKER_INSTANCE)' -- sh -lc "set -eu; cd '$(CURDIR)'; out=\$$(docker run --rm --platform linux/amd64 -e CI=true -v \"\$$PWD/dist/facts-linux-amd64:/usr/local/bin/facts:ro\" $$image /usr/local/bin/facts --json os.name os.family os.distro.id os.distro.description os.release.major os.distro.release.major kernel virtual); printf '%s\n' \"\$$out\"; printf '%s\n' \"\$$out\" | grep -Eq '\"kernel\"[[:space:]]*:[[:space:]]*\"Linux\"'; printf '%s\n' \"\$$out\" | grep -Eq '\"os.distro.id\"[[:space:]]*:[[:space:]]*\"$$expected_id\"'" || exit $$?; \
+		$(LIMACTL) shell '$(LIMA_DOCKER_INSTANCE)' -- sh -lc "set -eu; cd '$(CURDIR)'; out=\$$(docker run --rm --platform linux/amd64 -e CI=true -v \"\$$PWD/dist/facts-linux-amd64:/usr/local/bin/facts:ro\" $$image /usr/local/bin/facts --json os.name os.family os.distro.id os.distro.description os.release.major os.distro.release.major kernel.name virtual); printf '%s\n' \"\$$out\"; printf '%s\n' \"\$$out\" | grep -Eq '\"kernel.name\"[[:space:]]*:[[:space:]]*\"Linux\"'; printf '%s\n' \"\$$out\" | grep -Eq '\"os.distro.id\"[[:space:]]*:[[:space:]]*\"$$expected_id\"'" || exit $$?; \
 	done
 
 lima-docker-workloads: lima-docker-go-containers lima-docker-distro-facts
@@ -262,7 +262,7 @@ lima-linux-flavor-smoke: $(if $(LIMA_SKIP_BUILD),,lima-build-linux-binary)
 		echo "==> Lima Linux flavor smoke $(LIMA_FLAVOR) ($$instance)"; \
 		$(LIMACTL) shell "$$instance" -- sh -c 'cat > /tmp/facts' < '$(LIMA_LINUX_BINARY)'; \
 		$(LIMACTL) shell "$$instance" -- chmod +x /tmp/facts; \
-		$(LIMACTL) shell "$$instance" -- /tmp/facts --json os.name os.family os.distro.id kernel virtual
+		$(LIMACTL) shell "$$instance" -- /tmp/facts --json os.name os.family os.distro.id kernel.name virtual
 
 lima-build-freebsd-binary: lima-dev-bootstrap
 	$(LIMACTL) shell '$(LIMA_DEV_INSTANCE)' -- bash -lc 'set -eu; \

@@ -28,7 +28,7 @@ $factSet = @(
     "os.architecture",
     "os.hardware",
     "os.windows.system32",
-    "kernel",
+    "kernel.name",
     "virtual",
     "is_virtual",
     "networking",
@@ -42,9 +42,9 @@ $factSet = @(
     "timezone",
     "path",
     "facterversion",
-    "kernelrelease",
-    "kernelversion",
-    "kernelmajversion"
+    "kernel.release.full",
+    "kernel.version.full",
+    "kernel.release.major"
 )
 
 $output = & $FactsPath --json @factSet
@@ -92,7 +92,7 @@ foreach ($fact in $factSet) {
 
 Assert-Equals "os.name" "windows"
 Assert-Equals "os.family" "windows"
-Assert-Equals "kernel" "windows"
+Assert-Equals "kernel.name" "windows"
 
 Assert-NonEmpty "os.release"
 Assert-NonEmpty "os.architecture"
@@ -102,9 +102,9 @@ Assert-NonEmpty "virtual"
 Assert-NonEmpty "timezone"
 Assert-NonEmpty "path"
 Assert-NonEmpty "facterversion"
-Assert-NonEmpty "kernelrelease"
-Assert-NonEmpty "kernelversion"
-Assert-NonEmpty "kernelmajversion"
+Assert-NonEmpty "kernel.release.full"
+Assert-NonEmpty "kernel.version.full"
+Assert-NonEmpty "kernel.release.major"
 Assert-NonEmpty "memory.system.total"
 Assert-NonEmpty "processors.count"
 

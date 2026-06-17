@@ -37,7 +37,7 @@ func buildCoreFacts(s *Session) []ResolvedFact {
 	facts := []ResolvedFact{
 		{Name: "facterversion", Value: Version},
 		{Name: "is_virtual", Value: isVirtualFact},
-		{Name: "path", Value: os.Getenv("PATH")},
+		{Name: "path", Value: pathEntries(os.Getenv("PATH"))},
 		{Name: "virtual", Value: virtualFact},
 	}
 	facts = append(facts, networkingCoreFacts(s)...)
@@ -60,6 +60,20 @@ func buildCoreFacts(s *Session) []ResolvedFact {
 	facts = append(facts, ec2Facts(s, newEC2Client(ec2MetadataBaseURL, nil), virtualization)...)
 	facts = append(facts, platformGCEFacts(s.Context(), runtime.GOOS, virtualization, dmiBIOSVendor(dmi), newGCEClient(gceMetadataBaseURL, nil))...)
 	return facts
+}
+
+// pathEntries splits a raw PATH value into an ordered array of entries on the
+// host platform's path-list separator, preserving entry order and dropping
+// empty entries.
+func pathEntries(raw string) []string {
+	entries := make([]string, 0)
+	for _, entry := range strings.Split(raw, string(os.PathListSeparator)) {
+		if entry == "" {
+			continue
+		}
+		entries = append(entries, entry)
+	}
+	return entries
 }
 
 func virtualizationFactValues(v virtualization) (any, any) {

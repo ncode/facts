@@ -10,7 +10,18 @@ Generated from [`docs/schema/facts.yaml`](../schema/facts.yaml). `conditional` e
 $ facts --json
 {
   "fips_enabled": false,
-  "kernel": "windows",
+  "kernel": {
+    "name": "windows",
+    "release": {
+      "full": "10.0.22631",
+      "major": "10",
+      "minor": "0",
+      "patch": "22631"
+    },
+    "version": {
+      "full": "10.0.22631"
+    }
+  },
   "networking": {
     "hostname": "winbuild01",
     "interfaces": {
@@ -27,13 +38,17 @@ $ facts --json
     "windows": {
       "system32": "C:\\Windows\\System32"
     }
-  }
+  },
+  "path": [
+    "C:\\Windows\\system32",
+    "C:\\Windows"
+  ]
 }
 ```
 
 ## Fact Contract
 
-99 schema entries include `windows`.
+101 schema entries include `windows`.
 
 | Fact | Type | Conditional | Description |
 | --- | --- | --- | --- |
@@ -62,10 +77,12 @@ $ facts --json
 | `identity.privileged` | `boolean` | no | Whether Facts is running with root (or Administrator) privileges. |
 | `identity.user` | `string` | no | The name of the user running Facts. |
 | `is_virtual` | `boolean` | no | Whether the machine is a virtual machine or container. |
-| `kernel` | `string` | no | The kernel name, such as Linux, Darwin, windows, or FreeBSD. |
-| `kernelmajversion` | `string` | no | The two-component kernel version, such as 6.8. |
-| `kernelrelease` | `string` | no | The full kernel release reported by the system. |
-| `kernelversion` | `string` | no | The kernel version, without any release suffix. |
+| `kernel.name` | `string` | no | The kernel name, such as Linux, Darwin, windows, or FreeBSD. |
+| `kernel.release.full` | `string` | no | The full kernel release reported by the system. |
+| `kernel.release.major` | `string` | no | The major component of the kernel release. |
+| `kernel.release.minor` | `string` | no | The minor component of the kernel release. |
+| `kernel.release.patch` | `string` | yes | The patch component of the kernel release, when one is present. |
+| `kernel.version.full` | `string` | no | The kernel version, without any release suffix. |
 | `load_averages.15m` | `double` | no | The 15-minute system load average (null on Windows). |
 | `load_averages.1m` | `double` | no | The 1-minute system load average (null on Windows). |
 | `load_averages.5m` | `double` | no | The 5-minute system load average (null on Windows). |
@@ -117,7 +134,7 @@ $ facts --json
 | `os.windows.product_name` | `string` | no | The Windows product name, such as Windows Server 2022 Datacenter. |
 | `os.windows.release_id` | `string` | no | The Windows release identifier (the display version when available). |
 | `os.windows.system32` | `string` | no | The native system32 directory, sysnative-aware for 32-bit processes. |
-| `path` | `string` | no | The PATH environment variable of the Facts process. |
+| `path` | `array` | no | The PATH environment entries of the Facts process, in lookup order. |
 | `processors.cores` | `integer` | no | The number of cores per processor socket. |
 | `processors.count` | `integer` | no | The number of logical processors. |
 | `processors.extensions` | `array` | no | The instruction set architectures the processors support, including the base architecture and x86_64 microarchitecture levels. |

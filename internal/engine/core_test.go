@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -20,12 +21,31 @@ func TestCoreFacts_includeIntegrationRootFactGroups(t *testing.T) {
 }
 
 func TestCoreFacts_includePathFromEnvironment(t *testing.T) {
-	path := "/usr/bin:/etc:/usr/sbin:/usr/ucb:/usr/bin/X11:/sbin:/usr/java6/jre/bin:/usr/java6/bin"
-	t.Setenv("PATH", path)
+	entries := []string{"/usr/bin", "/etc", "/usr/sbin", "/usr/ucb", "/usr/bin/X11", "/sbin", "/usr/java6/jre/bin", "/usr/java6/bin"}
+	t.Setenv("PATH", strings.Join(entries, string(os.PathListSeparator)))
 	collection := Collection(CoreFacts(NewSession()))
 
-	if got := collection["path"]; got != path {
-		t.Fatalf("path = %#v, want %#v", got, path)
+	got, ok := collection["path"].([]string)
+	if !ok {
+		t.Fatalf("path = %#v, want array of entries", collection["path"])
+	}
+	if !reflect.DeepEqual(got, entries) {
+		t.Fatalf("path = %#v, want %#v", got, entries)
+	}
+}
+
+func TestPathEntries_splitsAndDropsEmpty(t *testing.T) {
+	t.Parallel()
+
+	sep := string(os.PathListSeparator)
+	raw := strings.Join([]string{"/usr/local/bin", "", "/usr/bin", "/bin", ""}, sep)
+	got := pathEntries(raw)
+	want := []string{"/usr/local/bin", "/usr/bin", "/bin"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("pathEntries(%q) = %#v, want %#v", raw, got, want)
+	}
+	if got := pathEntries(""); len(got) != 0 {
+		t.Fatalf("pathEntries(\"\") = %#v, want empty", got)
 	}
 }
 

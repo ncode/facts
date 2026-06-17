@@ -22,7 +22,7 @@ func TestSnapshotValue_queriesAreCaseInsensitive(t *testing.T) {
 	for _, tc := range []struct{ canonical, mixed string }{
 		{"os.name", "OS.NAME"},
 		{"os.name", "Os.Name"},
-		{"kernel", "KERNEL"},
+		{"kernel.name", "KERNEL.NAME"},
 	} {
 		want, err := snap.Value(tc.canonical)
 		if err != nil || want == nil {
@@ -57,12 +57,24 @@ func TestSnapshotTree_includesStandardCoreRootFacts(t *testing.T) {
 
 	names := []string{
 		"dmi", "identity", "is_virtual",
-		"kernel", "kernelmajversion", "kernelrelease", "kernelversion",
-		"system_uptime", "timezone", "virtual",
+		"kernel", "system_uptime", "timezone", "virtual",
 	}
 	for _, name := range names {
 		if _, ok := tree[name]; !ok {
 			t.Errorf("Tree() missing standard core root fact %q", name)
+		}
+	}
+
+	kernel, ok := tree["kernel"].(map[string]any)
+	if !ok {
+		t.Fatalf("Tree()[kernel] = %#v, want structured kernel map", tree["kernel"])
+	}
+	if kernel["name"] == nil {
+		t.Fatalf("kernel = %#v, want kernel.name", kernel)
+	}
+	for _, flat := range []string{"kernelmajversion", "kernelrelease", "kernelversion"} {
+		if got, ok := tree[flat]; ok {
+			t.Errorf("Tree()[%s] = %#v, want no flat kernel fact", flat, got)
 		}
 	}
 
