@@ -6327,12 +6327,12 @@ func TestMountpointsFactCapacityMatchesRubyFilesystemHelper(t *testing.T) {
 		},
 		{
 			name:  "empty",
-			stats: mountStat{SizeBytes: 100, UsedBytes: 0},
+			stats: mountStat{SizeBytes: 100, UsedBytes: 0, AvailableBytes: 100},
 			want:  "0%",
 		},
 		{
 			name:  "partial",
-			stats: mountStat{SizeBytes: 10_000, UsedBytes: 421},
+			stats: mountStat{SizeBytes: 10_000, UsedBytes: 421, AvailableBytes: 9_579},
 			want:  "4.21%",
 		},
 	}
@@ -6461,7 +6461,7 @@ tmpfs on /tmp/example path (tmpfs, local, nosuid)
 		"/": map[string]any{
 			"available":       "63.31 GiB",
 			"available_bytes": 67_979_685_888,
-			"capacity":        "80.33%",
+			"capacity":        "84.64%",
 			"device":          "/dev/ada0p2",
 			"filesystem":      "ufs",
 			"options":         []string{"local", "journaled soft-updates"},
@@ -6502,7 +6502,7 @@ func TestOpenBSDMountpointsFactParsesMountAndDFOutput(t *testing.T) {
 		"/": map[string]any{
 			"available":       "738.97 MiB",
 			"available_bytes": 774_868_992,
-			"capacity":        "20.04%",
+			"capacity":        "21.09%",
 			"device":          "/dev/sd0a",
 			"filesystem":      "ffs",
 			"options":         []string{"local"},
@@ -6514,7 +6514,7 @@ func TestOpenBSDMountpointsFactParsesMountAndDFOutput(t *testing.T) {
 		"/usr": map[string]any{
 			"available":       "157.56 MiB",
 			"available_bytes": 165_216_256,
-			"capacity":        "79.02%",
+			"capacity":        "83.17%",
 			"device":          "/dev/sd0d",
 			"filesystem":      "ffs",
 			"options":         []string{"local", "nodev"},
@@ -6526,7 +6526,7 @@ func TestOpenBSDMountpointsFactParsesMountAndDFOutput(t *testing.T) {
 		"/usr/local": map[string]any{
 			"available":       "1.10 GiB",
 			"available_bytes": 1_178_118_144,
-			"capacity":        "57.17%",
+			"capacity":        "60.18%",
 			"device":          "/dev/sd0e",
 			"filesystem":      "ffs",
 			"options":         []string{"local", "nodev", "wxallowed"},
