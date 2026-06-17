@@ -52,15 +52,10 @@ disks.*.model:
   description: The model of the disk.
   platforms: [linux, freebsd]
   conditional: true
-disks.*.serial:
-  type: string
-  description: The serial number of the disk.
-  platforms: [linux]
-  conditional: true
 disks.*.serial_number:
   type: string
   description: The serial number of the disk.
-  platforms: [freebsd]
+  platforms: [linux, freebsd]
   conditional: true
 disks.*.size:
   type: string

@@ -41,6 +41,10 @@ _Avoid_: failed fact, missing fact (that means "no such fact name")
 A fact documented in the schema as part of Facts' supported output contract for one or more supported release targets.
 _Avoid_: available fact (too host-specific), implemented fact (too code-centric)
 
+**Canonical fact spelling**:
+The one documented dot-notation path for a supported fact concept across supported release targets. Facts favors schema predictability over preserving upstream spelling differences for the same concept.
+_Avoid_: platform alias, compatibility duplicate
+
 **Supported release target**:
 A platform that Facts builds, validates, and treats as release-blocking. Supported release targets are broader than the host running a single discovery and narrower than every OS family with some compatible code path.
 _Avoid_: supported OS, supported platform (unless the context is casual)
@@ -48,7 +52,7 @@ _Avoid_: supported OS, supported platform (unless the context is casual)
 ### Contracts
 
 **Output contract**:
-The externally observable shape of resolved facts — fact names, nesting, value normalization, and formatter output (JSON, YAML, HOCON, legacy text) — which must remain compatible with Ruby Facter. Binding; not negotiable in the library work.
+The externally observable shape of resolved facts — fact names, nesting, value normalization, and formatter output (JSON, YAML, HOCON, legacy text). Canonical fact spelling is binding for supported facts; Ruby Facter compatibility guides structure and values, but does not require preserving upstream spelling differences for the same concept.
 
 **Input contract**:
 The accepted sources and semantics of operator-supplied facts — external fact files/executables/env vars, and the config file (facts-native `facts.conf` first, `facter.conf` as the compat read) — which must keep working unchanged. Binding; not negotiable in the library work. The Ruby custom-fact DSL is deliberately outside the contract: `.rb` fact files are not read anywhere. Puppet's *runtime* surface is outside it too: Facter's own external-fact directories (including the `puppetlabs/facter/facts.d` defaults) are in, but Puppet's agent cache (`puppet/cache/facts.d` pluginfactdest), pluginsync, and `.rb` plugin loading are not — Puppet's cache, like any directory, is reachable only through the explicit external-fact directory inputs.

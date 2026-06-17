@@ -125,9 +125,15 @@ func currentLinuxDisks(root string, run commandRunner, hosts ...hostOS) map[stri
 		if !ok {
 			continue
 		}
-		for _, field := range []string{"serial", "wwn"} {
-			if value := strings.TrimSpace(run("lsblk", "-dn", "-o", field, "/dev/"+name)); value != "" {
-				disk[field] = value
+		for _, field := range []struct {
+			lsblk string
+			fact  string
+		}{
+			{lsblk: "serial", fact: "serial_number"},
+			{lsblk: "wwn", fact: "wwn"},
+		} {
+			if value := strings.TrimSpace(run("lsblk", "-dn", "-o", field.lsblk, "/dev/"+name)); value != "" {
+				disk[field.fact] = value
 			}
 		}
 	}

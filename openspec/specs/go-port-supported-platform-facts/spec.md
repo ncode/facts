@@ -188,3 +188,13 @@ The Go port SHALL have repeatable OpenBSD and NetBSD validation paths before eit
 - **WHEN** OpenBSD or NetBSD fact behavior depends on sysctl, mount, df, route, DHCP, disk, DMI, or other OS command output
 - **THEN** deterministic Go tests MUST use fixtures and injectable seams so the behavior remains covered even when live BSD smoke gates are not running
 
+### Requirement: Linux disk serial uses canonical spelling
+
+Linux disk serial numbers SHALL be emitted as `disks.*.serial_number`, matching the schema-owned canonical spelling for the same concept on other supported release targets.
+
+#### Scenario: Linux disk serial key
+
+- **WHEN** Linux disk discovery finds a disk serial number
+- **THEN** the disk entry MUST contain `serial_number`
+- **AND** the disk entry MUST NOT contain `serial`
+
