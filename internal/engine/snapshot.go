@@ -18,26 +18,30 @@ var ErrFactNotFound = errors.New("fact not found")
 // Snapshot is the immutable result of one discovery run: the canonical tree
 // plus pure query operations over it. Safe for concurrent use.
 type Snapshot struct {
-	facts []ResolvedFact
-	tree  map[string]any
+	facts      []ResolvedFact
+	tree       map[string]any
+	projection *Projection
 }
 
 func newSnapshot(facts []ResolvedFact) *Snapshot {
-	return &Snapshot{facts: facts, tree: Collection(facts)}
+	tree := Collection(facts)
+	return &Snapshot{
+		facts:      facts,
+		tree:       tree,
+		projection: newProjectionWithTree(facts, false, tree),
+	}
 }
 
 // Value returns the canonical-tree node selected by the dot-notation query —
 // the same value the CLI reports for the same query. A query no fact resolved
 // returns an error satisfying errors.Is(err, ErrFactNotFound); a custom or
 // external fact that legitimately resolved to nil returns (nil, nil).
+//
+// Lookup reuses the canonical tree built once for the Snapshot; it does not
+// rebuild the tree per call.
 func (sn *Snapshot) Value(query string) (any, error) {
-	selected := Select(sn.facts, []string{query})
-	fact := selected[0]
-	if value := ValueForQuery(fact); value != nil {
+	if value, found := sn.projection.LookupValue(query); found {
 		return value, nil
-	}
-	if (fact.Type == "custom" || fact.Type == "external") && fact.Value == nil && fact.UserQuery == fact.Name {
-		return nil, nil
 	}
 	return nil, fmt.Errorf("fact %q: %w", query, ErrFactNotFound)
 }

@@ -64,10 +64,10 @@ func FormatJSON(facts []ResolvedFact) (string, error) {
 
 // FormatJSONWithDottedFacts renders JSON and optionally merges dotted custom and external facts.
 func FormatJSONWithDottedFacts(facts []ResolvedFact, includeTypedDotted bool) (string, error) {
-	value := any(factsForQueries(facts))
-	queries := uniqueQueries(facts)
-	if len(queries) == 1 && queries[0] == "" {
-		value = CollectionWithDottedFacts(facts, includeTypedDotted)
+	projection := NewProjection(facts, includeTypedDotted)
+	value := any(projection.MultiQueryValues())
+	if projection.Shape() == ShapeFullTree {
+		value = projection.FullTree()
 	}
 
 	out, err := json.MarshalIndent(value, "", "  ")
@@ -84,10 +84,10 @@ func FormatYAML(facts []ResolvedFact) string {
 
 // FormatYAMLWithDottedFacts renders YAML and optionally merges dotted custom and external facts.
 func FormatYAMLWithDottedFacts(facts []ResolvedFact, includeTypedDotted bool) string {
-	value := any(factsForQueries(facts))
-	queries := uniqueQueries(facts)
-	if len(queries) == 1 && queries[0] == "" {
-		value = CollectionWithDottedFacts(facts, includeTypedDotted)
+	projection := NewProjection(facts, includeTypedDotted)
+	value := any(projection.MultiQueryValues())
+	if projection.Shape() == ShapeFullTree {
+		value = projection.FullTree()
 	}
 	out := strings.Join(yamlLines(value, 0), "\n")
 	if out == "" {
@@ -103,16 +103,16 @@ func FormatHOCON(facts []ResolvedFact) string {
 
 // FormatHOCONWithDottedFacts renders HOCON and optionally merges dotted custom and external facts.
 func FormatHOCONWithDottedFacts(facts []ResolvedFact, includeTypedDotted bool) string {
-	queries := uniqueQueries(facts)
-	switch {
-	case len(queries) == 0:
+	projection := NewProjection(facts, includeTypedDotted)
+	switch projection.Shape() {
+	case ShapeEmpty:
 		return ""
-	case len(queries) == 1 && queries[0] == "":
-		return strings.Join(hoconLines(CollectionWithDottedFacts(facts, includeTypedDotted), 0, false), "\n") + "\n"
-	case len(queries) == 1:
-		return hoconScalar(ValueForQuery(facts[0]))
+	case ShapeFullTree:
+		return strings.Join(hoconLines(projection.FullTree(), 0, false), "\n") + "\n"
+	case ShapeSingleQuery:
+		return hoconScalar(projection.SingleQueryValue())
 	default:
-		values := factsForQueries(facts)
+		values := projection.MultiQueryValues()
 		lines := make([]string, 0, len(values))
 		for _, key := range sortedKeys(values) {
 			lines = append(lines, strconv.Quote(key)+"="+hoconScalar(values[key]))
@@ -131,16 +131,16 @@ func FormatLegacy(facts []ResolvedFact) string {
 // Ruby Facter's LegacyFactFormatter byte for byte: pretty-printed JSON rewritten
 // through Ruby's exact transform pipeline, quirks included.
 func FormatLegacyColored(facts []ResolvedFact, includeTypedDotted, colorize bool) string {
-	queries := uniqueQueries(facts)
-	switch {
-	case len(queries) == 0:
+	projection := NewProjection(facts, includeTypedDotted)
+	switch projection.Shape() {
+	case ShapeEmpty:
 		return ""
-	case len(queries) == 1 && queries[0] == "":
-		return legacyCollectionText(CollectionWithDottedFacts(facts, includeTypedDotted), colorize)
-	case len(queries) == 1:
-		return legacySingleQueryText(ValueForQuery(facts[0]), colorize)
+	case ShapeFullTree:
+		return legacyCollectionText(projection.FullTree(), colorize)
+	case ShapeSingleQuery:
+		return legacySingleQueryText(projection.SingleQueryValue(), colorize)
 	default:
-		values := factsForQueries(facts)
+		values := projection.MultiQueryValues()
 		for key, value := range values {
 			if value == nil {
 				values[key] = ""

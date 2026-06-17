@@ -356,7 +356,8 @@ func runQuery(stdout, stderr io.Writer, args []string) error {
 	}
 	facts := snapshot.Facts()
 	mergeDottedFacts := configOptions.ForceDotResolution || *forceDotResolution
-	facts = engine.SelectWithDottedFacts(facts, flags.Args(), mergeDottedFacts)
+	projection := engine.NewProjection(facts, mergeDottedFacts)
+	facts = projection.Select(flags.Args())
 	if !*noCache {
 		cache := engine.NewFactCache(engine.DefaultCachePath(), configOptions.TTLs, configOptions.FactGroups)
 		remaining, cached := cache.ResolveFacts(facts)
@@ -398,7 +399,7 @@ func runQuery(stdout, stderr io.Writer, args []string) error {
 		}
 	}
 	if *strict {
-		missing := missingFactQueries(facts)
+		missing := engine.NewProjection(facts, mergeDottedFacts).MissingQueries(facts)
 		if len(missing) > 0 {
 			for _, name := range missing {
 				writeError(stderr, fmt.Sprintf("fact %q does not exist.", name), colorDiagnostics)
@@ -494,16 +495,6 @@ func resolvedLogOptionsConflict(debug, verbose bool, logLevel string) bool {
 		return false
 	}
 	return (debug || verbose) && logLevel != ""
-}
-
-func missingFactQueries(facts []engine.ResolvedFact) []string {
-	missing := make([]string, 0)
-	for _, fact := range facts {
-		if fact.UserQuery != "" && engine.ValueForQuery(fact) == nil {
-			missing = append(missing, fact.UserQuery)
-		}
-	}
-	return missing
 }
 
 func canUseVersionQueryFastPath(queries, externalDirs []string, blockedFacts map[string]bool, noExternalFacts, timing bool) bool {
