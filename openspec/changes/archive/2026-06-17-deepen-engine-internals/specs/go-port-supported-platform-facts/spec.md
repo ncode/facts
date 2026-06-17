@@ -36,6 +36,8 @@ The Go port SHALL preserve supported-platform Ruby resolver fallback order and d
 - **WHEN** a core-fact resolver that holds a resolution Session executes a command or reads, stats, or lstats a file
 - **THEN** it MUST do so through the Session's host seam (e.g. `Session.commandOutput`/`readFile`), and a test MUST be able to substitute a fake host so the resolver runs to completion without touching the real operating system
 
+## ADDED Requirements
+
 ### Requirement: Runtime and package-version facts are Go-native
 Facts SHALL NOT expose Ruby runtime or Puppet package-version built-ins. The canonical built-in fact surface is Go-native; operator-supplied external facts remain the compatibility input surface.
 

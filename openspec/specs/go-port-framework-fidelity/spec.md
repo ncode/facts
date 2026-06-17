@@ -4,18 +4,18 @@
 TBD - created by archiving change close-go-port-release-readiness-gaps. Update Purpose after archive.
 ## Requirements
 ### Requirement: Bounded and documented --puppet behavior
-The Go port SHALL define `--puppet` behavior explicitly instead of silently diverging from Ruby.
+The Go port SHALL define `--puppet` behavior explicitly. `--puppet` remains an external-fact compatibility bridge for Puppet plugin fact destinations; it SHALL NOT inventory Puppet package versions.
 
-#### Scenario: puppetversion resolution
-- **WHEN** `facter --puppet` runs on a system with the puppet binary installed
-- **THEN** the `puppetversion` fact MUST resolve from the puppet installation
+#### Scenario: puppetversion is absent
+- **WHEN** `facts --puppet puppetversion` runs on a system with the puppet binary installed
+- **THEN** the CLI MUST NOT execute Puppet for version discovery and MUST treat `puppetversion` like any other missing fact
 
 #### Scenario: Plugin external facts are searched
-- **WHEN** `facter --puppet` runs
+- **WHEN** `facts --puppet` runs
 - **THEN** the engine MUST search Puppet's default plugin fact destination paths for external facts on each supported platform
 
 #### Scenario: Ruby plugin custom facts warn
-- **WHEN** `facter --puppet` runs and Puppet Ruby plugin custom facts would have been loaded by Ruby facter
+- **WHEN** `facts --puppet` runs and Puppet Ruby plugin custom facts would have been loaded by Ruby Facter
 - **THEN** the Go port MUST emit a warning that Ruby plugin custom facts are not loaded, and the deviation MUST be documented in the migration guide (`docs/CUSTOM_FACT_MIGRATION.md`) and man page
 
 ### Requirement: HOCON configuration parsing fidelity

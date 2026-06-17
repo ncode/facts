@@ -50,4 +50,4 @@ Land in order; `gofmt -w`, `go vet ./...`, and `go test ./...` green before movi
 - [x] 7.1 `gofmt -w`, `go vet ./...`, `go test ./...`, `go test -race . ./internal/engine ./internal/app` all clean
 - [x] 7.2 Existing contract/acceptance suites (`engine_contract_test.go`, `internal/app/contract_test.go`, `tests/acceptance`) green with only the intentional Ruby/Puppet package-version removals
 - [x] 7.3 Side-by-side: CLI output (default, `--json`, `--yaml`, `--hocon`, a query, `--color`) byte-identical to the pre-change binary modulo volatile values and the intentional `ruby`/`aio_agent_version`/`puppetversion` removals
-- [ ] 7.4 Platform CI gates green on the final commit
+- [x] 7.4 Platform CI gates green on the final commit
