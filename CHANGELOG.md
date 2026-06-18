@@ -1,6 +1,6 @@
 # Facts (Go port)
 
-## Unreleased
+## v0.0.3 - 2026-06-18
 
 ### Added
 
