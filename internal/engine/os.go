@@ -21,6 +21,11 @@ var linuxKernelVersionPattern = regexp.MustCompile(`^\d+(?:\.\d+){0,2}`)
 
 var bsdKernelVersionPattern = regexp.MustCompile(`^\d+(?:\.\d+)?`)
 
+// kernelReleaseLeadingNumeric captures the leading dot-separated numeric
+// prefix of a kernel release string (for example "12.1" from
+// "12.1-RELEASE-p3" or "4.15.0" from "4.15.0-109-generic").
+var kernelReleaseLeadingNumeric = regexp.MustCompile(`^\d+(?:\.\d+)*`)
+
 var mageiaReleasePattern = regexp.MustCompile(`Mageia release ([0-9.]+)`)
 
 var openWrtReleasePattern = regexp.MustCompile(`^(\d+\.\d+.*)`)
@@ -50,14 +55,6 @@ func majorVersion(version string) string {
 	return major
 }
 
-func linuxMajorVersion(version string) string {
-	parts := strings.Split(version, ".")
-	if len(parts) <= 1 {
-		return version
-	}
-	return parts[0] + "." + parts[1]
-}
-
 func kernelVersionFact(goos, kernelRelease, unameVersion string) string {
 	switch goos {
 	case "linux":
@@ -74,12 +71,25 @@ func kernelVersionFact(goos, kernelRelease, unameVersion string) string {
 	return majorVersion(kernelRelease)
 }
 
-func kernelMajorVersionFact(goos, kernelRelease string, osRelease any) string {
-	switch goos {
-	case "linux", "darwin":
-		return linuxMajorVersion(kernelRelease)
+// kernelReleaseComponents splits a kernel release string into its leading
+// major, minor, and patch numeric components. major and minor are returned
+// when available; patchOK reports whether a third numeric component exists,
+// so callers can omit kernel.release.patch when there is none (for example
+// BSD releases like "12.1-RELEASE-p3" have no patch component).
+func kernelReleaseComponents(kernelRelease string) (major, minor, patch string, patchOK bool) {
+	numeric := kernelReleaseLeadingNumeric.FindString(kernelRelease)
+	if numeric == "" {
+		return "", "", "", false
 	}
-	return majorVersion(kernelRelease)
+	parts := strings.Split(numeric, ".")
+	major = parts[0]
+	if len(parts) > 1 {
+		minor = parts[1]
+	}
+	if len(parts) > 2 {
+		return major, minor, parts[2], true
+	}
+	return major, minor, "", false
 }
 
 func architectureName(goos, machine string) string {
@@ -244,18 +254,17 @@ func currentWindowsOSDescription(input string) *windowsOSDescription {
 	}
 }
 
-func currentWindowsKernelFacts(input string, log *slog.Logger) []ResolvedFact {
+// currentWindowsKernel returns the Windows kernel name, release, and version
+// parsed from RtlGetVersion output. ok is false when the version is
+// unavailable, in which case a debug line is logged, mirroring the Ruby
+// resolver's failure path.
+func currentWindowsKernel(input string, log *slog.Logger) (name, release, version string, ok bool) {
 	info := parseWindowsOSVersionInfo(input)
 	if info.Version == "" {
 		log.Debug("Calling Windows RtlGetVersion failed")
-		return nil
+		return "", "", "", false
 	}
-	return []ResolvedFact{
-		{Name: "kernel", Value: "windows"},
-		{Name: "kernelmajversion", Value: info.MajorMinor},
-		{Name: "kernelrelease", Value: info.Version},
-		{Name: "kernelversion", Value: info.Version},
-	}
+	return "windows", info.Version, info.Version, true
 }
 
 func currentWindowsOSRelease(input string) map[string]any {
@@ -1599,26 +1608,26 @@ func linuxDistroFacts(distro linuxDistro) []ResolvedFact {
 	return core
 }
 
-func probeFilesystems(s *Session) any {
+func probeFilesystems(s *Session) []string {
 	return currentFilesystems(runtime.GOOS, s.readFile, s.commandOutput)
 }
 
-// filesystemsFacts returns the filesystems fact, or nothing when the
-// platform probe resolved no value (Windows and the BSDs, where Ruby Facter
-// has no filesystems fact): an unresolvable fact is absent, never an empty
-// string.
-func filesystemsFacts(value any) []ResolvedFact {
-	if value == nil || value == "" {
+// filesystemsFacts returns the filesystems fact as an array of filesystem
+// type strings, or nothing when the platform probe resolved no value (Windows
+// and the BSDs, where Ruby Facter has no filesystems fact): an unresolvable
+// fact is absent, never an empty array.
+func filesystemsFacts(value []string) []ResolvedFact {
+	if len(value) == 0 {
 		return nil
 	}
 	return []ResolvedFact{{Name: "filesystems", Value: value}}
 }
 
-func currentFilesystems(goos string, readFile fileReader, run commandRunner) any {
+func currentFilesystems(goos string, readFile fileReader, run commandRunner) []string {
 	switch goos {
 	case "darwin":
 		if run == nil {
-			return ""
+			return nil
 		}
 		return parseDarwinFilesystems(run("mount"))
 	case "linux":
@@ -1628,11 +1637,11 @@ func currentFilesystems(goos string, readFile fileReader, run commandRunner) any
 		}
 		return parseLinuxFilesystems(string(data))
 	default:
-		return ""
+		return nil
 	}
 }
 
-func parseLinuxFilesystems(input string) string {
+func parseLinuxFilesystems(input string) []string {
 	filesystems := make([]string, 0)
 	for line := range strings.SplitSeq(input, "\n") {
 		fields := strings.Fields(line)
@@ -1642,10 +1651,10 @@ func parseLinuxFilesystems(input string) string {
 		filesystems = append(filesystems, fields[0])
 	}
 	sort.Strings(filesystems)
-	return strings.Join(filesystems, ",")
+	return filesystems
 }
 
-func parseDarwinFilesystems(input string) string {
+func parseDarwinFilesystems(input string) []string {
 	seen := make(map[string]bool)
 	for line := range strings.SplitSeq(input, "\n") {
 		_, after, ok := strings.Cut(line, "(")
@@ -1670,7 +1679,7 @@ func parseDarwinFilesystems(input string) string {
 		filesystems = append(filesystems, filesystem)
 	}
 	sort.Strings(filesystems)
-	return strings.Join(filesystems, ",")
+	return filesystems
 }
 
 func osFamily(goos string, distro linuxDistro) string {
@@ -1742,6 +1751,30 @@ func kernelName(goos string) string {
 	}
 }
 
+// kernelFacts assembles the structured kernel subtree from the kernel name,
+// release, and version. kernel.release.major and kernel.release.minor are
+// emitted when the release exposes those numeric components, and
+// kernel.release.patch is emitted only when a third numeric component is
+// present.
+func kernelFacts(name, release, version string) []ResolvedFact {
+	facts := []ResolvedFact{
+		{Name: "kernel.name", Value: name},
+		{Name: "kernel.release.full", Value: release},
+		{Name: "kernel.version.full", Value: version},
+	}
+	major, minor, patch, patchOK := kernelReleaseComponents(release)
+	if major != "" {
+		facts = append(facts, ResolvedFact{Name: "kernel.release.major", Value: major})
+	}
+	if minor != "" {
+		facts = append(facts, ResolvedFact{Name: "kernel.release.minor", Value: minor})
+	}
+	if patchOK {
+		facts = append(facts, ResolvedFact{Name: "kernel.release.patch", Value: patch})
+	}
+	return facts
+}
+
 // osCoreFacts assembles the os category facts (kernel name/release/version,
 // os name/family/release/architecture/hardware, filesystems, the Linux distro
 // facts, and the macOS and Windows OS-description facts) for the current host.
@@ -1755,31 +1788,21 @@ func osCoreFacts(s *Session) []ResolvedFact {
 	kernelRelease := s.cachedKernelRelease()
 	osRelease := s.cachedOSRelease()
 	kernelVersion := kernelVersionFact(runtime.GOOS, kernelRelease, "")
-	kernelMajorVersion := kernelMajorVersionFact(runtime.GOOS, kernelRelease, osRelease)
 	if runtime.GOOS == "windows" {
-		kernelFacts := currentWindowsKernelFacts(s.cachedWindowsOSVersionInput(), s.logr())
-		for _, fact := range kernelFacts {
-			switch fact.Name {
-			case "kernelrelease":
-				kernelRelease, _ = fact.Value.(string)
-			case "kernelversion":
-				kernelVersion, _ = fact.Value.(string)
-			case "kernelmajversion":
-				kernelMajorVersion, _ = fact.Value.(string)
-			}
+		if name, release, version, ok := currentWindowsKernel(s.cachedWindowsOSVersionInput(), s.logr()); ok {
+			kernelName = name
+			kernelRelease = release
+			kernelVersion = version
 		}
 	}
 	facts := []ResolvedFact{
-		{Name: "kernel", Value: kernelName},
-		{Name: "kernelmajversion", Value: kernelMajorVersion},
-		{Name: "kernelrelease", Value: kernelRelease},
-		{Name: "kernelversion", Value: kernelVersion},
 		{Name: "os.architecture", Value: architecture},
 		{Name: "os.family", Value: osFamily},
 		{Name: "os.hardware", Value: hardwareModel},
 		{Name: "os.name", Value: osName},
 		{Name: "os.release", Value: osRelease},
 	}
+	facts = append(facts, kernelFacts(kernelName, kernelRelease, kernelVersion)...)
 	facts = append(facts, filesystemsFacts(s.cachedFilesystems())...)
 	facts = append(facts, linuxDistroFacts(linuxDistro)...)
 	macOSInfo := s.cachedMacOSInfo()

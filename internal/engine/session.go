@@ -83,7 +83,7 @@ type Session struct {
 	processorExtensions          memo[[]string]
 	uptime                       memo[uptimeInfo]
 	loadAverages                 memo[map[string]any]
-	filesystems                  memo[any]
+	filesystems                  memo[[]string]
 	identity                     memo[map[string]any]
 	dmi                          memo[map[string]any]
 }
@@ -249,8 +249,8 @@ func (s *Session) cachedUptime() uptimeInfo {
 func (s *Session) cachedLoadAverages() map[string]any {
 	return s.loadAverages.get(func() map[string]any { return probeLoadAverages(s) })
 }
-func (s *Session) cachedFilesystems() any {
-	return s.filesystems.get(func() any { return probeFilesystems(s) })
+func (s *Session) cachedFilesystems() []string {
+	return s.filesystems.get(func() []string { return probeFilesystems(s) })
 }
 
 // cachedIdentity memoizes identityFact so the emitted identity fact and the

@@ -17,7 +17,23 @@ $ facts --json
       "type": "ssd"
     }
   },
-  "kernel": "Linux",
+  "filesystems": [
+    "ext4",
+    "tmpfs",
+    "xfs"
+  ],
+  "kernel": {
+    "name": "Linux",
+    "release": {
+      "full": "6.8.0-31-generic",
+      "major": "6",
+      "minor": "8",
+      "patch": "0"
+    },
+    "version": {
+      "full": "6.8.0"
+    }
+  },
   "networking": {
     "hostname": "linux01",
     "interfaces": {
@@ -43,13 +59,18 @@ $ facts --json
       "size": "63.00 GiB",
       "size_bytes": 67645734912
     }
-  }
+  },
+  "path": [
+    "/usr/local/bin",
+    "/usr/bin",
+    "/bin"
+  ]
 }
 ```
 
 ## Fact Contract
 
-173 schema entries include `linux`.
+175 schema entries include `linux`.
 
 | Fact | Type | Conditional | Description |
 | --- | --- | --- | --- |
@@ -81,7 +102,7 @@ $ facts --json
 | `ec2_metadata` | `map` | yes | The EC2 instance metadata tree, on AWS instances. |
 | `ec2_userdata` | `string` | yes | The EC2 instance user data, on AWS instances that define it. |
 | `facterversion` | `string` | no | The Facter compatibility version of the Facts engine. |
-| `filesystems` | `string` | no | The usable filesystem types, as a comma-separated list. |
+| `filesystems` | `array` | no | The usable filesystem types, as an array of type names. |
 | `fips_enabled` | `boolean` | no | Whether the platform enforces FIPS-validated cryptography. |
 | `gce` | `map` | yes | The Google Compute Engine metadata tree, on GCE instances. |
 | `hypervisors.docker` | `map` | yes | Docker (or containerd/Kubernetes) container details, when running inside one. |
@@ -110,10 +131,12 @@ $ facts --json
 | `identity.uid` | `integer` | no | The user identifier of the user running Facts. |
 | `identity.user` | `string` | no | The name of the user running Facts. |
 | `is_virtual` | `boolean` | no | Whether the machine is a virtual machine or container. |
-| `kernel` | `string` | no | The kernel name, such as Linux, Darwin, windows, or FreeBSD. |
-| `kernelmajversion` | `string` | no | The two-component kernel version, such as 6.8. |
-| `kernelrelease` | `string` | no | The full kernel release reported by the system. |
-| `kernelversion` | `string` | no | The kernel version, without any release suffix. |
+| `kernel.name` | `string` | no | The kernel name, such as Linux, Darwin, windows, or FreeBSD. |
+| `kernel.release.full` | `string` | no | The full kernel release reported by the system. |
+| `kernel.release.major` | `string` | no | The major component of the kernel release. |
+| `kernel.release.minor` | `string` | no | The minor component of the kernel release. |
+| `kernel.release.patch` | `string` | yes | The patch component of the kernel release, when one is present. |
+| `kernel.version.full` | `string` | no | The kernel version, without any release suffix. |
 | `load_averages.15m` | `double` | no | The 15-minute system load average (null on Windows). |
 | `load_averages.1m` | `double` | no | The 1-minute system load average (null on Windows). |
 | `load_averages.5m` | `double` | no | The 5-minute system load average (null on Windows). |
@@ -205,7 +228,7 @@ $ facts --json
 | `partitions.*.size` | `string` | yes | The display size of the partition, such as 1.00 GiB. |
 | `partitions.*.size_bytes` | `integer` | yes | The size of the partition, in bytes. |
 | `partitions.*.uuid` | `string` | yes | The filesystem UUID of the partition. |
-| `path` | `string` | no | The PATH environment variable of the Facts process. |
+| `path` | `array` | no | The PATH environment entries of the Facts process, in lookup order. |
 | `processors.cores` | `integer` | no | The number of cores per processor socket. |
 | `processors.count` | `integer` | no | The number of logical processors. |
 | `processors.extensions` | `array` | no | The instruction set architectures the processors support, including the base architecture and x86_64 microarchitecture levels. |

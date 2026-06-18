@@ -39,7 +39,7 @@ jobs:
             -v "$PWD:/workspace" \
             -w /workspace \
             ${{ matrix.image }} \
-            sh -c 'go test ./... && go run ./cmd/facts --json os.name kernel virtual'
+            sh -c 'go test ./... && go run ./cmd/facts --json os.name kernel.name virtual'
 
   linux_distro_fact_tests:
     name: Distro facts (${{ matrix.name }})
@@ -126,7 +126,7 @@ jobs:
                 os.distro.description \
                 os.release.major \
                 os.distro.release.major \
-                kernel \
+                kernel.name \
                 virtual
           )"
           printf '%s\n' "$output"
@@ -142,7 +142,7 @@ jobs:
               "os.name": os.environ["EXPECTED_OS_NAME"],
               "os.family": os.environ["EXPECTED_OS_FAMILY"],
               "os.distro.id": os.environ["EXPECTED_DISTRO_ID"],
-              "kernel": "Linux",
+              "kernel.name": "Linux",
           }
           failures = []
           for key, expected in checks.items():

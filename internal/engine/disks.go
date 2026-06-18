@@ -1126,8 +1126,8 @@ func zfsFactsFromUpgradeOutput(output string) []ResolvedFact {
 		return nil
 	}
 	return []ResolvedFact{
-		{Name: "zfs_featurenumbers", Value: strings.Join(versions, ",")},
-		{Name: "zfs_version", Value: versions[len(versions)-1]},
+		{Name: "zfs.feature_numbers", Value: versions},
+		{Name: "zfs.version", Value: versions[len(versions)-1]},
 	}
 }
 
@@ -1138,14 +1138,14 @@ func zpoolFactsFromUpgradeOutput(output string) []ResolvedFact {
 	}
 	featureFlags := zpoolFeatureFlags(output)
 	facts := []ResolvedFact{
-		{Name: "zpool_featurenumbers", Value: strings.Join(versions, ",")},
+		{Name: "zpool.feature_numbers", Value: versions},
 	}
 	if len(featureFlags) > 0 {
-		facts = append(facts, ResolvedFact{Name: "zpool_featureflags", Value: strings.Join(featureFlags, ",")})
-		facts = append(facts, ResolvedFact{Name: "zpool_version", Value: "5000"})
+		facts = append(facts, ResolvedFact{Name: "zpool.feature_flags", Value: featureFlags})
+		facts = append(facts, ResolvedFact{Name: "zpool.version", Value: "5000"})
 		return facts
 	}
-	facts = append(facts, ResolvedFact{Name: "zpool_version", Value: versions[len(versions)-1]})
+	facts = append(facts, ResolvedFact{Name: "zpool.version", Value: versions[len(versions)-1]})
 	return facts
 }
 

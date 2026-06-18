@@ -9,7 +9,23 @@ Generated from [`docs/schema/facts.yaml`](../schema/facts.yaml). `conditional` e
 ```console
 $ facts --json
 {
-  "kernel": "Darwin",
+  "filesystems": [
+    "apfs",
+    "autofs",
+    "devfs"
+  ],
+  "kernel": {
+    "name": "Darwin",
+    "release": {
+      "full": "24.5.0",
+      "major": "24",
+      "minor": "5",
+      "patch": "0"
+    },
+    "version": {
+      "full": "24.5.0"
+    }
+  },
   "networking": {
     "hostname": "macbook",
     "interfaces": {
@@ -32,6 +48,11 @@ $ facts --json
     },
     "name": "Darwin"
   },
+  "path": [
+    "/usr/local/bin",
+    "/usr/bin",
+    "/bin"
+  ],
   "system_profiler": {
     "hardware": {
       "model_name": "MacBook Pro"
@@ -42,24 +63,26 @@ $ facts --json
 
 ## Fact Contract
 
-105 schema entries include `darwin`.
+107 schema entries include `darwin`.
 
 | Fact | Type | Conditional | Description |
 | --- | --- | --- | --- |
 | `augeas.version` | `string` | yes | The Augeas version reported by augparse, when Augeas is installed. |
 | `dmi.product.name` | `string` | yes | The product name of the system (the hardware model on macOS). |
 | `facterversion` | `string` | no | The Facter compatibility version of the Facts engine. |
-| `filesystems` | `string` | no | The usable filesystem types, as a comma-separated list. |
+| `filesystems` | `array` | no | The usable filesystem types, as an array of type names. |
 | `identity.gid` | `integer` | no | The group identifier of the user running Facts. |
 | `identity.group` | `string` | no | The group name of the user running Facts. |
 | `identity.privileged` | `boolean` | no | Whether Facts is running with root (or Administrator) privileges. |
 | `identity.uid` | `integer` | no | The user identifier of the user running Facts. |
 | `identity.user` | `string` | no | The name of the user running Facts. |
 | `is_virtual` | `boolean` | no | Whether the machine is a virtual machine or container. |
-| `kernel` | `string` | no | The kernel name, such as Linux, Darwin, windows, or FreeBSD. |
-| `kernelmajversion` | `string` | no | The two-component kernel version, such as 6.8. |
-| `kernelrelease` | `string` | no | The full kernel release reported by the system. |
-| `kernelversion` | `string` | no | The kernel version, without any release suffix. |
+| `kernel.name` | `string` | no | The kernel name, such as Linux, Darwin, windows, or FreeBSD. |
+| `kernel.release.full` | `string` | no | The full kernel release reported by the system. |
+| `kernel.release.major` | `string` | no | The major component of the kernel release. |
+| `kernel.release.minor` | `string` | no | The minor component of the kernel release. |
+| `kernel.release.patch` | `string` | yes | The patch component of the kernel release, when one is present. |
+| `kernel.version.full` | `string` | no | The kernel version, without any release suffix. |
 | `load_averages.15m` | `double` | no | The 15-minute system load average (null on Windows). |
 | `load_averages.1m` | `double` | no | The 1-minute system load average (null on Windows). |
 | `load_averages.5m` | `double` | no | The 5-minute system load average (null on Windows). |
@@ -130,7 +153,7 @@ $ facts --json
 | `os.release.full` | `string` | no | The full release number of the operating system. |
 | `os.release.major` | `string` | no | The major release number of the operating system. |
 | `os.release.minor` | `string` | yes | The minor release number of the operating system, when it has one. |
-| `path` | `string` | no | The PATH environment variable of the Facts process. |
+| `path` | `array` | no | The PATH environment entries of the Facts process, in lookup order. |
 | `processors.cores` | `integer` | no | The number of cores per processor socket. |
 | `processors.count` | `integer` | no | The number of logical processors. |
 | `processors.extensions` | `array` | no | The instruction set architectures the processors support, including the base architecture and x86_64 microarchitecture levels. |

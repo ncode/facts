@@ -171,8 +171,8 @@ facterversion:
   platforms: [linux, darwin, windows, freebsd, openbsd, netbsd]
 
 filesystems:
-  type: string
-  description: The usable filesystem types, as a comma-separated list.
+  type: array
+  description: The usable filesystem types, as an array of type names.
   platforms: [linux, darwin]
 
 fips_enabled:
@@ -323,19 +323,28 @@ is_virtual:
   description: Whether the machine is a virtual machine or container.
   platforms: [linux, darwin, windows, freebsd, openbsd, netbsd]
 
-kernel:
+kernel.name:
   type: string
   description: The kernel name, such as Linux, Darwin, windows, or FreeBSD.
   platforms: [linux, darwin, windows, freebsd, openbsd, netbsd]
-kernelmajversion:
-  type: string
-  description: The two-component kernel version, such as 6.8.
-  platforms: [linux, darwin, windows, freebsd, openbsd, netbsd]
-kernelrelease:
+kernel.release.full:
   type: string
   description: The full kernel release reported by the system.
   platforms: [linux, darwin, windows, freebsd, openbsd, netbsd]
-kernelversion:
+kernel.release.major:
+  type: string
+  description: The major component of the kernel release.
+  platforms: [linux, darwin, windows, freebsd, openbsd, netbsd]
+kernel.release.minor:
+  type: string
+  description: The minor component of the kernel release.
+  platforms: [linux, darwin, windows, freebsd, openbsd, netbsd]
+kernel.release.patch:
+  type: string
+  description: The patch component of the kernel release, when one is present.
+  platforms: [linux, darwin, windows, freebsd, openbsd, netbsd]
+  conditional: true
+kernel.version.full:
   type: string
   description: The kernel version, without any release suffix.
   platforms: [linux, darwin, windows, freebsd, openbsd, netbsd]
@@ -824,8 +833,8 @@ partitions.*.uuid:
   conditional: true
 
 path:
-  type: string
-  description: The PATH environment variable of the Facts process.
+  type: array
+  description: The PATH environment entries of the Facts process, in lookup order.
   platforms: [linux, darwin, windows, freebsd, openbsd, netbsd]
 
 processors.cores:
@@ -926,27 +935,27 @@ xen.domains:
   platforms: [linux]
   conditional: true
 
-zfs_featurenumbers:
-  type: string
-  description: The supported ZFS filesystem version numbers, comma-separated.
+zfs.feature_numbers:
+  type: array
+  description: The supported ZFS filesystem version numbers.
   platforms: [freebsd, netbsd]
   conditional: true
-zfs_version:
+zfs.version:
   type: string
   description: The latest supported ZFS filesystem version number.
   platforms: [freebsd, netbsd]
   conditional: true
-zpool_featurenumbers:
-  type: string
-  description: The supported ZFS pool version numbers, comma-separated.
+zpool.feature_numbers:
+  type: array
+  description: The supported ZFS pool version numbers.
   platforms: [freebsd, netbsd]
   conditional: true
-zpool_featureflags:
-  type: string
-  description: The supported ZFS pool feature flags, comma-separated.
+zpool.feature_flags:
+  type: array
+  description: The supported ZFS pool feature flags, when feature flags are available.
   platforms: [freebsd, netbsd]
   conditional: true
-zpool_version:
+zpool.version:
   type: string
   description: The latest supported ZFS pool version, or 5000 when feature flags are present.
   platforms: [freebsd, netbsd]

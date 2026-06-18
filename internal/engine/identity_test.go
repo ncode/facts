@@ -181,10 +181,36 @@ func TestCoreFacts_includeMacOSReleaseKernelHardwareAndIdentity(t *testing.T) {
 			t.Fatalf("identity = %#v, want key %q", identity, key)
 		}
 	}
-	for _, key := range []string{"kernel", "kernelrelease", "kernelversion", "kernelmajversion", "facterversion"} {
-		if got, ok := collection[key].(string); !ok || got == "" {
-			t.Fatalf("%s = %#v, want non-empty string", key, collection[key])
+	if got, ok := collection["facterversion"].(string); !ok || got == "" {
+		t.Fatalf("facterversion = %#v, want non-empty string", collection["facterversion"])
+	}
+	for _, legacy := range []string{"kernelrelease", "kernelversion", "kernelmajversion"} {
+		if _, ok := collection[legacy]; ok {
+			t.Fatalf("%s = %#v, want no flat kernel fact", legacy, collection[legacy])
 		}
+	}
+	kernel, kernelOK := collection["kernel"].(map[string]any)
+	if !kernelOK {
+		t.Fatalf("kernel = %#v, want structured map", collection["kernel"])
+	}
+	if got, ok := kernel["name"].(string); !ok || got == "" {
+		t.Fatalf("kernel.name = %#v, want non-empty string", kernel["name"])
+	}
+	release, releaseOK := kernel["release"].(map[string]any)
+	if !releaseOK {
+		t.Fatalf("kernel.release = %#v, want map", kernel["release"])
+	}
+	for _, key := range []string{"full", "major", "minor"} {
+		if got, ok := release[key].(string); !ok || got == "" {
+			t.Fatalf("kernel.release.%s = %#v, want non-empty string", key, release[key])
+		}
+	}
+	version, versionOK := kernel["version"].(map[string]any)
+	if !versionOK {
+		t.Fatalf("kernel.version = %#v, want map", kernel["version"])
+	}
+	if got, ok := version["full"].(string); !ok || got == "" {
+		t.Fatalf("kernel.version.full = %#v, want non-empty string", version["full"])
 	}
 	for _, key := range []string{"operatingsystem", "osfamily", "operatingsystemrelease", "architecture"} {
 		if got, ok := collection[key]; ok {

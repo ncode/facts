@@ -159,44 +159,52 @@ func exampleOutput(platform string) string {
 var exampleJSON = map[string]string{
 	"linux": `{
 		"disks": {"sda": {"serial_number": "S250NXAG959927J", "size": "64.00 GiB", "size_bytes": 68719476736, "type": "ssd"}},
-		"kernel": "Linux",
+		"filesystems": ["ext4", "tmpfs", "xfs"],
+		"kernel": {"name": "Linux", "release": {"full": "6.8.0-31-generic", "major": "6", "minor": "8", "patch": "0"}, "version": {"full": "6.8.0"}},
 		"networking": {"hostname": "linux01", "interfaces": {"eth0": {"ip": "192.0.2.10", "mac": "52:54:00:12:34:56", "mtu": 1500}}},
 		"os": {"family": "Debian", "name": "Ubuntu", "release": {"major": "24", "full": "24.04"}},
-		"partitions": {"/dev/sda1": {"filesystem": "ext4", "mount": "/", "size": "63.00 GiB", "size_bytes": 67645734912}}
+		"partitions": {"/dev/sda1": {"filesystem": "ext4", "mount": "/", "size": "63.00 GiB", "size_bytes": 67645734912}},
+		"path": ["/usr/local/bin", "/usr/bin", "/bin"]
 	}`,
 	"darwin": `{
-		"kernel": "Darwin",
+		"filesystems": ["apfs", "autofs", "devfs"],
+		"kernel": {"name": "Darwin", "release": {"full": "24.5.0", "major": "24", "minor": "5", "patch": "0"}, "version": {"full": "24.5.0"}},
 		"networking": {"hostname": "macbook", "interfaces": {"en0": {"ip": "192.0.2.20", "mac": "3c:22:fb:00:00:01", "mtu": 1500}}},
 		"os": {"family": "Darwin", "macosx": {"product": "macOS", "version": {"full": "15.5", "major": "15", "minor": "5"}}, "name": "Darwin"},
+		"path": ["/usr/local/bin", "/usr/bin", "/bin"],
 		"system_profiler": {"hardware": {"model_name": "MacBook Pro"}}
 	}`,
 	"windows": `{
 		"fips_enabled": false,
-		"kernel": "windows",
+		"kernel": {"name": "windows", "release": {"full": "10.0.22631", "major": "10", "minor": "0", "patch": "22631"}, "version": {"full": "10.0.22631"}},
 		"networking": {"hostname": "winbuild01", "interfaces": {"Ethernet": {"ip": "192.0.2.30", "mac": "00:15:5d:00:00:01", "mtu": 1500}}},
-		"os": {"family": "windows", "name": "windows", "windows": {"system32": "C:\\Windows\\System32"}}
+		"os": {"family": "windows", "name": "windows", "windows": {"system32": "C:\\Windows\\System32"}},
+		"path": ["C:\\Windows\\system32", "C:\\Windows"]
 	}`,
 	"freebsd": `{
 		"disks": {"ada0": {"model": "Virtual Disk", "serial_number": "S250NXAG959927J", "size": "64.00 GiB", "size_bytes": 68719476736}},
-		"kernel": "FreeBSD",
+		"kernel": {"name": "FreeBSD", "release": {"full": "14.3-RELEASE", "major": "14", "minor": "3"}, "version": {"full": "14.3"}},
 		"networking": {"hostname": "freebsd01", "interfaces": {"vtnet0": {"ip": "192.0.2.40", "mac": "58:9c:fc:00:00:01", "mtu": 1500}}},
 		"os": {"family": "FreeBSD", "name": "FreeBSD", "release": {"major": "14", "full": "14.3-RELEASE"}},
-		"partitions": {"ada0p1": {"partlabel": "gptboot0", "size": "512.00 KiB", "size_bytes": 524288}}
+		"partitions": {"ada0p1": {"partlabel": "gptboot0", "size": "512.00 KiB", "size_bytes": 524288}},
+		"path": ["/sbin", "/bin", "/usr/sbin", "/usr/bin"]
 	}`,
 	"openbsd": `{
 		"disks": {"sd0": {"size": "10.00 GiB", "size_bytes": 10737418240}},
-		"kernel": "OpenBSD",
+		"kernel": {"name": "OpenBSD", "release": {"full": "7.9", "major": "7", "minor": "9"}, "version": {"full": "7.9"}},
 		"networking": {"hostname": "openbsd01", "interfaces": {"vio0": {"ip": "192.0.2.50", "mac": "52:54:00:12:34:79", "mtu": 1500}}},
 		"os": {"family": "OpenBSD", "name": "OpenBSD", "release": {"major": "7", "minor": "9", "full": "7.9"}},
-		"partitions": {"/dev/sd0a": {"filesystem": "4.2BSD", "mount": "/", "size": "1.15 GiB", "size_bytes": 1233534976}}
+		"partitions": {"/dev/sd0a": {"filesystem": "4.2BSD", "mount": "/", "size": "1.15 GiB", "size_bytes": 1233534976}},
+		"path": ["/sbin", "/bin", "/usr/sbin", "/usr/bin"]
 	}`,
 	"netbsd": `{
 		"disks": {"ld4": {"size": "10.00 GiB", "size_bytes": 10737418240}},
-		"kernel": "NetBSD",
+		"kernel": {"name": "NetBSD", "release": {"full": "10.1", "major": "10", "minor": "1"}, "version": {"full": "10.1"}},
 		"networking": {"hostname": "netbsd01", "interfaces": {"vioif0": {"ip": "192.0.2.60", "mac": "52:54:00:12:34:23", "mtu": 1500}}},
 		"os": {"family": "NetBSD", "name": "NetBSD", "release": {"major": "10", "minor": "1", "full": "10.1"}},
 		"partitions": {"/dev/dk1": {"filesystem": "ffs", "mount": "/", "partlabel": "netbsd-root", "size": "9.90 GiB", "size_bytes": 10632560640}},
-		"zfs_version": "5",
-		"zpool_version": "5000"
+		"path": ["/sbin", "/bin", "/usr/sbin", "/usr/bin"],
+		"zfs": {"feature_numbers": ["1", "2", "3", "4", "5"], "version": "5"},
+		"zpool": {"feature_numbers": ["1", "2", "3", "4", "5"], "version": "5000"}
 	}`,
 }

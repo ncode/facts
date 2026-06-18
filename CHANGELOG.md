@@ -15,6 +15,21 @@
 
 ### Changed
 
+- **BREAKING**: Replaced the Ruby-era flat kernel facts with a structured
+  `kernel` map. `kernel.name`, `kernel.release.full`, `kernel.release.major`,
+  `kernel.release.minor`, `kernel.release.patch` (only when a patch component
+  exists), and `kernel.version.full` replace the removed `kernel`,
+  `kernelrelease`, `kernelmajversion`, and `kernelversion` facts. No
+  compatibility aliases are emitted (ADR-0011).
+- **BREAKING**: `filesystems` and `path` are now arrays instead of
+  delimiter-separated strings. `filesystems` is an array of filesystem type
+  names; `path` is an array of PATH entries split on the platform path-list
+  separator, with empty entries omitted.
+- **BREAKING**: ZFS and zpool facts are now structured. `zfs.feature_numbers`
+  (array) and `zfs.version` (string) replace `zfs_featurenumbers` and
+  `zfs_version`; `zpool.feature_numbers` (array), `zpool.feature_flags`
+  (array, when present), and `zpool.version` (string) replace
+  `zpool_featurenumbers`, `zpool_featureflags`, and `zpool_version`.
 - **BREAKING**: Linux disk serial numbers now emit as
   `disks.*.serial_number` instead of `disks.*.serial`, matching the
   schema-owned canonical spelling used for disk serials across supported

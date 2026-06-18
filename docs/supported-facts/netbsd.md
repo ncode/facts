@@ -15,7 +15,17 @@ $ facts --json
       "size_bytes": 10737418240
     }
   },
-  "kernel": "NetBSD",
+  "kernel": {
+    "name": "NetBSD",
+    "release": {
+      "full": "10.1",
+      "major": "10",
+      "minor": "1"
+    },
+    "version": {
+      "full": "10.1"
+    }
+  },
   "networking": {
     "hostname": "netbsd01",
     "interfaces": {
@@ -44,14 +54,38 @@ $ facts --json
       "size_bytes": 10632560640
     }
   },
-  "zfs_version": "5",
-  "zpool_version": "5000"
+  "path": [
+    "/sbin",
+    "/bin",
+    "/usr/sbin",
+    "/usr/bin"
+  ],
+  "zfs": {
+    "feature_numbers": [
+      "1",
+      "2",
+      "3",
+      "4",
+      "5"
+    ],
+    "version": "5"
+  },
+  "zpool": {
+    "feature_numbers": [
+      "1",
+      "2",
+      "3",
+      "4",
+      "5"
+    ],
+    "version": "5000"
+  }
 }
 ```
 
 ## Fact Contract
 
-107 schema entries include `netbsd`.
+109 schema entries include `netbsd`.
 
 | Fact | Type | Conditional | Description |
 | --- | --- | --- | --- |
@@ -72,10 +106,12 @@ $ facts --json
 | `identity.uid` | `integer` | no | The user identifier of the user running Facts. |
 | `identity.user` | `string` | no | The name of the user running Facts. |
 | `is_virtual` | `boolean` | no | Whether the machine is a virtual machine or container. |
-| `kernel` | `string` | no | The kernel name, such as Linux, Darwin, windows, or FreeBSD. |
-| `kernelmajversion` | `string` | no | The two-component kernel version, such as 6.8. |
-| `kernelrelease` | `string` | no | The full kernel release reported by the system. |
-| `kernelversion` | `string` | no | The kernel version, without any release suffix. |
+| `kernel.name` | `string` | no | The kernel name, such as Linux, Darwin, windows, or FreeBSD. |
+| `kernel.release.full` | `string` | no | The full kernel release reported by the system. |
+| `kernel.release.major` | `string` | no | The major component of the kernel release. |
+| `kernel.release.minor` | `string` | no | The minor component of the kernel release. |
+| `kernel.release.patch` | `string` | yes | The patch component of the kernel release, when one is present. |
+| `kernel.version.full` | `string` | no | The kernel version, without any release suffix. |
 | `load_averages.15m` | `double` | no | The 15-minute system load average (null on Windows). |
 | `load_averages.1m` | `double` | no | The 1-minute system load average (null on Windows). |
 | `load_averages.5m` | `double` | no | The 5-minute system load average (null on Windows). |
@@ -137,7 +173,7 @@ $ facts --json
 | `partitions.*.partlabel` | `string` | yes | The partition label from the partition table. |
 | `partitions.*.size` | `string` | yes | The display size of the partition, such as 1.00 GiB. |
 | `partitions.*.size_bytes` | `integer` | yes | The size of the partition, in bytes. |
-| `path` | `string` | no | The PATH environment variable of the Facts process. |
+| `path` | `array` | no | The PATH environment entries of the Facts process, in lookup order. |
 | `processors.cores` | `integer` | no | The number of cores per processor socket. |
 | `processors.count` | `integer` | no | The number of logical processors. |
 | `processors.extensions` | `array` | no | The instruction set architectures the processors support, including the base architecture and x86_64 microarchitecture levels. |
@@ -157,8 +193,8 @@ $ facts --json
 | `system_uptime.uptime` | `string` | no | The display form of the system uptime, such as 3 days. |
 | `timezone` | `string` | no | The abbreviated time zone name of the system, such as UTC. |
 | `virtual` | `string` | no | The hypervisor or container technology the machine runs under, or physical. |
-| `zfs_featurenumbers` | `string` | yes | The supported ZFS filesystem version numbers, comma-separated. |
-| `zfs_version` | `string` | yes | The latest supported ZFS filesystem version number. |
-| `zpool_featureflags` | `string` | yes | The supported ZFS pool feature flags, comma-separated. |
-| `zpool_featurenumbers` | `string` | yes | The supported ZFS pool version numbers, comma-separated. |
-| `zpool_version` | `string` | yes | The latest supported ZFS pool version, or 5000 when feature flags are present. |
+| `zfs.feature_numbers` | `array` | yes | The supported ZFS filesystem version numbers. |
+| `zfs.version` | `string` | yes | The latest supported ZFS filesystem version number. |
+| `zpool.feature_flags` | `array` | yes | The supported ZFS pool feature flags, when feature flags are available. |
+| `zpool.feature_numbers` | `array` | yes | The supported ZFS pool version numbers. |
+| `zpool.version` | `string` | yes | The latest supported ZFS pool version, or 5000 when feature flags are present. |

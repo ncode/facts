@@ -99,9 +99,9 @@ $ brew install ncode/tap/facts
 $ facts os.name
 Darwin
 
-$ facts --json os.family kernelversion
+$ facts --json os.family kernel.version.full
 {
-  "kernelversion": "25.5.0",
+  "kernel.version.full": "25.5.0",
   "os.family": "Darwin"
 }
 
