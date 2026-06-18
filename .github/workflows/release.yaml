@@ -67,3 +67,18 @@ jobs:
             dist/facts-*.zip \
             dist/SHA256SUMS \
             --clobber
+
+  bump-tap:
+    name: Bump Homebrew tap formula
+    needs: dist
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Bump formula in ncode/homebrew-tap
+        uses: dawidd6/action-homebrew-bump-formula@v3
+        with:
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          tap: ncode/homebrew-tap
+          formula: facts
+          tag: ${{ github.event.release.tag_name }}
+          force: false
