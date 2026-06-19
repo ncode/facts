@@ -64,7 +64,7 @@ $ facts --json
 
 ## Fact Contract
 
-111 schema entries include `openbsd`.
+113 schema entries include `openbsd`.
 
 | Fact | Type | Conditional | Description |
 | --- | --- | --- | --- |
@@ -78,6 +78,7 @@ $ facts --json
 | `dmi.product.name` | `string` | yes | The product name of the system (the hardware model on macOS). |
 | `dmi.product.serial_number` | `string` | yes | The serial number of the system. |
 | `dmi.product.uuid` | `string` | yes | The hardware UUID of the system. |
+| `dmi.product.version` | `string` | yes | The product version of the system. |
 | `facterversion` | `string` | no | The Facter compatibility version of the Facts engine. |
 | `identity.gid` | `integer` | no | The group identifier of the user running Facts. |
 | `identity.group` | `string` | no | The group name of the user running Facts. |
@@ -136,6 +137,7 @@ $ facts --json
 | `networking.interfaces.*.netmask6` | `string` | yes | The IPv6 netmask of the interface's first binding. |
 | `networking.interfaces.*.network` | `string` | yes | The IPv4 network of the interface's first binding. |
 | `networking.interfaces.*.network6` | `string` | yes | The IPv6 network of the interface's first binding. |
+| `networking.interfaces.*.operational_state` | `string` | yes | The operational state of the interface, such as up or down. |
 | `networking.interfaces.*.scope6` | `string` | yes | The IPv6 scope of the interface's first binding, such as global or link. |
 | `networking.ip` | `string` | no | The IPv4 address of the primary interface. |
 | `networking.ip6` | `string` | no | The IPv6 address of the primary interface. |

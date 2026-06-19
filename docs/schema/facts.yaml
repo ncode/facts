@@ -70,7 +70,7 @@ disks.*.size_bytes:
 disks.*.type:
   type: string
   description: "The kind of disk: ssd or hdd."
-  platforms: [linux]
+  platforms: [linux, freebsd]
   conditional: true
 disks.*.vendor:
   type: string
@@ -151,7 +151,7 @@ dmi.product.uuid:
 dmi.product.version:
   type: string
   description: The product version of the system.
-  platforms: [linux]
+  platforms: [linux, openbsd, netbsd]
   conditional: true
 
 ec2_metadata:
@@ -438,15 +438,15 @@ mountpoints.*:
 mountpoints.*.available:
   type: string
   description: The display amount of free space on the mount, such as 1.00 GiB.
-  platforms: [linux, darwin, freebsd, openbsd]
+  platforms: [linux, darwin, freebsd, openbsd, netbsd]
 mountpoints.*.available_bytes:
   type: integer
   description: The free space on the mount, in bytes.
-  platforms: [linux, darwin, freebsd, openbsd]
+  platforms: [linux, darwin, freebsd, openbsd, netbsd]
 mountpoints.*.capacity:
   type: string
   description: The percentage of the mount's space in use.
-  platforms: [linux, darwin, freebsd, openbsd]
+  platforms: [linux, darwin, freebsd, openbsd, netbsd]
 mountpoints.*.device:
   type: string
   description: The device backing the mount.
@@ -462,24 +462,24 @@ mountpoints.*.options:
 mountpoints.*.size:
   type: string
   description: The display size of the mount, such as 100.00 GiB.
-  platforms: [linux, darwin, freebsd, openbsd]
+  platforms: [linux, darwin, freebsd, openbsd, netbsd]
 mountpoints.*.size_bytes:
   type: integer
   description: The size of the mount, in bytes.
-  platforms: [linux, darwin, freebsd, openbsd]
+  platforms: [linux, darwin, freebsd, openbsd, netbsd]
 mountpoints.*.used:
   type: string
   description: The display amount of space in use on the mount, such as 1.00 GiB.
-  platforms: [linux, darwin, freebsd, openbsd]
+  platforms: [linux, darwin, freebsd, openbsd, netbsd]
 mountpoints.*.used_bytes:
   type: integer
   description: The space in use on the mount, in bytes.
-  platforms: [linux, darwin, freebsd, openbsd]
+  platforms: [linux, darwin, freebsd, openbsd, netbsd]
 
 networking.dhcp:
   type: string
   description: The DHCP server of the primary interface, when known.
-  platforms: [linux, darwin, windows, freebsd, openbsd, netbsd]
+  platforms: [linux, darwin, windows, freebsd, openbsd]
 networking.domain:
   type: string
   description: The DNS domain of the host, when one is configured.
@@ -510,7 +510,7 @@ networking.interfaces.*.bindings6:
 networking.interfaces.*.dhcp:
   type: string
   description: The DHCP server of the interface, when known (null on Windows interfaces without one).
-  platforms: [linux, darwin, windows, openbsd]
+  platforms: [linux, darwin, windows, freebsd, openbsd]
   conditional: true
 networking.interfaces.*.dns_suffix:
   type: string
@@ -520,7 +520,7 @@ networking.interfaces.*.dns_suffix:
 networking.interfaces.*.duplex:
   type: string
   description: "The duplex mode of the interface: full or half."
-  platforms: [linux]
+  platforms: [linux, freebsd]
   conditional: true
 networking.interfaces.*.ip:
   type: string
@@ -564,7 +564,7 @@ networking.interfaces.*.network6:
 networking.interfaces.*.operational_state:
   type: string
   description: The operational state of the interface, such as up or down.
-  platforms: [linux]
+  platforms: [linux, freebsd, openbsd, netbsd]
   conditional: true
 networking.interfaces.*.physical:
   type: boolean
@@ -809,7 +809,7 @@ partitions.*.partlabel:
 partitions.*.parttype:
   type: string
   description: The partition type GUID or identifier.
-  platforms: [linux]
+  platforms: [linux, freebsd]
   conditional: true
 partitions.*.partuuid:
   type: string

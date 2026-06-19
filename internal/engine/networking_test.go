@@ -536,6 +536,18 @@ func TestNetworkingDHCPFactIsEmptyWithoutPrimaryDHCPValue(t *testing.T) {
 	}
 }
 
+func TestNetworkingDHCPValueKeepsNetBSDAbsentWithoutSource(t *testing.T) {
+	t.Parallel()
+
+	interfaces := map[string]any{
+		"vioif0": map[string]any{"bindings": []any{map[string]any{"address": "10.0.0.12"}}},
+	}
+
+	if got := networkingDHCPValue("netbsd", interfaces, "10.0.0.12"); got != nil {
+		t.Fatalf("networkingDHCPValue(netbsd) = %#v, want nil", got)
+	}
+}
+
 func TestCurrentNetworkingDataExpandsFreeBSDInterfaceBindings(t *testing.T) {
 	t.Parallel()
 
@@ -776,6 +788,9 @@ func TestCurrentNetworkingDataAddsOpenBSDDHCPServer(t *testing.T) {
 		if name == "route" && reflect.DeepEqual(args, []string{"-n", "get", "default"}) {
 			return ""
 		}
+		if name == "ifconfig" {
+			return ""
+		}
 		if name != "dhcpleasectl" || len(args) != 2 || args[0] != "-l" {
 			t.Fatalf("run(%q, %#v), want dhcpleasectl -l <interface>", name, args)
 		}
@@ -794,6 +809,188 @@ func TestCurrentNetworkingDataAddsOpenBSDDHCPServer(t *testing.T) {
 	em1 := got["em1"].(map[string]any)
 	if got := em1["dhcp"]; got != nil {
 		t.Fatalf("em1[dhcp] = %#v, want nil", got)
+	}
+}
+
+func TestCurrentNetworkingDataAddsBSDOperationalState(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		goos     string
+		ifconfig string
+	}{
+		{
+			goos: "freebsd",
+			ifconfig: `em0: flags=1008843<UP,BROADCAST,RUNNING,SIMPLEX,MULTICAST,LOWER_UP> metric 0 mtu 1500
+	status: active
+`,
+		},
+		{
+			goos: "openbsd",
+			ifconfig: `em0: flags=808843<UP,BROADCAST,RUNNING,SIMPLEX,MULTICAST,AUTOCONF4> mtu 1500
+	status: active
+`,
+		},
+		{
+			goos: "netbsd",
+			ifconfig: `vioif0: flags=0x8843<UP,BROADCAST,RUNNING,SIMPLEX,MULTICAST> mtu 1500
+	status: active
+`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.goos, func(t *testing.T) {
+			t.Parallel()
+
+			ifaceName := "em0"
+			if tt.goos == "netbsd" {
+				ifaceName = "vioif0"
+			}
+			interfaces := map[string]any{ifaceName: map[string]any{"mtu": 1500}}
+			run := func(name string, args ...string) string {
+				if name == "route" && reflect.DeepEqual(args, []string{"-n", "get", "default"}) {
+					return ""
+				}
+				if name == "dhcpleasectl" {
+					return ""
+				}
+				if name == "ifconfig" && reflect.DeepEqual(args, []string{ifaceName}) {
+					return tt.ifconfig
+				}
+				if name == "ifconfig" && reflect.DeepEqual(args, []string{"-m", ifaceName}) {
+					return ""
+				}
+				t.Fatalf("unexpected command %q %#v", name, args)
+				return ""
+			}
+
+			_, got := currentNetworkingData(tt.goos, interfaces, run)
+			iface := got[ifaceName].(map[string]any)
+			if got, want := iface["operational_state"], "active"; got != want {
+				t.Fatalf("%s operational_state = %#v, want %#v", ifaceName, got, want)
+			}
+		})
+	}
+}
+
+func TestCurrentNetworkingDataAddsFreeBSDSpeedDuplex(t *testing.T) {
+	t.Parallel()
+
+	interfaces := map[string]any{"em0": map[string]any{"mtu": 1500}}
+	run := func(name string, args ...string) string {
+		if name == "route" && reflect.DeepEqual(args, []string{"-n", "get", "default"}) {
+			return ""
+		}
+		if name == "ifconfig" && reflect.DeepEqual(args, []string{"em0"}) {
+			return "em0: flags=8843<UP,BROADCAST,RUNNING,SIMPLEX,MULTICAST> mtu 1500\n\tstatus: active\n"
+		}
+		if name == "ifconfig" && reflect.DeepEqual(args, []string{"-m", "em0"}) {
+			return "em0: flags=8843<UP,BROADCAST,RUNNING,SIMPLEX,MULTICAST> mtu 1500\n\tmedia: Ethernet autoselect (1000baseT <full-duplex>)\n\tstatus: active\n"
+		}
+		t.Fatalf("unexpected command %q %#v", name, args)
+		return ""
+	}
+
+	_, got := currentNetworkingData("freebsd", interfaces, run)
+	em0 := got["em0"].(map[string]any)
+	if em0["speed"] != 1000 {
+		t.Fatalf("em0 speed = %#v, want 1000", em0["speed"])
+	}
+	if em0["duplex"] != "full" {
+		t.Fatalf("em0 duplex = %#v, want full", em0["duplex"])
+	}
+}
+
+func TestBSDMediaSpeedParsesCommonFreeBSDMediaTokens(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		token string
+		want  int
+	}{
+		{"10baseT/UTP", 10},
+		{"100baseTX", 100},
+		{"1000baseT", 1000},
+		{"2500baseT", 2500},
+		{"2.5Gbase-T", 2500},
+		{"5000baseT", 5000},
+		{"5Gbase-T", 5000},
+		{"10Gbase-T", 10000},
+		{"25GBase-SR", 25000},
+		{"40GBase-CR4", 40000},
+		{"100GBase-SR4", 100000},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.token, func(t *testing.T) {
+			t.Parallel()
+
+			if got := bsdMediaSpeed(tt.token); got != tt.want {
+				t.Fatalf("bsdMediaSpeed(%q) = %d, want %d", tt.token, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCurrentNetworkingDataAddsFreeBSDDHCPServer(t *testing.T) {
+	t.Parallel()
+
+	interfaces := map[string]any{
+		"em0": map[string]any{
+			"bindings": []any{map[string]any{"address": "192.168.1.2", "netmask": "255.255.255.0", "network": "192.168.1.0"}},
+		},
+	}
+	run := func(name string, args ...string) string {
+		if name == "route" && reflect.DeepEqual(args, []string{"-n", "get", "default"}) {
+			return "interface: em0\n"
+		}
+		if name == "ifconfig" {
+			return ""
+		}
+		t.Fatalf("unexpected command %q %#v", name, args)
+		return ""
+	}
+	readFile := func(path string) ([]byte, error) {
+		if path != "/var/db/dhclient.leases.em0" {
+			return nil, os.ErrNotExist
+		}
+		return []byte("lease {\n  option dhcp-server-identifier 192.168.1.1;\n}\n"), nil
+	}
+
+	primary, got := currentNetworkingData("freebsd", interfaces, run, readFile)
+	if primary != "em0" {
+		t.Fatalf("primary = %q, want em0", primary)
+	}
+	em0 := got["em0"].(map[string]any)
+	if em0["dhcp"] != "192.168.1.1" {
+		t.Fatalf("em0 dhcp = %#v, want 192.168.1.1", em0["dhcp"])
+	}
+	if dhcp := networkingDHCPFact(got, "192.168.1.2"); dhcp != "192.168.1.1" {
+		t.Fatalf("networkingDHCPFact() = %q, want 192.168.1.1", dhcp)
+	}
+}
+
+func TestCurrentNetworkingDataKeepsNetBSDDHCPAbsent(t *testing.T) {
+	t.Parallel()
+
+	interfaces := map[string]any{"vioif0": map[string]any{"bindings": []any{map[string]any{"address": "192.168.1.2"}}}}
+	run := func(name string, args ...string) string {
+		if name == "route" && reflect.DeepEqual(args, []string{"-n", "get", "default"}) {
+			return "interface: vioif0\n"
+		}
+		if name == "ifconfig" {
+			return "vioif0: flags=8843<UP,BROADCAST,RUNNING,SIMPLEX,MULTICAST> mtu 1500\n\tstatus: active\n"
+		}
+		t.Fatalf("unexpected command %q %#v", name, args)
+		return ""
+	}
+
+	_, got := currentNetworkingData("netbsd", interfaces, run, func(string) ([]byte, error) {
+		return []byte("option dhcp-server-identifier 192.168.1.1;\n"), nil
+	})
+	if dhcp := got["vioif0"].(map[string]any)["dhcp"]; dhcp != nil {
+		t.Fatalf("vioif0 dhcp = %#v, want absent", dhcp)
 	}
 }
 
@@ -926,6 +1123,23 @@ func TestLinuxDHCPServerReadsDHClientLeaseForInterface(t *testing.T) {
 
 	if got, want := linuxDHCPServerFromRoot(testSession, root, "eth0", 0), "10.32.10.163"; got != want {
 		t.Fatalf("linuxDHCPServerFromRoot(testSession) = %q, want %q", got, want)
+	}
+}
+
+func TestLinuxDHClientDHCPServerUsesLastLeaseServer(t *testing.T) {
+	t.Parallel()
+
+	content := `lease {
+  interface "eth0";
+  option dhcp-server-identifier 10.32.10.163;
+}
+lease {
+  interface "eth0";
+  option dhcp-server-identifier 10.32.10.254;
+}`
+
+	if got, want := linuxDHClientDHCPServer(content), "10.32.10.254"; got != want {
+		t.Fatalf("linuxDHClientDHCPServer() = %q, want %q", got, want)
 	}
 }
 

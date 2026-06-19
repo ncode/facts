@@ -9,6 +9,6 @@ These pages are generated from [`docs/schema/facts.yaml`](../schema/facts.yaml).
 | [Linux](linux.md) | 175 |
 | [macOS / Darwin](darwin.md) | 107 |
 | [Windows](windows.md) | 101 |
-| [FreeBSD](freebsd.md) | 124 |
-| [OpenBSD](openbsd.md) | 111 |
-| [NetBSD](netbsd.md) | 109 |
+| [FreeBSD](freebsd.md) | 129 |
+| [OpenBSD](openbsd.md) | 113 |
+| [NetBSD](netbsd.md) | 117 |

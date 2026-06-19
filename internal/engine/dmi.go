@@ -171,6 +171,7 @@ func openBSDDMIFacts(values map[string]string) []ResolvedFact {
 		"name":          "hw.product",
 		"serial_number": "hw.serialno",
 		"uuid":          "hw.uuid",
+		"version":       "hw.version",
 	})
 	if len(product) > 0 {
 		dmi["product"] = product
@@ -197,6 +198,7 @@ func netBSDDMIFacts(values map[string]string) []ResolvedFact {
 		"name":          "machdep.dmi.system-product",
 		"serial_number": "machdep.dmi.system-serial",
 		"uuid":          "machdep.dmi.system-uuid",
+		"version":       "machdep.dmi.system-version",
 	})
 	if len(product) > 0 {
 		dmi["product"] = product
