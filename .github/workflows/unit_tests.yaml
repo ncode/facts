@@ -101,6 +101,7 @@ jobs:
             # git: the run uses -buildvcs=false and the gates don't call git.
             ver=$(awk '$1=="go"{print $2; exit}' go.mod)
             fetch -o /tmp/go.tgz "https://go.dev/dl/go${ver}.freebsd-amd64.tar.gz"
+            mkdir -p /usr/local
             rm -rf /usr/local/go
             gunzip -c /tmp/go.tgz | tar -xf - -C /usr/local
           run: |
@@ -131,6 +132,7 @@ jobs:
             # security floor, so fetch the upstream openbsd archive instead.
             ver=$(awk '$1=="go"{print $2; exit}' go.mod)
             ftp -o /tmp/go.tgz "https://go.dev/dl/go${ver}.openbsd-amd64.tar.gz"
+            mkdir -p /usr/local
             rm -rf /usr/local/go
             gunzip -c /tmp/go.tgz | tar -xf - -C /usr/local
           run: |
@@ -162,6 +164,7 @@ jobs:
             # upstream netbsd archive, which always matches the toolchain floor.
             ver=$(awk '$1=="go"{print $2; exit}' go.mod)
             ftp -o /tmp/go.tgz "https://go.dev/dl/go${ver}.netbsd-amd64.tar.gz"
+            mkdir -p /usr/local
             rm -rf /usr/local/go
             gunzip -c /tmp/go.tgz | tar -xf - -C /usr/local
           run: |
