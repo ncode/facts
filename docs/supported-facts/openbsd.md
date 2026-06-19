@@ -125,14 +125,14 @@ $ facts --json
 | `networking.domain` | `string` | yes | The DNS domain of the host, when one is configured. |
 | `networking.fqdn` | `string` | no | The fully qualified domain name of the host. |
 | `networking.hostname` | `string` | no | The short host name of the machine. |
-| `networking.interfaces.*` | `map` | no | A network interface, keyed by interface name. |
+| `networking.interfaces.*` | `map` | yes | A network interface, keyed by interface name. |
 | `networking.interfaces.*.bindings` | `array` | yes | The IPv4 bindings of the interface (address, netmask, network). |
 | `networking.interfaces.*.bindings6` | `array` | yes | The IPv6 bindings of the interface (address, netmask, network, scope6, flags). |
 | `networking.interfaces.*.dhcp` | `string` | yes | The DHCP server of the interface, when known (null on Windows interfaces without one). |
 | `networking.interfaces.*.ip` | `string` | yes | The first IPv4 address bound to the interface. |
 | `networking.interfaces.*.ip6` | `string` | yes | The first IPv6 address bound to the interface. |
 | `networking.interfaces.*.mac` | `string` | yes | The MAC address of the interface. |
-| `networking.interfaces.*.mtu` | `integer` | no | The maximum transmission unit of the interface. |
+| `networking.interfaces.*.mtu` | `integer` | yes | The maximum transmission unit of the interface. |
 | `networking.interfaces.*.netmask` | `string` | yes | The IPv4 netmask of the interface's first binding. |
 | `networking.interfaces.*.netmask6` | `string` | yes | The IPv6 netmask of the interface's first binding. |
 | `networking.interfaces.*.network` | `string` | yes | The IPv4 network of the interface's first binding. |

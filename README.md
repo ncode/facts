@@ -129,6 +129,8 @@ Every release target is a blocking CI gate — unit tests, the race detector ove
 | FreeBSD | amd64 | VM job + release-gate fact set | [FreeBSD facts](docs/supported-facts/freebsd.md) |
 | OpenBSD | amd64 | VM job + release-gate fact set | [OpenBSD facts](docs/supported-facts/openbsd.md) |
 | NetBSD | amd64 | VM job + release-gate fact set | [NetBSD facts](docs/supported-facts/netbsd.md) |
+| DragonFly BSD | amd64 | local/asserted native gate + release-gate fact set | [DragonFly BSD facts](docs/supported-facts/dragonfly.md) |
+| illumos | amd64 | local/asserted native gate + release-gate fact set | [illumos facts](docs/supported-facts/illumos.md) |
 
 Requires Go 1.26+.
 

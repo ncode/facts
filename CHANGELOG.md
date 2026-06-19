@@ -4,6 +4,10 @@
 
 ### Added
 
+- DragonFly BSD and illumos are now supported `amd64` targets with core
+  OS/kernel, networking, memory/swap, processor, uptime/load, mountpoint,
+  schema, dist, cross-compile, and native release-gate coverage. illumos is
+  validated as illumos/OmniOS only; Oracle Solaris remains out of scope.
 - OpenBSD and NetBSD are being promoted to supported targets with core fact
   resolvers, schema metadata, local smoke targets, release-gate scripts, and
   GitHub VM/cross-compile coverage.

@@ -93,10 +93,23 @@ the pipeline (`.github/workflows/unit_tests.yaml`):
   packages and `tools/openbsd-release-gate.sh` /
   `tools/netbsd-release-gate.sh`. Local QEMU guests under `.local/bsd-vms`
   can run the same checks through `make local-bsd-smoke`.
+- **DragonFly BSD** and **illumos**: native gates use
+  `tools/dragonfly-release-gate.sh` and `tools/illumos-release-gate.sh`
+  through local, untracked SSH wrappers. These validate `dragonfly/amd64` and
+  `illumos/amd64`; Oracle Solaris is not covered by the illumos gate.
 
 Local equivalents: `make lima-freebsd-smoke`, `make lima-linux-flavor-smoke`,
-`make local-bsd-smoke`, and running `tools/windows-release-gate.ps1` on a
-Windows host.
+`make local-bsd-smoke`, `make local-amd64-bsd-smoke`,
+`make local-candidate-smoke`, and running `tools/windows-release-gate.ps1` on
+a Windows host.
+
+The amd64 lab smoke targets are configured only through wrapper variables:
+`LOCAL_FREEBSD_AMD64_SSH`, `LOCAL_OPENBSD_ARM64_SSH`,
+`LOCAL_OPENBSD_AMD64_SSH`, `LOCAL_NETBSD_ARM64_SSH`,
+`LOCAL_NETBSD_AMD64_SSH`, `LOCAL_DRAGONFLY_AMD64_SSH`, and
+`LOCAL_ILLUMOS_AMD64_SSH`. OpenBSD, NetBSD, and DragonFly wrappers must allow
+`sudo -n` because their release gates read privileged disk labels. Real
+`.local` wrapper scripts stay untracked.
 
 ## The change workflow
 
