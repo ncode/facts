@@ -220,14 +220,35 @@ func TestFormatYAML_multipleUserQueriesUseOriginalQueryKeys(t *testing.T) {
 }
 
 func TestFormatYAML_quotesUnsafeKeys(t *testing.T) {
-	facts := []ResolvedFact{
-		{Name: "bad\nkey", Value: "value", Type: "external"},
+	tests := []struct {
+		name string
+		fact ResolvedFact
+		want string
+	}{
+		{
+			name: "control character",
+			fact: ResolvedFact{Name: "bad\nkey", Value: "value", Type: "external"},
+			want: "\"bad\\nkey\": value\n",
+		},
+		{
+			name: "boolean token",
+			fact: ResolvedFact{Name: "true", Value: "value", Type: "external"},
+			want: "\"true\": value\n",
+		},
+		{
+			name: "numeric token",
+			fact: ResolvedFact{Name: "123", Value: "value", Type: "external"},
+			want: "\"123\": value\n",
+		},
 	}
 
-	got := FormatYAML(facts)
-	want := "\"bad\\nkey\": value\n"
-	if got != want {
-		t.Fatalf("FormatYAML() = %q, want %q", got, want)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := FormatYAML([]ResolvedFact{tt.fact})
+			if got != tt.want {
+				t.Fatalf("FormatYAML() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 
@@ -340,11 +361,11 @@ func TestFormatHOCON_multipleUserQueriesUseQuotedQueryKeys(t *testing.T) {
 
 func TestFormatHOCON_quotesUnsafeKeys(t *testing.T) {
 	facts := []ResolvedFact{
-		{Name: "bad\nkey", Value: "value", Type: "external"},
+		{Name: "bad\x07key", Value: "value", Type: "external"},
 	}
 
 	got := FormatHOCON(facts)
-	want := "\"bad\\nkey\"=value\n"
+	want := "\"bad\\u0007key\"=value\n"
 	if got != want {
 		t.Fatalf("FormatHOCON() = %q, want %q", got, want)
 	}

@@ -17,6 +17,6 @@ func statMountpoint(path string) (mountStat, bool) {
 	blockSize := uint64(stat.Bsize)
 	sizeBytes := statfsNativeBlockBytes(stat.Blocks, blockSize)
 	availableBytes := statfsNativeBlockBytes(stat.Bavail, blockSize)
-	freeBytes := statfsNativeBlockBytes(stat.Bfree, blockSize)
-	return mountStat{SizeBytes: sizeBytes, AvailableBytes: availableBytes, UsedBytes: statfsUsedBytes(sizeBytes, freeBytes)}, true
+	usedBytes := statfsNativeUsedBytes(stat.Blocks, stat.Bfree, blockSize)
+	return mountStat{SizeBytes: sizeBytes, AvailableBytes: availableBytes, UsedBytes: usedBytes}, true
 }

@@ -221,17 +221,17 @@ func hoconLines(m map[string]any, depth int, braces bool) []string {
 }
 
 func yamlKey(value string) string {
-	if isPlainOutputKey(value, true) {
+	if isPlainOutputKey(value, true) && isPlainYAMLKey(value) {
 		return value
 	}
-	return strconv.Quote(value)
+	return quoteOutputString(value)
 }
 
 func hoconKey(value string) string {
 	if isPlainOutputKey(value, false) {
 		return value
 	}
-	return strconv.Quote(value)
+	return quoteOutputString(value)
 }
 
 func isPlainOutputKey(value string, allowDot bool) bool {
@@ -248,6 +248,23 @@ func isPlainOutputKey(value string, allowDot bool) bool {
 		return false
 	}
 	return true
+}
+
+func isPlainYAMLKey(value string) bool {
+	switch strings.ToLower(value) {
+	case "true", "false", "null", "~", "yes", "no", "on", "off":
+		return false
+	}
+	_, err := strconv.ParseFloat(value, 64)
+	return err != nil
+}
+
+func quoteOutputString(value string) string {
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return strconv.Quote(value)
+	}
+	return string(encoded)
 }
 
 func hoconScalar(value any) string {

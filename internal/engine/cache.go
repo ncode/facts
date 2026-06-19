@@ -370,9 +370,26 @@ func safeCacheGroupName(name string) bool {
 	return name != "" &&
 		name != "." &&
 		name != ".." &&
+		strings.TrimRight(name, ". ") == name &&
 		filepath.Clean(name) == name &&
 		!filepath.IsAbs(name) &&
-		!strings.ContainsAny(name, `/\:`)
+		!strings.ContainsAny(name, `/\:`) &&
+		!windowsReservedCacheName(name)
+}
+
+func windowsReservedCacheName(name string) bool {
+	base := strings.ToUpper(name)
+	if before, _, ok := strings.Cut(base, "."); ok {
+		base = before
+	}
+	switch base {
+	case "CON", "PRN", "AUX", "NUL":
+		return true
+	}
+	if len(base) == 4 && base[3] >= '1' && base[3] <= '9' {
+		return strings.HasPrefix(base, "COM") || strings.HasPrefix(base, "LPT")
+	}
+	return false
 }
 
 func deleteCacheFile(path string, log *slog.Logger) {

@@ -35,20 +35,15 @@ func (osHost) run(ctx context.Context, name string, args ...string) string {
 }
 
 func coreCommandEnv(env []string, goos string) []string {
-	out := make([]string, 0, len(env)+1)
-	for _, entry := range env {
-		name, _, ok := strings.Cut(entry, "=")
-		if ok && strings.EqualFold(name, "PATH") {
-			continue
-		}
-		out = append(out, entry)
-	}
-
-	key := "PATH"
 	if goos == "windows" {
-		key = "Path"
+		root := coreWindowsRoot()
+		return []string{
+			"SystemRoot=" + root,
+			"WINDIR=" + root,
+			"Path=" + coreCommandSearchPath(goos, env),
+		}
 	}
-	return append(out, key+"="+coreCommandSearchPath(goos, env))
+	return []string{"PATH=" + coreCommandSearchPath(goos, env)}
 }
 
 func coreCommandExecutable(name, goos string) (string, bool) {
@@ -93,10 +88,7 @@ func coreCommandFileExecutable(path, goos string) bool {
 func coreCommandSearchPath(goos string, env []string) string {
 	sep := corePathListSeparator(goos)
 	if goos == "windows" {
-		root := systemRootFromEnv(env)
-		if root == "" {
-			root = `C:\Windows`
-		}
+		root := coreWindowsRoot()
 		return strings.Join([]string{
 			root + `\System32`,
 			root,

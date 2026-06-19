@@ -1275,6 +1275,38 @@ func TestExternalFactLoader_rejectsOversizedStructuredFactFile(t *testing.T) {
 	}
 }
 
+func TestExternalFactLoader_reportsReadErrorsAfterOpen(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "site.txt")
+	if err := os.WriteFile(path, []byte("site=lab\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	readErr := errors.New("read exploded")
+	host := &fakeExternalFactLoaderHost{
+		openFunc: func(string) (io.ReadCloser, error) {
+			return io.NopCloser(errorReader{err: readErr}), nil
+		},
+	}
+
+	_, err := externalFactLoader{
+		s:    NewSession(),
+		mode: externalFactLoaderLibrary,
+		dirs: []string{dir},
+		host: host,
+	}.load()
+	if !errors.Is(err, readErr) {
+		t.Fatalf("load() err = %v, want read error", err)
+	}
+}
+
+type errorReader struct {
+	err error
+}
+
+func (r errorReader) Read([]byte) (int, error) {
+	return 0, r.err
+}
+
 func TestExternalFactLoader_rejectsOversizedExecutableFactOutput(t *testing.T) {
 	dir := t.TempDir()
 	// Windows classifies external executable facts by extension, not the mode
@@ -1323,11 +1355,11 @@ func TestLimitedBuffer_marksOverflowAndRetainsPrefix(t *testing.T) {
 	buf.limit = 8
 
 	n, err := buf.Write([]byte("site=larger-than-limit\n"))
-	if err != nil {
-		t.Fatal(err)
+	if !errors.Is(err, ErrExternalFactTooLarge) {
+		t.Fatalf("Write() err = %v, want ErrExternalFactTooLarge", err)
 	}
-	if n != len("site=larger-than-limit\n") {
-		t.Fatalf("Write() n = %d, want full input length", n)
+	if n != 8 {
+		t.Fatalf("Write() n = %d, want retained byte count", n)
 	}
 	if !buf.tooLarge {
 		t.Fatal("limitedBuffer did not mark overflow")

@@ -22,16 +22,16 @@ func statfsNativeBlockBytes[T ~int64 | ~uint64](blocks T, blockSize uint64) int 
 	return statfsBlockBytes(uint64(blocks), blockSize)
 }
 
-func statfsSignedBlockBytes(blocks, blockSize int64) int {
-	if blocks <= 0 || blockSize <= 0 {
+func statfsNativeUsedBytes[T ~int64 | ~uint64](blocks, bfree T, blockSize uint64) int {
+	if blocks <= 0 || bfree < 0 {
 		return 0
 	}
-	return statfsBlockBytes(uint64(blocks), uint64(blockSize))
+	return statfsUsedBlockBytes(uint64(blocks), uint64(bfree), blockSize)
 }
 
-func statfsUsedBytes(sizeBytes, freeBytes int) int {
-	if freeBytes >= sizeBytes {
+func statfsUsedBlockBytes(blocks, bfree, blockSize uint64) int {
+	if bfree >= blocks {
 		return 0
 	}
-	return sizeBytes - freeBytes
+	return statfsBlockBytes(blocks-bfree, blockSize)
 }

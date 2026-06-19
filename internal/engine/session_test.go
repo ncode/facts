@@ -137,15 +137,15 @@ func TestSessionBackedProbesUseFakeHost(t *testing.T) {
 }
 
 func TestCoreCommandEnvSanitizesPath(t *testing.T) {
-	env := coreCommandEnv([]string{"PATH=/tmp/attacker", "HOME=/home/alice"}, "linux")
+	env := coreCommandEnv([]string{"PATH=/tmp/attacker", "HOME=/home/alice", "LD_PRELOAD=/tmp/libhack.so"}, "linux")
 
 	for _, entry := range env {
 		if entry == "PATH=/tmp/attacker" {
 			t.Fatalf("coreCommandEnv kept attacker PATH: %#v", env)
 		}
 	}
-	if !slices.Contains(env, "HOME=/home/alice") {
-		t.Fatalf("coreCommandEnv dropped non-PATH env: %#v", env)
+	if slices.Contains(env, "HOME=/home/alice") || slices.Contains(env, "LD_PRELOAD=/tmp/libhack.so") {
+		t.Fatalf("coreCommandEnv kept caller environment entries: %#v", env)
 	}
 	path := ""
 	for _, entry := range env {
@@ -159,6 +159,14 @@ func TestCoreCommandEnvSanitizesPath(t *testing.T) {
 	}
 	if strings.Contains(path, "/tmp/attacker") {
 		t.Fatalf("PATH = %q, want sanitized path", path)
+	}
+}
+
+func TestCoreCommandSearchPathIgnoresCallerSystemRoot(t *testing.T) {
+	path := coreCommandSearchPath("windows", []string{`SYSTEMROOT=C:\attacker`})
+
+	if strings.Contains(strings.ToLower(path), `c:\attacker`) {
+		t.Fatalf("windows core command path = %q, want trusted Windows root", path)
 	}
 }
 
@@ -178,4 +186,3 @@ func TestOSHostRunDoesNotSearchCallerPath(t *testing.T) {
 		t.Fatalf("osHost.run() = %q, want no output from caller PATH command", got)
 	}
 }
-

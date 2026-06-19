@@ -234,6 +234,17 @@ func TestFactCache_ignoresUnsafeCacheGroupNames(t *testing.T) {
 	}
 }
 
+func TestSafeCacheGroupNameRejectsWindowsSpecialNames(t *testing.T) {
+	unsafe := []string{"CON", "nul.txt", "COM1", "LPT9.log", "name.", "name "}
+	for _, name := range unsafe {
+		t.Run(name, func(t *testing.T) {
+			if safeCacheGroupName(name) {
+				t.Fatalf("safeCacheGroupName(%q) = true, want false", name)
+			}
+		})
+	}
+}
+
 func TestFactCache_cacheFactsWarnsWhenCacheFileCannotBeWrittenLikeRubyCacheManager(t *testing.T) {
 	dir := t.TempDir()
 	originalWriteFile := cacheWriteFile

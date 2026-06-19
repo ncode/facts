@@ -12,7 +12,7 @@ func TestLinuxMountStatUsesFrsize(t *testing.T) {
 
 	tests := []struct {
 		name                          string
-		blocks, bavail, bfree         int64
+		blocks, bavail, bfree         uint64
 		bsize, frsize                 int64
 		wantSize, wantAvail, wantUsed int
 	}{
