@@ -51,12 +51,14 @@ var schemaTypes = map[string]bool{
 }
 
 var schemaPlatforms = map[string]bool{
-	"linux":   true,
-	"darwin":  true,
-	"windows": true,
-	"freebsd": true,
-	"openbsd": true,
-	"netbsd":  true,
+	"linux":     true,
+	"darwin":    true,
+	"windows":   true,
+	"freebsd":   true,
+	"openbsd":   true,
+	"netbsd":    true,
+	"dragonfly": true,
+	"illumos":   true,
 }
 
 func loadSchema(t *testing.T) map[string]schemaEntry {
