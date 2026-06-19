@@ -126,6 +126,14 @@ func networkingDHCPFact(interfaces map[string]any, primaryIP string) string {
 	return primaryDHCP
 }
 
+func networkingDHCPValue(goos string, interfaces map[string]any, primaryIP string) any {
+	dhcp := networkingDHCPFact(interfaces, primaryIP)
+	if goos == "netbsd" && dhcp == "" {
+		return nil
+	}
+	return dhcp
+}
+
 type networkInterfaceSnapshot struct {
 	Interface net.Interface
 	Addrs     []net.Addr
@@ -266,11 +274,19 @@ func currentNetworkingData(goos string, interfaces map[string]any, run commandRu
 		addDarwinDHCPServers(interfaces, run)
 		expandInterfaceBindings(interfaces)
 		return primaryInterfaceFromRoute(run("route", "-n", "get", "default")), interfaces
-	case "freebsd", "netbsd":
+	case "freebsd":
+		addBSDInterfaceOperationalStates(interfaces, run)
+		addFreeBSDInterfaceMedia(interfaces, run)
+		addFreeBSDDHCPServers(interfaces, readFile)
+		expandInterfaceBindings(interfaces)
+		return primaryInterfaceFromRoute(run("route", "-n", "get", "default")), interfaces
+	case "netbsd":
+		addBSDInterfaceOperationalStates(interfaces, run)
 		expandInterfaceBindings(interfaces)
 		return primaryInterfaceFromRoute(run("route", "-n", "get", "default")), interfaces
 	case "openbsd":
 		addOpenBSDDHCPServers(interfaces, run)
+		addBSDInterfaceOperationalStates(interfaces, run)
 		expandInterfaceBindings(interfaces)
 		return primaryInterfaceFromRoute(run("route", "-n", "get", "default")), interfaces
 	case "windows":
@@ -539,6 +555,105 @@ func addOpenBSDDHCPServers(interfaces map[string]any, run commandRunner) {
 			iface["dhcp"] = server
 		}
 	}
+}
+
+func addBSDInterfaceOperationalStates(interfaces map[string]any, run commandRunner) {
+	for _, name := range sortedKeys(interfaces) {
+		iface, ok := interfaces[name].(map[string]any)
+		if !ok {
+			continue
+		}
+		if state := bsdInterfaceStatus(run("ifconfig", name)); state != "" {
+			iface["operational_state"] = state
+		}
+	}
+}
+
+func addFreeBSDInterfaceMedia(interfaces map[string]any, run commandRunner) {
+	for _, name := range sortedKeys(interfaces) {
+		iface, ok := interfaces[name].(map[string]any)
+		if !ok {
+			continue
+		}
+		speed, duplex := freeBSDInterfaceMedia(run("ifconfig", "-m", name))
+		if speed > 0 {
+			iface["speed"] = speed
+		}
+		if duplex != "" {
+			iface["duplex"] = duplex
+		}
+	}
+}
+
+func addFreeBSDDHCPServers(interfaces map[string]any, readFile fileReader) {
+	for _, name := range sortedKeys(interfaces) {
+		iface, ok := interfaces[name].(map[string]any)
+		if !ok {
+			continue
+		}
+		content := readText("/var/db/dhclient.leases."+name, readFile)
+		if server := linuxDHClientDHCPServer(content); server != "" {
+			iface["dhcp"] = server
+		}
+	}
+}
+
+func bsdInterfaceStatus(output string) string {
+	for line := range strings.SplitSeq(output, "\n") {
+		line = strings.TrimSpace(line)
+		value, ok := strings.CutPrefix(line, "status:")
+		if ok {
+			return strings.ToLower(strings.TrimSpace(value))
+		}
+	}
+	return ""
+}
+
+func freeBSDInterfaceMedia(output string) (int, string) {
+	for line := range strings.SplitSeq(output, "\n") {
+		line = strings.TrimSpace(line)
+		value, ok := strings.CutPrefix(line, "media:")
+		if !ok {
+			continue
+		}
+		return bsdMediaSpeedAndDuplex(value)
+	}
+	return 0, ""
+}
+
+func bsdMediaSpeedAndDuplex(media string) (int, string) {
+	media = strings.ToLower(media)
+	media = strings.NewReplacer("(", " ", ")", " ", "<", " ", ">", " ").Replace(media)
+	duplex := ""
+	switch {
+	case strings.Contains(media, "full-duplex"):
+		duplex = "full"
+	case strings.Contains(media, "half-duplex"):
+		duplex = "half"
+	}
+	for _, field := range strings.Fields(media) {
+		if speed := bsdMediaSpeed(field); speed > 0 {
+			return speed, duplex
+		}
+	}
+	return 0, duplex
+}
+
+func bsdMediaSpeed(field string) int {
+	prefix, _, ok := strings.Cut(strings.ToLower(field), "base")
+	if !ok {
+		return 0
+	}
+	multiplier := 1
+	if strings.HasSuffix(prefix, "g") {
+		multiplier = 1000
+		prefix = strings.TrimSuffix(prefix, "g")
+	}
+	value, err := strconv.ParseFloat(prefix, 64)
+	if err != nil || value <= 0 {
+		return 0
+	}
+	return int(value * float64(multiplier))
 }
 
 func openBSDDHCPServer(output string) string {
@@ -876,11 +991,11 @@ func linuxSystemdDHCPServer(content string) string {
 }
 
 func linuxDHClientDHCPServer(content string) string {
-	match := linuxDHClientServerPattern.FindStringSubmatch(content)
-	if len(match) != 2 {
+	matches := linuxDHClientServerPattern.FindAllStringSubmatch(content, -1)
+	if len(matches) == 0 {
 		return ""
 	}
-	return match[1]
+	return matches[len(matches)-1][1]
 }
 
 func linuxDHCPCDDHCPServer(content string) string {
@@ -1341,7 +1456,7 @@ func networkingCoreFacts(s *Session) []ResolvedFact {
 	primaryScope6 := primaryIPv6Scope(interfaces, ipv6)
 	primaryMAC, _ := primaryInterfaceFact(interfaces, primaryInterfaceName, "mac").(string)
 	primaryMTU := primaryInterfaceFact(interfaces, primaryInterfaceName, "mtu")
-	primaryDHCP := networkingDHCPFact(interfaces, ipv4)
+	primaryDHCP := networkingDHCPValue(runtime.GOOS, interfaces, ipv4)
 	return []ResolvedFact{
 		{Name: "networking.hostname", Value: hostnameValue},
 		{Name: "networking.fqdn", Value: fqdnValue},

@@ -191,18 +191,21 @@ func TestParseFreeBSDGeomPartitions_returnsRubyCompatiblePartitionFacts(t *testi
 	want := map[string]any{
 		"ada0p1": map[string]any{
 			"partlabel":  "gptboot0",
+			"parttype":   "freebsd-boot",
 			"partuuid":   "503d3458-c135-11e8-bd11-7d7cd061b26f",
 			"size":       "512.00 KiB",
 			"size_bytes": 524288,
 		},
 		"ada0p2": map[string]any{
 			"partlabel":  "swap0",
+			"parttype":   "freebsd-swap",
 			"partuuid":   "5048d40d-c135-11e8-bd11-7d7cd061b26f",
 			"size":       "2.00 GiB",
 			"size_bytes": 2147483648,
 		},
 		"ada0p3": map[string]any{
 			"partlabel":  "zfs0",
+			"parttype":   "freebsd-zfs",
 			"partuuid":   "504f1547-c135-11e8-bd11-7d7cd061b26f",
 			"size":       "474.94 GiB",
 			"size_bytes": 509961306112,
@@ -230,6 +233,41 @@ func TestParseFreeBSDGeomDisks_returnsRubyCompatibleDiskFacts(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("parseFreeBSDGeomDisks() = %#v, want %#v", got, want)
+	}
+}
+
+func TestParseFreeBSDGeomDisks_omitsTypeWithoutRotationRate(t *testing.T) {
+	input := `<mesh><class><name>DISK</name><geom><provider><name>ada1</name><config><descr>Unknown Disk</descr></config></provider></geom></class></mesh>`
+
+	got := parseFreeBSDGeomDisks(input)
+	disk := got["ada1"].(map[string]any)
+	if _, ok := disk["type"]; ok {
+		t.Fatalf("disk type = %#v, want omitted", disk["type"])
+	}
+}
+
+func TestFreeBSDDiskTypeMapsRotationRates(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"unknown", "0", ""},
+		{"non_rotating", "1", "ssd"},
+		{"rotational", "7200", "hdd"},
+		{"missing", "", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := freeBSDDiskType(tt.in); got != tt.want {
+				t.Fatalf("freeBSDDiskType(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
 	}
 }
 
@@ -1020,6 +1058,37 @@ func TestOpenBSDMountpointsFactParsesMountAndDFOutput(t *testing.T) {
 
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("openBSDMountpointsFact() = %#v, want %#v", got, want)
+	}
+}
+
+func TestNetBSDMountpointsFactParsesMountAndDFOutput(t *testing.T) {
+	mountOutput := `/dev/dk1 on / type ffs (noatime, local)
+/dev/dk0 on /boot type msdos (local)
+ptyfs on /dev/pts type ptyfs (local)
+`
+	dfOutput := `Filesystem  512-blocks      Used     Avail Capacity Mounted on
+/dev/dk1       40891628   5550832  33296216    14%   /
+/dev/dk0         261120     13568    247552     5%   /boot
+`
+
+	got := netBSDMountpointsFact(mountOutput, dfOutput)
+	root := got["/"].(map[string]any)
+	for key, want := range map[string]any{
+		"available":       "15.88 GiB",
+		"available_bytes": 17_047_662_592,
+		"capacity":        "14.29%",
+		"size":            "19.50 GiB",
+		"size_bytes":      20_936_513_536,
+		"used":            "2.65 GiB",
+		"used_bytes":      2_842_025_984,
+	} {
+		if root[key] != want {
+			t.Fatalf("root[%s] = %#v, want %#v", key, root[key], want)
+		}
+	}
+	devpts := got["/dev/pts"].(map[string]any)
+	if _, ok := devpts["size_bytes"]; ok {
+		t.Fatalf("/dev/pts size_bytes = %#v, want omitted without df row", devpts["size_bytes"])
 	}
 }
 

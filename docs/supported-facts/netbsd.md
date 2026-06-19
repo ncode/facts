@@ -85,7 +85,7 @@ $ facts --json
 
 ## Fact Contract
 
-109 schema entries include `netbsd`.
+117 schema entries include `netbsd`.
 
 | Fact | Type | Conditional | Description |
 | --- | --- | --- | --- |
@@ -99,6 +99,7 @@ $ facts --json
 | `dmi.product.name` | `string` | yes | The product name of the system (the hardware model on macOS). |
 | `dmi.product.serial_number` | `string` | yes | The serial number of the system. |
 | `dmi.product.uuid` | `string` | yes | The hardware UUID of the system. |
+| `dmi.product.version` | `string` | yes | The product version of the system. |
 | `facterversion` | `string` | no | The Facter compatibility version of the Facts engine. |
 | `identity.gid` | `integer` | no | The group identifier of the user running Facts. |
 | `identity.group` | `string` | no | The group name of the user running Facts. |
@@ -131,10 +132,16 @@ $ facts --json
 | `memory.system.used` | `string` | no | The display amount of physical memory in use, such as 1.00 GiB. |
 | `memory.system.used_bytes` | `integer` | no | The physical memory in use, in bytes. |
 | `mountpoints.*` | `map` | no | A mounted filesystem, keyed by mount path. |
+| `mountpoints.*.available` | `string` | no | The display amount of free space on the mount, such as 1.00 GiB. |
+| `mountpoints.*.available_bytes` | `integer` | no | The free space on the mount, in bytes. |
+| `mountpoints.*.capacity` | `string` | no | The percentage of the mount's space in use. |
 | `mountpoints.*.device` | `string` | no | The device backing the mount. |
 | `mountpoints.*.filesystem` | `string` | no | The filesystem type of the mount. |
 | `mountpoints.*.options` | `array` | no | The mount options the filesystem is mounted with. |
-| `networking.dhcp` | `string` | no | The DHCP server of the primary interface, when known. |
+| `mountpoints.*.size` | `string` | no | The display size of the mount, such as 100.00 GiB. |
+| `mountpoints.*.size_bytes` | `integer` | no | The size of the mount, in bytes. |
+| `mountpoints.*.used` | `string` | no | The display amount of space in use on the mount, such as 1.00 GiB. |
+| `mountpoints.*.used_bytes` | `integer` | no | The space in use on the mount, in bytes. |
 | `networking.domain` | `string` | yes | The DNS domain of the host, when one is configured. |
 | `networking.fqdn` | `string` | no | The fully qualified domain name of the host. |
 | `networking.hostname` | `string` | no | The short host name of the machine. |
@@ -149,6 +156,7 @@ $ facts --json
 | `networking.interfaces.*.netmask6` | `string` | yes | The IPv6 netmask of the interface's first binding. |
 | `networking.interfaces.*.network` | `string` | yes | The IPv4 network of the interface's first binding. |
 | `networking.interfaces.*.network6` | `string` | yes | The IPv6 network of the interface's first binding. |
+| `networking.interfaces.*.operational_state` | `string` | yes | The operational state of the interface, such as up or down. |
 | `networking.interfaces.*.scope6` | `string` | yes | The IPv6 scope of the interface's first binding, such as global or link. |
 | `networking.ip` | `string` | no | The IPv4 address of the primary interface. |
 | `networking.ip6` | `string` | no | The IPv6 address of the primary interface. |

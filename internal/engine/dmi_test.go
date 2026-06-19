@@ -252,6 +252,7 @@ func TestOpenBSDDMIFacts_returnsStructuredFacts(t *testing.T) {
 				"name":          "VMware Virtual Platform",
 				"serial_number": "VMware-42 1a 02 ea e6 27 76 b8-a1 23 a7 8a d3 12 ee cf",
 				"uuid":          "ea021a42-27e6-b876-a123-a78ad312eecf",
+				"version":       "6.00",
 			},
 		},
 	}
@@ -281,8 +282,9 @@ func TestNetBSDDMIFacts_returnsStructuredFacts(t *testing.T) {
 			},
 			"manufacturer": "QEMU",
 			"product": map[string]any{
-				"name": "QEMU Virtual Machine",
-				"uuid": "00000000-0000-0000-0000-000000000000",
+				"name":    "QEMU Virtual Machine",
+				"uuid":    "00000000-0000-0000-0000-000000000000",
+				"version": "virt-11.0",
 			},
 		},
 	}

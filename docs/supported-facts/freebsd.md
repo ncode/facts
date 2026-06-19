@@ -64,7 +64,7 @@ $ facts --json
 
 ## Fact Contract
 
-124 schema entries include `freebsd`.
+129 schema entries include `freebsd`.
 
 | Fact | Type | Conditional | Description |
 | --- | --- | --- | --- |
@@ -75,6 +75,7 @@ $ facts --json
 | `disks.*.serial_number` | `string` | yes | The serial number of the disk. |
 | `disks.*.size` | `string` | yes | The display size of the disk, such as 1.00 GiB. |
 | `disks.*.size_bytes` | `integer` | yes | The size of the disk, in bytes. |
+| `disks.*.type` | `string` | yes | The kind of disk: ssd or hdd. |
 | `dmi.bios.release_date` | `string` | yes | The release date of the system BIOS. |
 | `dmi.bios.vendor` | `string` | yes | The vendor of the system BIOS. |
 | `dmi.bios.version` | `string` | yes | The version of the system BIOS. |
@@ -133,6 +134,8 @@ $ facts --json
 | `networking.interfaces.*` | `map` | no | A network interface, keyed by interface name. |
 | `networking.interfaces.*.bindings` | `array` | yes | The IPv4 bindings of the interface (address, netmask, network). |
 | `networking.interfaces.*.bindings6` | `array` | yes | The IPv6 bindings of the interface (address, netmask, network, scope6, flags). |
+| `networking.interfaces.*.dhcp` | `string` | yes | The DHCP server of the interface, when known (null on Windows interfaces without one). |
+| `networking.interfaces.*.duplex` | `string` | yes | The duplex mode of the interface: full or half. |
 | `networking.interfaces.*.ip` | `string` | yes | The first IPv4 address bound to the interface. |
 | `networking.interfaces.*.ip6` | `string` | yes | The first IPv6 address bound to the interface. |
 | `networking.interfaces.*.mac` | `string` | yes | The MAC address of the interface. |
@@ -141,6 +144,7 @@ $ facts --json
 | `networking.interfaces.*.netmask6` | `string` | yes | The IPv6 netmask of the interface's first binding. |
 | `networking.interfaces.*.network` | `string` | yes | The IPv4 network of the interface's first binding. |
 | `networking.interfaces.*.network6` | `string` | yes | The IPv6 network of the interface's first binding. |
+| `networking.interfaces.*.operational_state` | `string` | yes | The operational state of the interface, such as up or down. |
 | `networking.interfaces.*.scope6` | `string` | yes | The IPv6 scope of the interface's first binding, such as global or link. |
 | `networking.ip` | `string` | no | The IPv4 address of the primary interface. |
 | `networking.ip6` | `string` | no | The IPv6 address of the primary interface. |
@@ -164,6 +168,7 @@ $ facts --json
 | `partitions.*` | `map` | yes | A disk partition (or device-mapper/loop device), keyed by device path. |
 | `partitions.*.mount` | `string` | yes | The path the partition is mounted on. |
 | `partitions.*.partlabel` | `string` | yes | The partition label from the partition table. |
+| `partitions.*.parttype` | `string` | yes | The partition type GUID or identifier. |
 | `partitions.*.partuuid` | `string` | yes | The partition UUID from the partition table. |
 | `partitions.*.size` | `string` | yes | The display size of the partition, such as 1.00 GiB. |
 | `partitions.*.size_bytes` | `integer` | yes | The size of the partition, in bytes. |

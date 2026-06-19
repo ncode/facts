@@ -29,10 +29,13 @@ type freeBSDGeomProvider struct {
 }
 
 type freeBSDGeomConfig struct {
-	Descr   string `xml:"descr"`
-	Ident   string `xml:"ident"`
-	Label   string `xml:"label"`
-	RawUUID string `xml:"rawuuid"`
+	Descr        string `xml:"descr"`
+	Ident        string `xml:"ident"`
+	Label        string `xml:"label"`
+	RawType      string `xml:"rawtype"`
+	RawUUID      string `xml:"rawuuid"`
+	RotationRate string `xml:"rotationrate"`
+	Type         string `xml:"type"`
 }
 
 func disksFact(root string, hosts ...hostOS) map[string]any {
@@ -158,6 +161,9 @@ func parseFreeBSDGeomDisks(input string) map[string]any {
 		}
 		if serialNumber := strings.TrimSpace(provider.Config.Ident); serialNumber != "" {
 			disk["serial_number"] = serialNumber
+		}
+		if diskType := freeBSDDiskType(provider.Config.RotationRate); diskType != "" {
+			disk["type"] = diskType
 		}
 		addFreeBSDGeomSize(disk, provider.MediaSize)
 		disks[name] = disk
@@ -405,6 +411,9 @@ func parseFreeBSDGeomPartitions(input string) map[string]any {
 		if rawUUID := strings.TrimSpace(provider.Config.RawUUID); rawUUID != "" {
 			partition["partuuid"] = rawUUID
 		}
+		if partType := freeBSDPartitionType(provider.Config); partType != "" {
+			partition["parttype"] = partType
+		}
 		addFreeBSDGeomSize(partition, provider.MediaSize)
 		partitions[name] = partition
 	}
@@ -438,6 +447,27 @@ func addFreeBSDGeomSize(values map[string]any, mediaSize string) {
 	}
 	values["size_bytes"] = sizeBytes
 	values["size"] = bytesToHumanReadable(sizeBytes)
+}
+
+func freeBSDPartitionType(config freeBSDGeomConfig) string {
+	if value := strings.TrimSpace(config.Type); value != "" {
+		return value
+	}
+	return strings.TrimSpace(config.RawType)
+}
+
+func freeBSDDiskType(rotationRate string) string {
+	rate, err := strconv.Atoi(strings.TrimSpace(rotationRate))
+	if err != nil {
+		return ""
+	}
+	if rate == 1 {
+		return "ssd"
+	}
+	if rate > 1 {
+		return "hdd"
+	}
+	return ""
 }
 
 func currentBSDDisks(goos string, run commandRunner) map[string]any {
@@ -750,6 +780,9 @@ func rootMountpoint(s *Session) map[string]any {
 	if runtime.GOOS == "openbsd" {
 		return currentOpenBSDMountpoints(s)
 	}
+	if runtime.GOOS == "netbsd" {
+		return currentNetBSDMountpoints(s)
+	}
 
 	entries := currentMountEntries(s)
 	if len(entries) == 0 {
@@ -768,6 +801,15 @@ func currentOpenBSDMountpoints(s *Session) map[string]any {
 	}
 	dfOutput := s.commandOutput("df", "-P")
 	return openBSDMountpointsFact(mountOutput, dfOutput)
+}
+
+func currentNetBSDMountpoints(s *Session) map[string]any {
+	mountOutput := s.commandOutput("mount")
+	if mountOutput == "" {
+		return mountpointsFact([]mountEntry{{Path: "/"}}, statMountpoint)
+	}
+	dfOutput := s.commandOutput("df", "-P")
+	return netBSDMountpointsFact(mountOutput, dfOutput)
 }
 
 func currentMountEntries(s *Session) []mountEntry {
@@ -973,6 +1015,14 @@ func parseBSDMountEntries(input string) []mountEntry {
 func openBSDMountpointsFact(mountOutput, dfOutput string) map[string]any {
 	stats := parseDFP512Stats(dfOutput)
 	return mountpointsFact(parseOpenBSDMountEntries(mountOutput), func(path string) (mountStat, bool) {
+		stat, ok := stats[path]
+		return stat, ok
+	})
+}
+
+func netBSDMountpointsFact(mountOutput, dfOutput string) map[string]any {
+	stats := parseDFP512Stats(dfOutput)
+	return mountpointsFact(parseBSDMountEntries(mountOutput), func(path string) (mountStat, bool) {
 		stat, ok := stats[path]
 		return stat, ok
 	})

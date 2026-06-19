@@ -9,6 +9,10 @@
   GitHub VM/cross-compile coverage.
 - Conditional ZFS and zpool facts are now emitted on FreeBSD and NetBSD when
   usable `zfs upgrade -v`/`zpool upgrade -v` output is available.
+- BSD fact coverage now includes NetBSD mountpoint byte/capacity fields,
+  BSD interface operational state, FreeBSD interface DHCP/speed/duplex,
+  FreeBSD GEOM partition type and disk rotation metadata, and OpenBSD/NetBSD
+  `dmi.product.version` when the native DMI source exposes it.
 - Added generated per-platform supported fact pages under
   `docs/supported-facts/`, derived from `docs/schema/facts.yaml` and checked
   by `go test ./...`.
