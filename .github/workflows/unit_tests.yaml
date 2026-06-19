@@ -144,16 +144,20 @@ jobs:
             # plain `go` on PATH. Pin to match go.mod's go directive; bump both together.
             # No git: vmactions rsyncs the workspace in and builds use -buildvcs=false,
             # so pulling git-base only drags in a pcre2 upgrade the base image rejects.
-            # cdn.NetBSD.org intermittently 503s and pkg_add has no retry, so one
-            # bad response fails the gate before any test runs. Retry with backoff.
-            i=1
-            while :; do
-              /usr/sbin/pkg_add go126 && break
-              [ $i -ge 5 ] && { echo "pkg_add go126 failed after $i attempts" >&2; exit 1; }
-              echo "pkg_add go126 attempt $i failed; retrying in $((i * 10))s" >&2
-              sleep $((i * 10))
-              i=$((i + 1))
+            # cdn.NetBSD.org (Fastly) intermittently 503s, failing the gate before
+            # any test runs. pkg_add has no failover, so try the CDN first, then
+            # JAIST (independent mirror, survives a cdn/origin outage), then the
+            # origin. The $rel/All path is a release-stable alias that redirects to
+            # the current quarterly set, so it needs no per-quarter bumping.
+            arch=$(uname -p); rel=$(uname -r)
+            for repo in \
+              "https://cdn.NetBSD.org/pub/pkgsrc/packages/NetBSD/$arch/$rel/All" \
+              "https://ftp.jaist.ac.jp/pub/pkgsrc/packages/NetBSD/$arch/$rel/All" \
+              "https://ftp.NetBSD.org/pub/pkgsrc/packages/NetBSD/$arch/$rel/All" ; do
+              echo "pkg_add go126 from $repo" >&2
+              PKG_PATH="$repo" /usr/sbin/pkg_add go126 && break
             done
+            [ -x /usr/pkg/go126/bin/go ] || { echo "go126 not installed from any mirror" >&2; exit 1; }
           run: |
             set -e
             export PATH=/usr/pkg/go126/bin:/usr/pkg/bin:/usr/pkg/sbin:/usr/sbin:/sbin:/usr/bin:/bin
