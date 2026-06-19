@@ -35,15 +35,38 @@ func (osHost) run(ctx context.Context, name string, args ...string) string {
 }
 
 func coreCommandEnv(env []string, goos string) []string {
-	if goos == "windows" {
-		root := coreWindowsRoot()
-		return []string{
-			"SystemRoot=" + root,
-			"WINDIR=" + root,
-			"Path=" + coreCommandSearchPath(goos, env),
-		}
+	if goos != "windows" {
+		// Unix probes (uname, sysctl, ...) need nothing but a trusted PATH;
+		// dropping the rest closes LD_PRELOAD/HOME-style hijacks of
+		// dynamically linked probe binaries.
+		return []string{"PATH=" + coreCommandSearchPath(goos, env)}
 	}
-	return []string{"PATH=" + coreCommandSearchPath(goos, env)}
+	// ponytail: Windows probes shell out to powershell/wmic/CIM, which hang
+	// with a near-empty environment, so keep the inherited env and override
+	// only the hijackable Path/SystemRoot/WINDIR with trusted values.
+	root := coreWindowsRoot()
+	out := make([]string, 0, len(env)+3)
+	for _, entry := range env {
+		if name, _, ok := strings.Cut(entry, "="); ok && coreWindowsManagedEnv(name) {
+			continue
+		}
+		out = append(out, entry)
+	}
+	return append(out,
+		"SystemRoot="+root,
+		"WINDIR="+root,
+		"Path="+coreCommandSearchPath(goos, env),
+	)
+}
+
+// coreWindowsManagedEnv reports whether coreCommandEnv overrides name with a
+// trusted value, so the caller's copy is dropped before the override is added.
+func coreWindowsManagedEnv(name string) bool {
+	switch strings.ToLower(name) {
+	case "path", "systemroot", "windir":
+		return true
+	}
+	return false
 }
 
 func coreCommandExecutable(name, goos string) (string, bool) {
