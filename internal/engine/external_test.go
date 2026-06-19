@@ -1277,7 +1277,13 @@ func TestExternalFactLoader_rejectsOversizedStructuredFactFile(t *testing.T) {
 
 func TestExternalFactLoader_rejectsOversizedExecutableFactOutput(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "huge_fact")
+	// Windows classifies external executable facts by extension, not the mode
+	// bit, so name the file accordingly to exercise the executable path there.
+	name := "huge_fact"
+	if runtime.GOOS == "windows" {
+		name = "huge_fact.bat"
+	}
+	path := filepath.Join(dir, name)
 	if err := os.WriteFile(path, []byte("#!/bin/sh\nprintf 'site=larger-than-limit\\n'\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
