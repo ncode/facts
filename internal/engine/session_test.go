@@ -162,6 +162,30 @@ func TestCoreCommandEnvSanitizesPath(t *testing.T) {
 	}
 }
 
+func TestCoreCommandEnvWindowsKeepsEnvButOverridesPathAndRoot(t *testing.T) {
+	// coreWindowsRoot() resolves to C:\Windows on non-Windows builds, so this
+	// test is deterministic on the Linux/macOS CI runners.
+	env := coreCommandEnv([]string{
+		`TEMP=C:\Temp`,
+		`PATH=C:\attacker`,
+		`systemroot=C:\attacker`,
+		`WinDir=C:\attacker`,
+	}, "windows")
+
+	if !slices.Contains(env, `TEMP=C:\Temp`) {
+		t.Fatalf("coreCommandEnv dropped inherited Windows env: %#v", env)
+	}
+	if !slices.Contains(env, `SystemRoot=C:\Windows`) || !slices.Contains(env, `WINDIR=C:\Windows`) {
+		t.Fatalf("coreCommandEnv did not set trusted SystemRoot/WINDIR: %#v", env)
+	}
+	for _, entry := range env {
+		name, value, _ := strings.Cut(entry, "=")
+		if coreWindowsManagedEnv(name) && strings.Contains(strings.ToLower(value), `c:\attacker`) {
+			t.Fatalf("coreCommandEnv kept attacker %s: %#v", name, env)
+		}
+	}
+}
+
 func TestCoreCommandSearchPathIgnoresCallerSystemRoot(t *testing.T) {
 	path := coreCommandSearchPath("windows", []string{`SYSTEMROOT=C:\attacker`})
 
