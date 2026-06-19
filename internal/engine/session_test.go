@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -143,7 +144,7 @@ func TestCoreCommandEnvSanitizesPath(t *testing.T) {
 			t.Fatalf("coreCommandEnv kept attacker PATH: %#v", env)
 		}
 	}
-	if !slicesContains(env, "HOME=/home/alice") {
+	if !slices.Contains(env, "HOME=/home/alice") {
 		t.Fatalf("coreCommandEnv dropped non-PATH env: %#v", env)
 	}
 	path := ""
@@ -178,11 +179,3 @@ func TestOSHostRunDoesNotSearchCallerPath(t *testing.T) {
 	}
 }
 
-func slicesContains(values []string, want string) bool {
-	for _, value := range values {
-		if value == want {
-			return true
-		}
-	}
-	return false
-}
