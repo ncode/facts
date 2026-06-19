@@ -24,7 +24,9 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          # Pin the latest 1.26 patch so govulncheck scans a clean stdlib;
+          # the go.mod floor stays low for BSD VMs on GOTOOLCHAIN=local.
+          go-version: "1.26"
           cache: true
 
       - name: Check formatting
