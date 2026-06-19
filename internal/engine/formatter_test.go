@@ -219,6 +219,39 @@ func TestFormatYAML_multipleUserQueriesUseOriginalQueryKeys(t *testing.T) {
 	}
 }
 
+func TestFormatYAML_quotesUnsafeKeys(t *testing.T) {
+	tests := []struct {
+		name string
+		fact ResolvedFact
+		want string
+	}{
+		{
+			name: "control character",
+			fact: ResolvedFact{Name: "bad\nkey", Value: "value", Type: "external"},
+			want: "\"bad\\nkey\": value\n",
+		},
+		{
+			name: "boolean token",
+			fact: ResolvedFact{Name: "true", Value: "value", Type: "external"},
+			want: "\"true\": value\n",
+		},
+		{
+			name: "numeric token",
+			fact: ResolvedFact{Name: "123", Value: "value", Type: "external"},
+			want: "\"123\": value\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := FormatYAML([]ResolvedFact{tt.fact})
+			if got != tt.want {
+				t.Fatalf("FormatYAML() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestFormatYAML_formatsArrayValuesAsSequences(t *testing.T) {
 	facts := []ResolvedFact{
 		{Name: "arr_ext_fact", Value: []any{"ex1", "ex2"}, UserQuery: "arr_ext_fact"},
@@ -321,6 +354,18 @@ func TestFormatHOCON_multipleUserQueriesUseQuotedQueryKeys(t *testing.T) {
 
 	got := FormatHOCON(facts)
 	want := "\"os.family\"=Darwin\n\"os.name\"=Darwin\n"
+	if got != want {
+		t.Fatalf("FormatHOCON() = %q, want %q", got, want)
+	}
+}
+
+func TestFormatHOCON_quotesUnsafeKeys(t *testing.T) {
+	facts := []ResolvedFact{
+		{Name: "bad\x07key", Value: "value", Type: "external"},
+	}
+
+	got := FormatHOCON(facts)
+	want := "\"bad\\u0007key\"=value\n"
 	if got != want {
 		t.Fatalf("FormatHOCON() = %q, want %q", got, want)
 	}

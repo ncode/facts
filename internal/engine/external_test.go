@@ -1255,6 +1255,120 @@ func TestLoadExternalFacts_timesOutHungExecutableFact(t *testing.T) {
 	}
 }
 
+func TestExternalFactLoader_rejectsOversizedStructuredFactFile(t *testing.T) {
+	oldLimit := externalFactMaxBytes
+	externalFactMaxBytes = 8
+	t.Cleanup(func() { externalFactMaxBytes = oldLimit })
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "huge.json"), []byte(`{"site":"larger than limit"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := externalFactLoader{
+		s:    NewSession(),
+		mode: externalFactLoaderLibrary,
+		dirs: []string{dir},
+	}.load()
+	if !errors.Is(err, ErrExternalFactTooLarge) {
+		t.Fatalf("load() err = %v, want ErrExternalFactTooLarge", err)
+	}
+}
+
+func TestExternalFactLoader_reportsReadErrorsAfterOpen(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "site.txt")
+	if err := os.WriteFile(path, []byte("site=lab\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	readErr := errors.New("read exploded")
+	host := &fakeExternalFactLoaderHost{
+		openFunc: func(string) (io.ReadCloser, error) {
+			return io.NopCloser(errorReader{err: readErr}), nil
+		},
+	}
+
+	_, err := externalFactLoader{
+		s:    NewSession(),
+		mode: externalFactLoaderLibrary,
+		dirs: []string{dir},
+		host: host,
+	}.load()
+	if !errors.Is(err, readErr) {
+		t.Fatalf("load() err = %v, want read error", err)
+	}
+}
+
+type errorReader struct {
+	err error
+}
+
+func (r errorReader) Read([]byte) (int, error) {
+	return 0, r.err
+}
+
+func TestExternalFactLoader_rejectsOversizedExecutableFactOutput(t *testing.T) {
+	dir := t.TempDir()
+	// Windows classifies external executable facts by extension, not the mode
+	// bit, so name the file accordingly to exercise the executable path there.
+	name := "huge_fact"
+	if runtime.GOOS == "windows" {
+		name = "huge_fact.bat"
+	}
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte("#!/bin/sh\nprintf 'site=larger-than-limit\\n'\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	host := &fakeExternalFactLoaderHost{
+		runCommandFunc: func(context.Context, string, ...string) ([]byte, []byte, error) {
+			return []byte("site=lar"), nil, ErrExternalFactTooLarge
+		},
+	}
+
+	_, err := externalFactLoader{
+		s:    NewSession(),
+		mode: externalFactLoaderLibrary,
+		dirs: []string{dir},
+		host: host,
+	}.load()
+	if !errors.Is(err, ErrExternalFactTooLarge) {
+		t.Fatalf("load() err = %v, want ErrExternalFactTooLarge", err)
+	}
+}
+
+func TestRunExternalFactCommand_rejectsOversizedStdout(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses /bin/sh")
+	}
+	oldLimit := externalFactMaxBytes
+	externalFactMaxBytes = 8
+	t.Cleanup(func() { externalFactMaxBytes = oldLimit })
+
+	out, stderr, err := runExternalFactCommand(context.Background(), "/bin/sh", "-c", "printf 'site=larger-than-limit\\n'")
+	if !errors.Is(err, ErrExternalFactTooLarge) {
+		t.Fatalf("runExternalFactCommand() stdout=%q stderr=%q err=%v, want ErrExternalFactTooLarge", out, stderr, err)
+	}
+}
+
+func TestLimitedBuffer_marksOverflowAndRetainsPrefix(t *testing.T) {
+	var buf limitedBuffer
+	buf.limit = 8
+
+	n, err := buf.Write([]byte("site=larger-than-limit\n"))
+	if !errors.Is(err, ErrExternalFactTooLarge) {
+		t.Fatalf("Write() err = %v, want ErrExternalFactTooLarge", err)
+	}
+	if n != 8 {
+		t.Fatalf("Write() n = %d, want retained byte count", n)
+	}
+	if !buf.tooLarge {
+		t.Fatal("limitedBuffer did not mark overflow")
+	}
+	if got := string(buf.Bytes()); got != "site=lar" {
+		t.Fatalf("limitedBuffer bytes = %q, want retained prefix", got)
+	}
+}
+
 func TestLoadExternalFacts_executableYAMLFacts(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("extensionless shell-script external facts are a POSIX mechanism; Windows executables use .bat/.cmd/.exe/.ps1")

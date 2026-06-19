@@ -5,8 +5,19 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strings"
 	"sync"
+	"time"
 )
+
+// coreCommandTimeout bounds each core probe command so one wedged subprocess
+// (a hung wmic/powershell, a corrupted WMI repository, a stuck system_profiler)
+// can't hang discovery forever. The CLI runs Discover with a background
+// context, so without this a single stuck probe would block the whole run;
+// external facts already cap themselves with externalFactCommandTimeout.
+var coreCommandTimeout = 30 * time.Second
 
 type hostOS interface {
 	run(context.Context, string, ...string) string
@@ -18,11 +29,114 @@ type hostOS interface {
 type osHost struct{}
 
 func (osHost) run(ctx context.Context, name string, args ...string) string {
-	data, err := exec.CommandContext(ctx, name, args...).Output()
+	cmdName, ok := coreCommandExecutable(name, runtime.GOOS)
+	if !ok {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(ctx, coreCommandTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, cmdName, args...)
+	cmd.Env = coreCommandEnv(os.Environ(), runtime.GOOS)
+	data, err := cmd.Output()
 	if err != nil {
 		return ""
 	}
 	return string(data)
+}
+
+func coreCommandEnv(env []string, goos string) []string {
+	if goos != "windows" {
+		// Unix probes (uname, sysctl, ...) need nothing but a trusted PATH;
+		// dropping the rest closes LD_PRELOAD/HOME-style hijacks of
+		// dynamically linked probe binaries.
+		return []string{"PATH=" + coreCommandSearchPath(goos, env)}
+	}
+	// ponytail: Windows probes shell out to powershell/wmic/CIM, which hang
+	// with a near-empty environment, so keep the inherited env and override
+	// only the hijackable Path/SystemRoot/WINDIR with trusted values.
+	root := coreWindowsRoot()
+	out := make([]string, 0, len(env)+3)
+	for _, entry := range env {
+		if name, _, ok := strings.Cut(entry, "="); ok && coreWindowsManagedEnv(name) {
+			continue
+		}
+		out = append(out, entry)
+	}
+	return append(out,
+		"SystemRoot="+root,
+		"WINDIR="+root,
+		"Path="+coreCommandSearchPath(goos, env),
+	)
+}
+
+// coreWindowsManagedEnv reports whether coreCommandEnv overrides name with a
+// trusted value, so the caller's copy is dropped before the override is added.
+func coreWindowsManagedEnv(name string) bool {
+	switch strings.ToLower(name) {
+	case "path", "systemroot", "windir":
+		return true
+	}
+	return false
+}
+
+func coreCommandExecutable(name, goos string) (string, bool) {
+	if commandHasPathSeparator(name, goos) {
+		return name, true
+	}
+	for _, dir := range strings.Split(coreCommandSearchPath(goos, os.Environ()), corePathListSeparator(goos)) {
+		if dir == "" {
+			continue
+		}
+		for _, candidate := range coreCommandCandidates(filepath.Join(dir, name), goos) {
+			if coreCommandFileExecutable(candidate, goos) {
+				return candidate, true
+			}
+		}
+	}
+	return "", false
+}
+
+func commandHasPathSeparator(name, goos string) bool {
+	if strings.ContainsAny(name, `/\`) {
+		return true
+	}
+	return goos == "windows" && strings.Contains(name, ":")
+}
+
+func coreCommandCandidates(path, goos string) []string {
+	if goos != "windows" || filepath.Ext(path) != "" {
+		return []string{path}
+	}
+	return []string{path + ".exe", path + ".com", path + ".bat", path + ".cmd"}
+}
+
+func coreCommandFileExecutable(path, goos string) bool {
+	info, err := os.Stat(path)
+	if err != nil || !info.Mode().IsRegular() {
+		return false
+	}
+	return goos == "windows" || info.Mode()&0o111 != 0
+}
+
+func coreCommandSearchPath(goos string, env []string) string {
+	sep := corePathListSeparator(goos)
+	if goos == "windows" {
+		root := coreWindowsRoot()
+		return strings.Join([]string{
+			root + `\System32`,
+			root,
+			root + `\System32\Wbem`,
+			root + `\System32\WindowsPowerShell\v1.0`,
+		}, sep)
+	}
+	return strings.Join([]string{"/usr/sbin", "/usr/bin", "/sbin", "/bin"}, sep)
+}
+
+func corePathListSeparator(goos string) string {
+	if goos == "windows" {
+		return ";"
+	}
+	return ":"
 }
 
 func (osHost) readFile(path string) ([]byte, error) {

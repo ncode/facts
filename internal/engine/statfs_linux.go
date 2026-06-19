@@ -17,7 +17,7 @@ func statMountpoint(path string) (mountStat, bool) {
 	if err := syscall.Statfs(path, &stat); err != nil {
 		return mountStat{}, false
 	}
-	return linuxMountStat(int64(stat.Blocks), int64(stat.Bavail), int64(stat.Bfree), int64(stat.Bsize), int64(stat.Frsize)), true
+	return linuxMountStat(uint64(stat.Blocks), uint64(stat.Bavail), uint64(stat.Bfree), int64(stat.Bsize), int64(stat.Frsize)), true
 }
 
 // linuxMountStat converts statfs block counts to byte totals using the
@@ -26,13 +26,15 @@ func statMountpoint(path string) (mountStat, bool) {
 // bavail, bfree) are expressed in frsize units, so using bsize on filesystems
 // where bsize != frsize (for example virtiofs, bsize 256x frsize) inflates
 // every byte total. Kept pure (no syscall) so the block math is unit-testable.
-func linuxMountStat(blocks, bavail, bfree, bsize, frsize int64) mountStat {
-	blockSize := frsize
-	if blockSize == 0 {
-		blockSize = bsize
+func linuxMountStat(blocks, bavail, bfree uint64, bsize, frsize int64) mountStat {
+	blockSize := uint64(0)
+	if frsize > 0 {
+		blockSize = uint64(frsize)
+	} else if bsize > 0 {
+		blockSize = uint64(bsize)
 	}
-	sizeBytes := blocks * blockSize
-	availableBytes := bavail * blockSize
-	usedBytes := sizeBytes - bfree*blockSize
-	return mountStat{SizeBytes: int(sizeBytes), AvailableBytes: int(availableBytes), UsedBytes: int(usedBytes)}
+	sizeBytes := statfsBlockBytes(blocks, blockSize)
+	availableBytes := statfsBlockBytes(bavail, blockSize)
+	usedBytes := statfsUsedBlockBytes(blocks, bfree, blockSize)
+	return mountStat{SizeBytes: sizeBytes, AvailableBytes: availableBytes, UsedBytes: usedBytes}
 }

@@ -24,9 +24,14 @@ import (
 // ErrNullByte reports an external fact name or value containing a NUL byte.
 var ErrNullByte = errors.New("external fact contains a null byte reference")
 
+// ErrExternalFactTooLarge reports an external fact source exceeding the byte cap.
+var ErrExternalFactTooLarge = errors.New("external fact exceeds size limit")
+
 const externalFactResolutionEnv = "FACTER_EXTERNAL_FACTS_RUNNING"
 
+var errExternalFactOpen = errors.New("open external fact")
 var externalFactCommandTimeout = 30 * time.Second
+var externalFactMaxBytes = 1 << 20
 
 type externalFactLoaderMode int
 
@@ -369,13 +374,15 @@ func windowsExecutableExternalFactExt(ext string) bool {
 }
 
 func (l externalFactLoader) loadExternalTxtFacts(path string) ([]ResolvedFact, error) {
-	file, err := l.host.open(path)
+	data, err := l.readExternalFactFile(path)
 	if err != nil {
-		return nil, nil
+		if errors.Is(err, errExternalFactOpen) {
+			return nil, nil
+		}
+		return nil, err
 	}
-	defer file.Close()
 
-	scanner := bufio.NewScanner(file)
+	scanner := bufio.NewScanner(bytes.NewReader(data))
 	facts, err := parseKeyValueFacts(scanner)
 	if err != nil {
 		return nil, fmt.Errorf("scan external fact %s: %w", path, err)
@@ -473,6 +480,9 @@ func (l externalFactLoader) loadExternalCommandFacts(name, warningName string, a
 	if ctx.Err() != nil {
 		return nil, fmt.Errorf("%w: %s: %v", errExternalFactExec, warningName, ctx.Err())
 	}
+	if errors.Is(err, ErrExternalFactTooLarge) {
+		return nil, fmt.Errorf("%w: %s: %w", errExternalFactExec, warningName, err)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("%w: %s: %v", errExternalFactExec, warningName, err)
 	}
@@ -501,22 +511,34 @@ func runExternalFactCommand(ctx context.Context, name string, args ...string) ([
 	if unquoted, err := strconv.Unquote(name); err == nil {
 		cmdName = unquoted
 	}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	cmd := exec.CommandContext(ctx, cmdName, args...)
 	cmd.Env = append(os.Environ(), externalFactResolutionEnv+"=1")
-	var stderr bytes.Buffer
+	var stdout, stderr limitedBuffer
+	stdout.limit = externalFactMaxBytes
+	stderr.limit = externalFactMaxBytes
+	stdout.cancel = cancel
+	stderr.cancel = cancel
+	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	out, err := cmd.Output()
-	return out, stderr.Bytes(), err
+	err := cmd.Run()
+	if stdout.tooLarge || stderr.tooLarge {
+		err = ErrExternalFactTooLarge
+	}
+	return stdout.Bytes(), stderr.Bytes(), err
 }
 
 func (l externalFactLoader) loadExternalJSONFacts(path string) ([]ResolvedFact, error) {
-	file, err := l.host.open(path)
+	data, err := l.readExternalFactFile(path)
 	if err != nil {
-		return nil, nil
+		if errors.Is(err, errExternalFactOpen) {
+			return nil, nil
+		}
+		return nil, err
 	}
-	defer file.Close()
 
-	decoder := json.NewDecoder(file)
+	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.UseNumber()
 	var value any
 	if err := decoder.Decode(&value); err != nil {
@@ -536,14 +558,16 @@ func (l externalFactLoader) loadExternalJSONFacts(path string) ([]ResolvedFact, 
 }
 
 func (l externalFactLoader) loadExternalYAMLFacts(path string) ([]ResolvedFact, error) {
-	file, err := l.host.open(path)
+	data, err := l.readExternalFactFile(path)
 	if err != nil {
-		return nil, nil
+		if errors.Is(err, errExternalFactOpen) {
+			return nil, nil
+		}
+		return nil, err
 	}
-	defer file.Close()
 
 	var value any
-	if err := yaml.NewDecoder(file).Decode(&value); err != nil {
+	if err := yaml.NewDecoder(bytes.NewReader(data)).Decode(&value); err != nil {
 		if errors.Is(err, io.EOF) {
 			return nil, nil
 		}
@@ -599,6 +623,70 @@ func normalizeExecutableYAMLValue(value any) any {
 		return v
 	default:
 		return v
+	}
+}
+
+func (l externalFactLoader) readExternalFactFile(path string) ([]byte, error) {
+	file, err := l.host.open(path)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", errExternalFactOpen, err)
+	}
+	defer file.Close()
+	data, err := readExternalFactData(file)
+	if err != nil {
+		return nil, fmt.Errorf("read external fact %s: %w", path, err)
+	}
+	return data, nil
+}
+
+func readExternalFactData(r io.Reader) ([]byte, error) {
+	data, err := io.ReadAll(io.LimitReader(r, int64(externalFactMaxBytes)+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > externalFactMaxBytes {
+		return nil, ErrExternalFactTooLarge
+	}
+	return data, nil
+}
+
+type limitedBuffer struct {
+	buf      bytes.Buffer
+	limit    int
+	tooLarge bool
+	cancel   context.CancelFunc
+}
+
+func (b *limitedBuffer) Bytes() []byte {
+	return b.buf.Bytes()
+}
+
+func (b *limitedBuffer) Write(p []byte) (int, error) {
+	if b.limit <= 0 {
+		b.markTooLarge()
+		return 0, ErrExternalFactTooLarge
+	}
+	remaining := b.limit - b.buf.Len()
+	if remaining <= 0 {
+		b.markTooLarge()
+		return 0, ErrExternalFactTooLarge
+	}
+	if len(p) <= remaining {
+		_, _ = b.buf.Write(p)
+		return len(p), nil
+	}
+	_, _ = b.buf.Write(p[:remaining])
+	b.markTooLarge()
+	return remaining, ErrExternalFactTooLarge
+}
+
+func (b *limitedBuffer) markTooLarge() {
+	if b.tooLarge {
+		return
+	}
+	b.tooLarge = true
+	if b.cancel != nil {
+		b.cancel()
 	}
 }
 

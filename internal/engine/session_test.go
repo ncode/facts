@@ -3,7 +3,11 @@ package engine
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"reflect"
+	"runtime"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -129,5 +133,98 @@ func TestSessionBackedProbesUseFakeHost(t *testing.T) {
 	wantCalls := []fakeHostRunCall{{name: "augparse", args: []string{"--version"}}}
 	if !reflect.DeepEqual(host.runCalls, wantCalls) {
 		t.Fatalf("run calls = %#v, want %#v", host.runCalls, wantCalls)
+	}
+}
+
+func TestCoreCommandEnvSanitizesPath(t *testing.T) {
+	env := coreCommandEnv([]string{"PATH=/tmp/attacker", "HOME=/home/alice", "LD_PRELOAD=/tmp/libhack.so"}, "linux")
+
+	for _, entry := range env {
+		if entry == "PATH=/tmp/attacker" {
+			t.Fatalf("coreCommandEnv kept attacker PATH: %#v", env)
+		}
+	}
+	if slices.Contains(env, "HOME=/home/alice") || slices.Contains(env, "LD_PRELOAD=/tmp/libhack.so") {
+		t.Fatalf("coreCommandEnv kept caller environment entries: %#v", env)
+	}
+	path := ""
+	for _, entry := range env {
+		if value, ok := strings.CutPrefix(entry, "PATH="); ok {
+			path = value
+			break
+		}
+	}
+	if path == "" {
+		t.Fatalf("coreCommandEnv did not set PATH: %#v", env)
+	}
+	if strings.Contains(path, "/tmp/attacker") {
+		t.Fatalf("PATH = %q, want sanitized path", path)
+	}
+}
+
+func TestOSHostRunTimesOutWedgedCommand(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses the POSIX sleep command")
+	}
+	prev := coreCommandTimeout
+	coreCommandTimeout = 50 * time.Millisecond
+	t.Cleanup(func() { coreCommandTimeout = prev })
+
+	start := time.Now()
+	got := (osHost{}).run(context.Background(), "sleep", "30")
+	if elapsed := time.Since(start); elapsed > 10*time.Second {
+		t.Fatalf("osHost.run did not honor coreCommandTimeout: ran for %s", elapsed)
+	}
+	if got != "" {
+		t.Fatalf("osHost.run() = %q, want empty output on timeout", got)
+	}
+}
+
+func TestCoreCommandEnvWindowsKeepsEnvButOverridesPathAndRoot(t *testing.T) {
+	// coreWindowsRoot() resolves to C:\Windows on non-Windows builds, so this
+	// test is deterministic on the Linux/macOS CI runners.
+	env := coreCommandEnv([]string{
+		`TEMP=C:\Temp`,
+		`PATH=C:\attacker`,
+		`systemroot=C:\attacker`,
+		`WinDir=C:\attacker`,
+	}, "windows")
+
+	if !slices.Contains(env, `TEMP=C:\Temp`) {
+		t.Fatalf("coreCommandEnv dropped inherited Windows env: %#v", env)
+	}
+	if !slices.Contains(env, `SystemRoot=C:\Windows`) || !slices.Contains(env, `WINDIR=C:\Windows`) {
+		t.Fatalf("coreCommandEnv did not set trusted SystemRoot/WINDIR: %#v", env)
+	}
+	for _, entry := range env {
+		name, value, _ := strings.Cut(entry, "=")
+		if coreWindowsManagedEnv(name) && strings.Contains(strings.ToLower(value), `c:\attacker`) {
+			t.Fatalf("coreCommandEnv kept attacker %s: %#v", name, env)
+		}
+	}
+}
+
+func TestCoreCommandSearchPathIgnoresCallerSystemRoot(t *testing.T) {
+	path := coreCommandSearchPath("windows", []string{`SYSTEMROOT=C:\attacker`})
+
+	if strings.Contains(strings.ToLower(path), `c:\attacker`) {
+		t.Fatalf("windows core command path = %q, want trusted Windows root", path)
+	}
+}
+
+func TestOSHostRunDoesNotSearchCallerPath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses a POSIX shell script")
+	}
+	dir := t.TempDir()
+	name := "facts-test-attacker-command"
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte("#!/bin/sh\nprintf pwned\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
+
+	if got := (osHost{}).run(context.Background(), name); got != "" {
+		t.Fatalf("osHost.run() = %q, want no output from caller PATH command", got)
 	}
 }
