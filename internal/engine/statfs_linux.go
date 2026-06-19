@@ -31,8 +31,8 @@ func linuxMountStat(blocks, bavail, bfree, bsize, frsize int64) mountStat {
 	if blockSize == 0 {
 		blockSize = bsize
 	}
-	sizeBytes := blocks * blockSize
-	availableBytes := bavail * blockSize
-	usedBytes := sizeBytes - bfree*blockSize
-	return mountStat{SizeBytes: int(sizeBytes), AvailableBytes: int(availableBytes), UsedBytes: int(usedBytes)}
+	sizeBytes := statfsSignedBlockBytes(blocks, blockSize)
+	availableBytes := statfsSignedBlockBytes(bavail, blockSize)
+	freeBytes := statfsSignedBlockBytes(bfree, blockSize)
+	return mountStat{SizeBytes: sizeBytes, AvailableBytes: availableBytes, UsedBytes: statfsUsedBytes(sizeBytes, freeBytes)}
 }

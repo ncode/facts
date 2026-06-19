@@ -1255,6 +1255,82 @@ func TestLoadExternalFacts_timesOutHungExecutableFact(t *testing.T) {
 	}
 }
 
+func TestExternalFactLoader_rejectsOversizedStructuredFactFile(t *testing.T) {
+	oldLimit := externalFactMaxBytes
+	externalFactMaxBytes = 8
+	t.Cleanup(func() { externalFactMaxBytes = oldLimit })
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "huge.json"), []byte(`{"site":"larger than limit"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := externalFactLoader{
+		s:    NewSession(),
+		mode: externalFactLoaderLibrary,
+		dirs: []string{dir},
+	}.load()
+	if !errors.Is(err, ErrExternalFactTooLarge) {
+		t.Fatalf("load() err = %v, want ErrExternalFactTooLarge", err)
+	}
+}
+
+func TestExternalFactLoader_rejectsOversizedExecutableFactOutput(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "huge_fact")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\nprintf 'site=larger-than-limit\\n'\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	host := &fakeExternalFactLoaderHost{
+		runCommandFunc: func(context.Context, string, ...string) ([]byte, []byte, error) {
+			return []byte("site=lar"), nil, ErrExternalFactTooLarge
+		},
+	}
+
+	_, err := externalFactLoader{
+		s:    NewSession(),
+		mode: externalFactLoaderLibrary,
+		dirs: []string{dir},
+		host: host,
+	}.load()
+	if !errors.Is(err, ErrExternalFactTooLarge) {
+		t.Fatalf("load() err = %v, want ErrExternalFactTooLarge", err)
+	}
+}
+
+func TestRunExternalFactCommand_rejectsOversizedStdout(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses /bin/sh")
+	}
+	oldLimit := externalFactMaxBytes
+	externalFactMaxBytes = 8
+	t.Cleanup(func() { externalFactMaxBytes = oldLimit })
+
+	out, stderr, err := runExternalFactCommand(context.Background(), "/bin/sh", "-c", "printf 'site=larger-than-limit\\n'")
+	if !errors.Is(err, ErrExternalFactTooLarge) {
+		t.Fatalf("runExternalFactCommand() stdout=%q stderr=%q err=%v, want ErrExternalFactTooLarge", out, stderr, err)
+	}
+}
+
+func TestLimitedBuffer_marksOverflowAndRetainsPrefix(t *testing.T) {
+	var buf limitedBuffer
+	buf.limit = 8
+
+	n, err := buf.Write([]byte("site=larger-than-limit\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != len("site=larger-than-limit\n") {
+		t.Fatalf("Write() n = %d, want full input length", n)
+	}
+	if !buf.tooLarge {
+		t.Fatal("limitedBuffer did not mark overflow")
+	}
+	if got := string(buf.Bytes()); got != "site=lar" {
+		t.Fatalf("limitedBuffer bytes = %q, want retained prefix", got)
+	}
+}
+
 func TestLoadExternalFacts_executableYAMLFacts(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("extensionless shell-script external facts are a POSIX mechanism; Windows executables use .bat/.cmd/.exe/.ps1")

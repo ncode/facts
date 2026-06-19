@@ -215,6 +215,25 @@ func TestFactCache_cacheFactsWritesConfiguredGroups(t *testing.T) {
 	}
 }
 
+func TestFactCache_ignoresUnsafeCacheGroupNames(t *testing.T) {
+	dir := t.TempDir()
+	outside := filepath.Join(dir, "..", "outside-cache")
+	cache := NewFactCache(
+		dir,
+		[]FactTTL{{Fact: "../outside-cache", TTL: "1 hour"}},
+		nil,
+		discardLog(),
+	)
+
+	if err := cache.CacheFacts([]ResolvedFact{{Name: "../outside-cache", Value: "pwned", Type: "external"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := os.Stat(outside); !os.IsNotExist(err) {
+		t.Fatalf("outside cache path stat err = %v, want not exist", err)
+	}
+}
+
 func TestFactCache_cacheFactsWarnsWhenCacheFileCannotBeWrittenLikeRubyCacheManager(t *testing.T) {
 	dir := t.TempDir()
 	originalWriteFile := cacheWriteFile

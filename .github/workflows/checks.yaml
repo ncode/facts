@@ -45,6 +45,9 @@ jobs:
       - name: Vet packages
         run: go vet ./...
 
+      - name: Vulnerability scan
+        run: go tool govulncheck ./...
+
   race_tests:
     runs-on: ubuntu-latest
     name: race detector

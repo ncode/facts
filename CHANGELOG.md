@@ -189,6 +189,11 @@
 
 ### Fixed
 
+- Hardened framework boundaries around untrusted inputs: unsafe cache group
+  names are ignored instead of escaping the cache directory, external fact
+  files and executable output are size-limited, YAML/HOCON keys are escaped
+  when needed, built-in probes use a sanitized system `PATH`, statfs byte math
+  clamps overflow, and CI now runs `govulncheck`.
 - The default `key => value` text format is now byte-compatible with Ruby
   Facter 4.10.0's `LegacyFactFormatter` in all three modes (full output,
   single query, multiple queries): nested strings are double-quoted, map

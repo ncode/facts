@@ -159,16 +159,16 @@ func yamlLines(value any, depth int) []string {
 		for _, key := range sortedKeys(v) {
 			child := v[key]
 			if childMap, ok := child.(map[string]any); ok {
-				lines = append(lines, indent+key+":")
+				lines = append(lines, indent+yamlKey(key)+":")
 				lines = append(lines, yamlLines(childMap, depth+1)...)
 				continue
 			}
 			if childSlice, ok := child.([]any); ok {
-				lines = append(lines, indent+key+":")
+				lines = append(lines, indent+yamlKey(key)+":")
 				lines = append(lines, yamlSequenceLines(childSlice, depth)...)
 				continue
 			}
-			lines = append(lines, indent+key+": "+yamlScalar(child))
+			lines = append(lines, indent+yamlKey(key)+": "+yamlScalar(child))
 		}
 		return lines
 	case []any:
@@ -207,17 +207,47 @@ func hoconLines(m map[string]any, depth int, braces bool) []string {
 	for _, key := range sortedKeys(m) {
 		value := m[key]
 		if child, ok := value.(map[string]any); ok {
-			lines = append(lines, indent+key+"={")
+			lines = append(lines, indent+hoconKey(key)+"={")
 			lines = append(lines, hoconLines(child, depth+1, false)...)
 			lines = append(lines, indent+"}")
 			continue
 		}
-		lines = append(lines, indent+key+"="+hoconScalar(value))
+		lines = append(lines, indent+hoconKey(key)+"="+hoconScalar(value))
 	}
 	if braces {
 		lines = append(lines, strings.Repeat("    ", depth-1)+"}")
 	}
 	return lines
+}
+
+func yamlKey(value string) string {
+	if isPlainOutputKey(value, true) {
+		return value
+	}
+	return strconv.Quote(value)
+}
+
+func hoconKey(value string) string {
+	if isPlainOutputKey(value, false) {
+		return value
+	}
+	return strconv.Quote(value)
+}
+
+func isPlainOutputKey(value string, allowDot bool) bool {
+	if value == "" {
+		return false
+	}
+	for _, r := range value {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '_' || r == '-' {
+			continue
+		}
+		if allowDot && r == '.' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func hoconScalar(value any) string {

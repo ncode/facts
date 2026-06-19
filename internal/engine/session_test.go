@@ -3,7 +3,10 @@ package engine
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"reflect"
+	"runtime"
+	"strings"
 	"testing"
 	"time"
 )
@@ -130,4 +133,56 @@ func TestSessionBackedProbesUseFakeHost(t *testing.T) {
 	if !reflect.DeepEqual(host.runCalls, wantCalls) {
 		t.Fatalf("run calls = %#v, want %#v", host.runCalls, wantCalls)
 	}
+}
+
+func TestCoreCommandEnvSanitizesPath(t *testing.T) {
+	env := coreCommandEnv([]string{"PATH=/tmp/attacker", "HOME=/home/alice"}, "linux")
+
+	for _, entry := range env {
+		if entry == "PATH=/tmp/attacker" {
+			t.Fatalf("coreCommandEnv kept attacker PATH: %#v", env)
+		}
+	}
+	if !slicesContains(env, "HOME=/home/alice") {
+		t.Fatalf("coreCommandEnv dropped non-PATH env: %#v", env)
+	}
+	path := ""
+	for _, entry := range env {
+		if value, ok := strings.CutPrefix(entry, "PATH="); ok {
+			path = value
+			break
+		}
+	}
+	if path == "" {
+		t.Fatalf("coreCommandEnv did not set PATH: %#v", env)
+	}
+	if strings.Contains(path, "/tmp/attacker") {
+		t.Fatalf("PATH = %q, want sanitized path", path)
+	}
+}
+
+func TestOSHostRunDoesNotSearchCallerPath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses a POSIX shell script")
+	}
+	dir := t.TempDir()
+	name := "facts-test-attacker-command"
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte("#!/bin/sh\nprintf pwned\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
+
+	if got := (osHost{}).run(context.Background(), name); got != "" {
+		t.Fatalf("osHost.run() = %q, want no output from caller PATH command", got)
+	}
+}
+
+func slicesContains(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }

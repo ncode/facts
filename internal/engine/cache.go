@@ -119,7 +119,9 @@ func (fc *FactCache) ResolveFacts(searched []ResolvedFact) ([]ResolvedFact, []Re
 			continue
 		}
 		if !cacheDataHasKeyMatchingFact(data, fact.Name) {
-			deleteCacheFile(filepath.Join(fc.dir, group), fc.logger())
+			if path, ok := fc.cachePath(group); ok {
+				deleteCacheFile(path, fc.logger())
+			}
 			// The file is gone: later facts in this group must miss, as they
 			// would if they re-read the cache.
 			reads[group] = groupRead{}
@@ -217,7 +219,11 @@ func (fc *FactCache) CacheFacts(facts []ResolvedFact) error {
 		if err != nil {
 			return err
 		}
-		if err := cacheWriteFile(filepath.Join(fc.dir, group), encoded, 0o600); err != nil {
+		path, ok := fc.cachePath(group)
+		if !ok {
+			continue
+		}
+		if err := cacheWriteFile(path, encoded, 0o600); err != nil {
 			if warnCacheWriteFailure(err, fc.logger()) {
 				return nil
 			}
@@ -273,7 +279,10 @@ func factMatchesPrefix(name, prefix string) bool {
 }
 
 func (fc *FactCache) cacheFresh(group string, ttl time.Duration) bool {
-	path := filepath.Join(fc.dir, group)
+	path, ok := fc.cachePath(group)
+	if !ok {
+		return false
+	}
 	info, err := os.Stat(path)
 	if err != nil {
 		return false
@@ -286,7 +295,10 @@ func (fc *FactCache) cacheFresh(group string, ttl time.Duration) bool {
 }
 
 func (fc *FactCache) shouldWriteCache(group string, ttl time.Duration, data map[string]any) bool {
-	path := filepath.Join(fc.dir, group)
+	path, ok := fc.cachePath(group)
+	if !ok {
+		return false
+	}
 	info, err := os.Stat(path)
 	if err != nil {
 		return true
@@ -326,7 +338,10 @@ func cacheContainsFacts(path string, data map[string]any, log *slog.Logger) bool
 }
 
 func (fc *FactCache) readCache(group string) (map[string]any, bool) {
-	path := filepath.Join(fc.dir, group)
+	path, ok := fc.cachePath(group)
+	if !ok {
+		return nil, false
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, false
@@ -341,6 +356,23 @@ func (fc *FactCache) readCache(group string) (map[string]any, bool) {
 		return nil, false
 	}
 	return decoded, true
+}
+
+func (fc *FactCache) cachePath(group string) (string, bool) {
+	if !safeCacheGroupName(group) {
+		fc.logger().Warn(fmt.Sprintf("Ignoring unsafe cache group name %q", group))
+		return "", false
+	}
+	return filepath.Join(fc.dir, group), true
+}
+
+func safeCacheGroupName(name string) bool {
+	return name != "" &&
+		name != "." &&
+		name != ".." &&
+		filepath.Clean(name) == name &&
+		!filepath.IsAbs(name) &&
+		!strings.ContainsAny(name, `/\:`)
 }
 
 func deleteCacheFile(path string, log *slog.Logger) {

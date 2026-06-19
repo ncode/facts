@@ -5,6 +5,9 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strings"
 	"sync"
 )
 
@@ -18,11 +21,97 @@ type hostOS interface {
 type osHost struct{}
 
 func (osHost) run(ctx context.Context, name string, args ...string) string {
-	data, err := exec.CommandContext(ctx, name, args...).Output()
+	cmdName, ok := coreCommandExecutable(name, runtime.GOOS)
+	if !ok {
+		return ""
+	}
+	cmd := exec.CommandContext(ctx, cmdName, args...)
+	cmd.Env = coreCommandEnv(os.Environ(), runtime.GOOS)
+	data, err := cmd.Output()
 	if err != nil {
 		return ""
 	}
 	return string(data)
+}
+
+func coreCommandEnv(env []string, goos string) []string {
+	out := make([]string, 0, len(env)+1)
+	for _, entry := range env {
+		name, _, ok := strings.Cut(entry, "=")
+		if ok && strings.EqualFold(name, "PATH") {
+			continue
+		}
+		out = append(out, entry)
+	}
+
+	key := "PATH"
+	if goos == "windows" {
+		key = "Path"
+	}
+	return append(out, key+"="+coreCommandSearchPath(goos, env))
+}
+
+func coreCommandExecutable(name, goos string) (string, bool) {
+	if commandHasPathSeparator(name, goos) {
+		return name, true
+	}
+	for _, dir := range strings.Split(coreCommandSearchPath(goos, os.Environ()), corePathListSeparator(goos)) {
+		if dir == "" {
+			continue
+		}
+		for _, candidate := range coreCommandCandidates(filepath.Join(dir, name), goos) {
+			if coreCommandFileExecutable(candidate, goos) {
+				return candidate, true
+			}
+		}
+	}
+	return "", false
+}
+
+func commandHasPathSeparator(name, goos string) bool {
+	if strings.ContainsAny(name, `/\`) {
+		return true
+	}
+	return goos == "windows" && strings.Contains(name, ":")
+}
+
+func coreCommandCandidates(path, goos string) []string {
+	if goos != "windows" || filepath.Ext(path) != "" {
+		return []string{path}
+	}
+	return []string{path + ".exe", path + ".com", path + ".bat", path + ".cmd"}
+}
+
+func coreCommandFileExecutable(path, goos string) bool {
+	info, err := os.Stat(path)
+	if err != nil || !info.Mode().IsRegular() {
+		return false
+	}
+	return goos == "windows" || info.Mode()&0o111 != 0
+}
+
+func coreCommandSearchPath(goos string, env []string) string {
+	sep := corePathListSeparator(goos)
+	if goos == "windows" {
+		root := systemRootFromEnv(env)
+		if root == "" {
+			root = `C:\Windows`
+		}
+		return strings.Join([]string{
+			root + `\System32`,
+			root,
+			root + `\System32\Wbem`,
+			root + `\System32\WindowsPowerShell\v1.0`,
+		}, sep)
+	}
+	return strings.Join([]string{"/usr/sbin", "/usr/bin", "/sbin", "/bin"}, sep)
+}
+
+func corePathListSeparator(goos string) string {
+	if goos == "windows" {
+		return ";"
+	}
+	return ":"
 }
 
 func (osHost) readFile(path string) ([]byte, error) {
