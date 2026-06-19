@@ -407,6 +407,50 @@ func TestParseBSDMemory_returnsSystemAndSwapFacts(t *testing.T) {
 	}
 }
 
+func TestParseDragonFlyMemory_returnsSystemAndSwapFacts(t *testing.T) {
+	got := parseDragonFlyMemory(map[string]int{
+		"hw.physmem":            2_110_259_200,
+		"vmstat.bytes_per_page": 4096,
+		"vmstat.pages_active":   45_537,
+		"vmstat.pages_wired":    98_459,
+	}, `Device          1K-blocks     Used    Avail Capacity  Type
+/dev/da0s1b       2097152        0  2097152     0%    Interleaved`)
+
+	if got.System["total_bytes"] != 2_110_259_200 {
+		t.Fatalf("System total_bytes = %#v, want 2110259200", got.System["total_bytes"])
+	}
+	if got.Swap["total_bytes"] != 2_147_483_648 {
+		t.Fatalf("Swap total_bytes = %#v, want 2147483648", got.Swap["total_bytes"])
+	}
+}
+
+func TestParseIllumosMemory_returnsSystemAndSwapFacts(t *testing.T) {
+	got := parseIllumosMemory(
+		"unix:0:system_pages:physmem\t1046390\nunix:0:system_pages:freemem\t744767\n",
+		"4096\n",
+		"total: 138896k bytes allocated + 16308k reserved = 155204k used, 2459052k available",
+	)
+
+	if got.System["total_bytes"] != 4_286_013_440 {
+		t.Fatalf("System total_bytes = %#v, want 4286013440", got.System["total_bytes"])
+	}
+	if got.Swap["available_bytes"] != 2_518_069_248 {
+		t.Fatalf("Swap available_bytes = %#v, want 2518069248", got.Swap["available_bytes"])
+	}
+}
+
+func TestParseIllumosMemoryOmitsSystemWithoutFreePages(t *testing.T) {
+	got := parseIllumosMemory(
+		"unix:0:system_pages:physmem\t1046390\n",
+		"4096\n",
+		"",
+	)
+
+	if got.System != nil {
+		t.Fatalf("System = %#v, want nil", got.System)
+	}
+}
+
 func TestParseBSDVMStatCounters(t *testing.T) {
 	input := `       4096 bytes per page
      241757 pages managed

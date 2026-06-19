@@ -126,9 +126,9 @@ func probeProcessorSpeed(s *Session) string {
 			return ""
 		}
 		return parseLinuxProcessorSpeed(string(data))
-	case "freebsd":
+	case "freebsd", "dragonfly":
 		return hertzToHumanReadable(s.cachedPlatformProcessorInfo().SpeedHz)
-	case "netbsd", "openbsd":
+	case "netbsd", "openbsd", "illumos":
 		return hertzToHumanReadable(s.cachedPlatformProcessorInfo().SpeedHz)
 	}
 	return ""
@@ -150,7 +150,7 @@ func probeProcessorModels(s *Session) []string {
 				return models
 			}
 		}
-	case "freebsd", "netbsd", "openbsd", "windows":
+	case "freebsd", "netbsd", "openbsd", "dragonfly", "illumos", "windows":
 		models := s.cachedPlatformProcessorInfo().Models
 		if len(models) > 0 {
 			return append([]string(nil), models...)
@@ -178,7 +178,7 @@ func probeProcessorTopology(s *Session) (int, int) {
 				return cores, threads
 			}
 		}
-	case "freebsd", "netbsd", "openbsd", "windows":
+	case "freebsd", "netbsd", "openbsd", "dragonfly", "illumos", "windows":
 		processors := s.cachedPlatformProcessorInfo()
 		if processors.CoresPerSocket > 0 && processors.ThreadsPerCore > 0 {
 			return processors.CoresPerSocket, processors.ThreadsPerCore
@@ -208,12 +208,20 @@ func currentProcessorInfo(goos string, run func(string, ...string) string, log *
 			run("sysctl", "-n", "hw.model"),
 			run("sysctl", "-n", "hw.clockrate"),
 		)
+	case "dragonfly":
+		return parseFreeBSDProcessors(
+			run("sysctl", "-n", "hw.ncpu"),
+			run("sysctl", "-n", "hw.model"),
+			run("sysctl", "-n", "hw.clockrate"),
+		)
 	case "netbsd", "openbsd":
 		return parseFreeBSDProcessors(
 			run("sysctl", "-n", "hw.ncpu"),
 			run("sysctl", "-n", "hw.model"),
 			run("sysctl", "-n", "hw.cpuspeed"),
 		)
+	case "illumos":
+		return parseIllumosProcessors(run("psrinfo", "-pv"))
 	case "windows":
 		return currentWindowsProcessors(goos, run, log)
 	default:
@@ -283,6 +291,103 @@ func parseFreeBSDProcessors(countOutput, modelOutput, speedOutput string) proces
 		info.ThreadsPerCore = 1
 	}
 	return info
+}
+
+func parseIllumosProcessors(input string) processorInfo {
+	info := processorInfo{}
+	var wantModel bool
+	coreTotal := 0
+	nextModelCount := 1
+	for line := range strings.SplitSeq(input, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if strings.HasPrefix(line, "The physical processor has ") {
+			info.PhysicalCount++
+			nextModelCount = 1
+			if count := illumosVirtualProcessorCount(line); count > 0 {
+				info.LogicalCount += count
+				nextModelCount = count
+			}
+			if cores := illumosCoreCount(line); cores > 0 {
+				coreTotal += cores
+			}
+			continue
+		}
+		if clock := illumosClockMHz(line); clock > 0 {
+			info.SpeedHz = clock * 1000 * 1000
+			if fields := strings.Fields(line); len(fields) > 0 && info.ISA == "" {
+				info.ISA = fields[0]
+			}
+			wantModel = true
+			continue
+		}
+		if wantModel {
+			for range nextModelCount {
+				info.Models = append(info.Models, line)
+			}
+			nextModelCount = 1
+			wantModel = false
+		}
+	}
+	if info.LogicalCount == 0 && len(info.Models) > 0 {
+		info.LogicalCount = len(info.Models)
+	}
+	if info.PhysicalCount == 0 && info.LogicalCount > 0 {
+		info.PhysicalCount = 1
+	}
+	if info.LogicalCount > 0 && info.PhysicalCount > 0 {
+		if coreTotal > 0 {
+			info.CoresPerSocket = max(1, coreTotal/info.PhysicalCount)
+			info.ThreadsPerCore = max(1, info.LogicalCount/(info.PhysicalCount*info.CoresPerSocket))
+		} else {
+			info.CoresPerSocket = max(1, info.LogicalCount/info.PhysicalCount)
+			info.ThreadsPerCore = 1
+		}
+	}
+	return info
+}
+
+func illumosVirtualProcessorCount(line string) int {
+	after, ok := strings.CutPrefix(line, "The physical processor has ")
+	if !ok {
+		return 0
+	}
+	beforeVirtual, _, ok := strings.Cut(after, " virtual processor")
+	if !ok {
+		return 0
+	}
+	fields := strings.Fields(beforeVirtual)
+	if len(fields) == 0 {
+		return 0
+	}
+	return positiveInt(fields[len(fields)-1])
+}
+
+func illumosCoreCount(line string) int {
+	after, ok := strings.CutPrefix(line, "The physical processor has ")
+	if !ok {
+		return 0
+	}
+	beforeCore, _, ok := strings.Cut(after, " core")
+	if !ok {
+		return 0
+	}
+	fields := strings.Fields(beforeCore)
+	if len(fields) == 0 {
+		return 0
+	}
+	return positiveInt(fields[len(fields)-1])
+}
+
+func illumosClockMHz(line string) int {
+	_, after, ok := strings.Cut(line, " clock ")
+	if !ok {
+		return 0
+	}
+	value, _, _ := strings.Cut(after, " MHz")
+	return positiveInt(value)
 }
 
 func probeProcessorExtensions(s *Session) []string {
@@ -496,7 +601,7 @@ func hertzToHumanReadable(hz any) string {
 func processorsCoreFacts(s *Session) []ResolvedFact {
 	architecture := s.cachedArchitectureName()
 	platformProcessors := processorInfo{}
-	if runtime.GOOS == "darwin" || runtime.GOOS == "freebsd" || runtime.GOOS == "netbsd" || runtime.GOOS == "openbsd" || runtime.GOOS == "windows" {
+	if runtime.GOOS == "darwin" || runtime.GOOS == "freebsd" || runtime.GOOS == "netbsd" || runtime.GOOS == "openbsd" || runtime.GOOS == "dragonfly" || runtime.GOOS == "illumos" || runtime.GOOS == "windows" {
 		platformProcessors = s.cachedPlatformProcessorInfo()
 	}
 	if runtime.GOOS == "linux" {

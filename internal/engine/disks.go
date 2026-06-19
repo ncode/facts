@@ -104,6 +104,8 @@ func currentDisks(goos string, run commandRunner, hosts ...hostOS) map[string]an
 	switch goos {
 	case "freebsd":
 		return parseFreeBSDGeomDisks(run("sysctl", "-n", "kern.geom.confxml"))
+	case "dragonfly":
+		return currentDragonFlyDisks(run)
 	case "openbsd", "netbsd":
 		return currentBSDDisks(goos, run)
 	case "linux":
@@ -178,6 +180,8 @@ func currentPartitions(s *Session) map[string]any {
 	switch runtime.GOOS {
 	case "freebsd":
 		return parseFreeBSDGeomPartitions(s.commandOutput("sysctl", "-n", "kern.geom.confxml"))
+	case "dragonfly":
+		return currentDragonFlyPartitions(s.commandOutput)
 	case "openbsd":
 		return currentOpenBSDPartitions(s.commandOutput)
 	case "netbsd":
@@ -470,6 +474,41 @@ func freeBSDDiskType(rotationRate string) string {
 	return ""
 }
 
+func currentDragonFlyDisks(run commandRunner) map[string]any {
+	if run == nil {
+		return nil
+	}
+	disks := map[string]any{}
+	for _, device := range strings.Fields(run("sysctl", "-n", "kern.disks")) {
+		disk := parseDragonFlyDiskInfo(run("diskinfo", "/dev/"+device))
+		if len(disk) > 0 {
+			disks[device] = disk
+		}
+	}
+	if len(disks) == 0 {
+		return nil
+	}
+	return disks
+}
+
+func parseDragonFlyDiskInfo(input string) map[string]any {
+	for _, field := range strings.Fields(input) {
+		value, ok := strings.CutPrefix(field, "size=")
+		if !ok {
+			continue
+		}
+		sizeBytes, err := strconv.ParseInt(value, 0, 64)
+		if err != nil || sizeBytes <= 0 {
+			return nil
+		}
+		return map[string]any{
+			"size":       bytesToHumanReadable(sizeBytes),
+			"size_bytes": int(sizeBytes),
+		}
+	}
+	return nil
+}
+
 func currentBSDDisks(goos string, run commandRunner) map[string]any {
 	if run == nil {
 		return nil
@@ -628,6 +667,67 @@ func parseBSDDisklabelInt(input, key string) int {
 	return 0
 }
 
+func currentDragonFlyPartitions(run commandRunner) map[string]any {
+	if run == nil {
+		return nil
+	}
+	partitions := map[string]any{}
+	for _, device := range strings.Fields(run("sysctl", "-n", "kern.disks")) {
+		for _, target := range dragonFlyDisklabelTargets(device) {
+			for name, partition := range parseDragonFlyDisklabelPartitions(target, run("disklabel", target)) {
+				partitions[name] = partition
+			}
+		}
+	}
+	if len(partitions) == 0 {
+		return nil
+	}
+	return partitions
+}
+
+func dragonFlyDisklabelTargets(device string) []string {
+	return []string{device, device + "s1", device + "s2", device + "s3", device + "s4"}
+}
+
+func parseDragonFlyDisklabelPartitions(device, input string) map[string]any {
+	blockSize := parseBSDDisklabelInt(input, "display block size:")
+	if blockSize <= 0 {
+		blockSize = parseBSDDisklabelSectorSize(input)
+	}
+	if blockSize <= 0 {
+		return nil
+	}
+	partitions := map[string]any{}
+	for line := range strings.Lines(input) {
+		fields := strings.Fields(strings.TrimSpace(line))
+		if len(fields) < 4 || !strings.HasSuffix(fields[0], ":") {
+			continue
+		}
+		label := strings.TrimSuffix(fields[0], ":")
+		if len(label) != 1 || label == "c" {
+			continue
+		}
+		sizeBlocks, err := strconv.Atoi(fields[1])
+		if err != nil || sizeBlocks <= 0 {
+			continue
+		}
+		filesystem := fields[3]
+		if filesystem == "" || filesystem == "unused" {
+			continue
+		}
+		sizeBytes := sizeBlocks * blockSize
+		partitions["/dev/"+device+label] = map[string]any{
+			"filesystem": filesystem,
+			"size":       bytesToHumanReadable(sizeBytes),
+			"size_bytes": sizeBytes,
+		}
+	}
+	if len(partitions) == 0 {
+		return nil
+	}
+	return partitions
+}
+
 func parseBSDDisklabelPartitions(device, input string) map[string]any {
 	sectorSize := parseBSDDisklabelSectorSize(input)
 	if sectorSize <= 0 {
@@ -783,6 +883,12 @@ func rootMountpoint(s *Session) map[string]any {
 	if runtime.GOOS == "netbsd" {
 		return currentNetBSDMountpoints(s)
 	}
+	if runtime.GOOS == "dragonfly" {
+		return currentDragonFlyMountpoints(s)
+	}
+	if runtime.GOOS == "illumos" {
+		return currentIllumosMountpoints(s)
+	}
 
 	entries := currentMountEntries(s)
 	if len(entries) == 0 {
@@ -810,6 +916,22 @@ func currentNetBSDMountpoints(s *Session) map[string]any {
 	}
 	dfOutput := s.commandOutput("df", "-P")
 	return netBSDMountpointsFact(mountOutput, dfOutput)
+}
+
+func currentDragonFlyMountpoints(s *Session) map[string]any {
+	mountOutput := s.commandOutput("mount")
+	if mountOutput == "" {
+		return mountpointsFact([]mountEntry{{Path: "/"}}, statMountpoint)
+	}
+	return dragonFlyMountpointsFact(mountOutput, s.commandOutput("df", "-P"))
+}
+
+func currentIllumosMountpoints(s *Session) map[string]any {
+	mountOutput := s.commandOutput("mount")
+	if mountOutput == "" {
+		return mountpointsFact([]mountEntry{{Path: "/"}}, statMountpoint)
+	}
+	return illumosMountpointsFact(mountOutput, s.commandOutput("df", "-P"))
 }
 
 func currentMountEntries(s *Session) []mountEntry {
@@ -1028,6 +1150,82 @@ func netBSDMountpointsFact(mountOutput, dfOutput string) map[string]any {
 	})
 }
 
+func dragonFlyMountpointsFact(mountOutput, dfOutput string) map[string]any {
+	stats := parseDFP512Stats(dfOutput)
+	entries := parseBSDMountEntries(mountOutput)
+	for i := range entries {
+		entries[i].Device = dragonFlyMountDevice(entries[i].Device)
+	}
+	return mountpointsFact(entries, func(path string) (mountStat, bool) {
+		stat, ok := stats[path]
+		return stat, ok
+	})
+}
+
+func dragonFlyMountDevice(device string) string {
+	if strings.HasPrefix(device, "/") || !isDragonFlyPartitionName(device) {
+		return device
+	}
+	return "/dev/" + device
+}
+
+func isDragonFlyPartitionName(name string) bool {
+	if name == "" || strings.ContainsAny(name, "/:") {
+		return false
+	}
+	i := 0
+	for i < len(name) && ((name[i] >= 'a' && name[i] <= 'z') || (name[i] >= 'A' && name[i] <= 'Z')) {
+		i++
+	}
+	if i == 0 {
+		return false
+	}
+	for i < len(name) && name[i] >= '0' && name[i] <= '9' {
+		i++
+	}
+	if i >= len(name) || name[i] != 's' {
+		return false
+	}
+	i++
+	startSlice := i
+	for i < len(name) && name[i] >= '0' && name[i] <= '9' {
+		i++
+	}
+	if i == startSlice || i != len(name)-1 {
+		return false
+	}
+	last := name[i]
+	return last >= 'a' && last <= 'p' || last >= 'A' && last <= 'P'
+}
+
+func illumosMountpointsFact(mountOutput, dfOutput string) map[string]any {
+	stats := parseDFP512Stats(dfOutput)
+	return mountpointsFact(parseIllumosMountEntries(mountOutput), func(path string) (mountStat, bool) {
+		stat, ok := stats[path]
+		return stat, ok
+	})
+}
+
+func parseIllumosMountEntries(input string) []mountEntry {
+	entries := make([]mountEntry, 0, strings.Count(input, "\n"))
+	for line := range strings.SplitSeq(input, "\n") {
+		path, rest, ok := strings.Cut(line, " on ")
+		if !ok {
+			continue
+		}
+		fields := strings.Fields(rest)
+		if len(fields) < 2 {
+			continue
+		}
+		entries = append(entries, mountEntry{
+			Device:  fields[0],
+			Path:    path,
+			Options: strings.Split(fields[1], "/"),
+		})
+	}
+	return entries
+}
+
 func darwinMountpointsFact(entries []mountEntry, stat func(string) (mountStat, bool)) map[string]any {
 	missingStats := make(map[string]bool)
 	mountpoints := mountpointsFactWithSkip(entries, func(path string) (mountStat, bool) {
@@ -1162,7 +1360,7 @@ func skipMountEntry(entry mountEntry) bool {
 }
 
 func currentZFSFacts(goos string, run commandRunner) []ResolvedFact {
-	if run == nil || goos != "freebsd" && goos != "netbsd" {
+	if run == nil || goos != "freebsd" && goos != "netbsd" && goos != "illumos" {
 		return nil
 	}
 	facts := zfsFactsFromUpgradeOutput(run("zfs", "upgrade", "-v"))

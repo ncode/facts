@@ -246,6 +246,73 @@ func TestCurrentProcessorInfoWiresGenericBSDSysctlOutput(t *testing.T) {
 	}
 }
 
+func TestCurrentProcessorInfoWiresDragonFlySysctlOutput(t *testing.T) {
+	t.Parallel()
+
+	got := currentProcessorInfo("dragonfly", func(path string, args ...string) string {
+		if path != "sysctl" || len(args) != 2 || args[0] != "-n" {
+			t.Fatalf("run(%q, %#v), want sysctl -n <name>", path, args)
+		}
+		switch args[1] {
+		case "hw.ncpu":
+			return "2\n"
+		case "hw.model":
+			return "Intel(R) Core(TM) i7-7700 CPU @ 3.60GHz\n"
+		case "hw.clockrate":
+			return "3600\n"
+		default:
+			t.Fatalf("unexpected sysctl name %q", args[1])
+			return ""
+		}
+	}, discardLog())
+
+	wantModels := []string{
+		"Intel(R) Core(TM) i7-7700 CPU @ 3.60GHz",
+		"Intel(R) Core(TM) i7-7700 CPU @ 3.60GHz",
+	}
+	if got.LogicalCount != 2 || got.SpeedHz != 3_600_000_000 || !reflect.DeepEqual(got.Models, wantModels) {
+		t.Fatalf("currentProcessorInfo(dragonfly) = %#v", got)
+	}
+}
+
+func TestCurrentProcessorInfoWiresIllumosPsrinfoOutput(t *testing.T) {
+	t.Parallel()
+
+	got := currentProcessorInfo("illumos", func(path string, args ...string) string {
+		if path != "psrinfo" || !reflect.DeepEqual(args, []string{"-pv"}) {
+			t.Fatalf("run(%q, %#v), want psrinfo -pv", path, args)
+		}
+		return `The physical processor has 1 virtual processor (0)
+  x86 (GenuineIntel 906E9 family 6 model 158 step 9 clock 3600 MHz)
+	Intel(r) Core(tm) i7-7700 CPU @ 3.60GHz
+The physical processor has 1 virtual processor (1)
+  x86 (GenuineIntel 906E9 family 6 model 158 step 9 clock 3600 MHz)
+	Intel(r) Core(tm) i7-7700 CPU @ 3.60GHz`
+	}, discardLog())
+
+	wantModels := []string{
+		"Intel(r) Core(tm) i7-7700 CPU @ 3.60GHz",
+		"Intel(r) Core(tm) i7-7700 CPU @ 3.60GHz",
+	}
+	if got.LogicalCount != 2 || got.PhysicalCount != 2 || got.SpeedHz != 3_600_000_000 || !reflect.DeepEqual(got.Models, wantModels) {
+		t.Fatalf("currentProcessorInfo(illumos) = %#v", got)
+	}
+}
+
+func TestCurrentProcessorInfoIllumosParsesCoreAndThreadCounts(t *testing.T) {
+	t.Parallel()
+
+	got := currentProcessorInfo("illumos", func(path string, args ...string) string {
+		return `The physical processor has 2 cores and 4 virtual processors (0-3)
+  x86 (GenuineIntel 906E9 family 6 model 158 step 9 clock 3600 MHz)
+	Intel(r) Core(tm) i7-7700 CPU @ 3.60GHz`
+	}, discardLog())
+
+	if got.LogicalCount != 4 || got.PhysicalCount != 1 || got.CoresPerSocket != 2 || got.ThreadsPerCore != 2 || len(got.Models) != 4 {
+		t.Fatalf("currentProcessorInfo(illumos) = %#v", got)
+	}
+}
+
 func TestCurrentProcessorISAUsesOpenBSDUnameProcessor(t *testing.T) {
 	got := currentProcessorISA(testSession, "openbsd", "amd64", func(name string, args ...string) string {
 		if name != "uname" || !reflect.DeepEqual(args, []string{"-p"}) {

@@ -503,6 +503,59 @@ func TestCurrentOSReleaseNetBSDUsesKernelReleaseMap(t *testing.T) {
 	}
 }
 
+func TestCurrentOSReleaseDragonFlyUsesKernelReleaseMap(t *testing.T) {
+	got := currentOSRelease(testSession, "dragonfly", nil, func(name string, args ...string) string {
+		if name != "uname" || !reflect.DeepEqual(args, []string{"-r"}) {
+			t.Fatalf("command = %s %#v, want uname -r", name, args)
+		}
+		return "6.4-RELEASE\n"
+	})
+
+	want := map[string]any{"full": "6.4-RELEASE", "major": "6", "minor": "4-RELEASE"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("currentOSRelease(testSession, dragonfly) = %#v, want %#v", got, want)
+	}
+}
+
+func TestCurrentOSReleaseIllumosUsesEtcRelease(t *testing.T) {
+	got := currentOSRelease(testSession, "illumos", func(path string) ([]byte, error) {
+		if path != "/etc/release" {
+			t.Fatalf("path = %q, want /etc/release", path)
+		}
+		return []byte("  OmniOS v11 r151058\n"), nil
+	}, nil)
+
+	want := map[string]any{"full": "r151058", "major": "151058"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("currentOSRelease(testSession, illumos) = %#v, want %#v", got, want)
+	}
+}
+
+func TestCurrentOSReleaseIllumosScansPastBannerLines(t *testing.T) {
+	got := currentOSRelease(testSession, "illumos", func(path string) ([]byte, error) {
+		return []byte("\n  OpenIndiana Development\n  OpenIndiana Hipster r202510\n"), nil
+	}, nil)
+
+	want := map[string]any{"full": "r202510", "major": "202510"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("currentOSRelease(testSession, illumos) = %#v, want %#v", got, want)
+	}
+}
+
+func TestCurrentOSReleaseIllumosFallsBackToKernelRelease(t *testing.T) {
+	host := &fakeHostOS{runOutput: "5.11\n"}
+	session := NewSession()
+	session.host = host
+
+	got := currentOSRelease(session, "illumos", func(path string) ([]byte, error) {
+		return []byte("OpenIndiana Hipster\n"), nil
+	}, session.commandOutput)
+
+	if got != "5.11" {
+		t.Fatalf("currentOSRelease(session, illumos) = %#v, want %q", got, "5.11")
+	}
+}
+
 func TestCoreFacts_includeOSHardware(t *testing.T) {
 	collection := Collection(CoreFacts(testSession))
 	osFact, ok := collection["os"].(map[string]any)
@@ -1042,6 +1095,8 @@ func TestOSFamily_mapsBSDLikeRubyFact(t *testing.T) {
 		{goos: "freebsd", want: "FreeBSD"},
 		{goos: "netbsd", want: "NetBSD"},
 		{goos: "openbsd", want: "OpenBSD"},
+		{goos: "dragonfly", want: "DragonFly"},
+		{goos: "illumos", want: "illumos"},
 	}
 
 	for _, tt := range tests {
@@ -1065,13 +1120,19 @@ func TestOSName_mapsBSDLikeRubyFact(t *testing.T) {
 		{goos: "freebsd", want: "FreeBSD"},
 		{goos: "netbsd", want: "NetBSD"},
 		{goos: "openbsd", want: "OpenBSD"},
+		{goos: "dragonfly", want: "DragonFly"},
+		{goos: "illumos", want: "OmniOS"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.goos, func(t *testing.T) {
 			t.Parallel()
 
-			if got := osName(tt.goos, linuxDistro{}); got != tt.want {
+			distro := linuxDistro{}
+			if tt.goos == "illumos" {
+				distro.Name = "OmniOS"
+			}
+			if got := osName(tt.goos, distro); got != tt.want {
 				t.Fatalf("osName(%q) = %q, want %q", tt.goos, got, tt.want)
 			}
 		})
@@ -1088,6 +1149,8 @@ func TestKernelName_mapsBSDLikeRubyFact(t *testing.T) {
 		{goos: "freebsd", want: "FreeBSD"},
 		{goos: "netbsd", want: "NetBSD"},
 		{goos: "openbsd", want: "OpenBSD"},
+		{goos: "dragonfly", want: "DragonFly"},
+		{goos: "illumos", want: "SunOS"},
 	}
 
 	for _, tt := range tests {

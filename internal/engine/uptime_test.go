@@ -380,7 +380,7 @@ func TestParseMacOSLoadAverages(t *testing.T) {
 }
 
 func TestCurrentLoadAverages_wiresBSDVMLoadavg(t *testing.T) {
-	for _, goos := range []string{"freebsd", "openbsd", "netbsd"} {
+	for _, goos := range []string{"freebsd", "openbsd", "netbsd", "dragonfly"} {
 		t.Run(goos, func(t *testing.T) {
 			got := currentLoadAverages(goos, nil, func(path string, args ...string) string {
 				if path != "sysctl" || !reflect.DeepEqual(args, []string{"-n", "vm.loadavg"}) {
@@ -394,6 +394,20 @@ func TestCurrentLoadAverages_wiresBSDVMLoadavg(t *testing.T) {
 				t.Fatalf("currentLoadAverages() = %#v, want %#v", got, want)
 			}
 		})
+	}
+}
+
+func TestCurrentLoadAverages_wiresIllumosUptime(t *testing.T) {
+	got := currentLoadAverages("illumos", nil, func(path string, args ...string) string {
+		if path != "uptime" || len(args) != 0 {
+			t.Fatalf("run(%q, %#v), want uptime", path, args)
+		}
+		return "22:09:38    up  3:04,  0 users,  load average: 0.00, 0.01, 0.02"
+	})
+	want := map[string]any{"1m": 0.00, "5m": 0.01, "15m": 0.02}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("currentLoadAverages(illumos) = %#v, want %#v", got, want)
 	}
 }
 
