@@ -9,7 +9,15 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"time"
 )
+
+// coreCommandTimeout bounds each core probe command so one wedged subprocess
+// (a hung wmic/powershell, a corrupted WMI repository, a stuck system_profiler)
+// can't hang discovery forever. The CLI runs Discover with a background
+// context, so without this a single stuck probe would block the whole run;
+// external facts already cap themselves with externalFactCommandTimeout.
+var coreCommandTimeout = 30 * time.Second
 
 type hostOS interface {
 	run(context.Context, string, ...string) string
@@ -25,6 +33,8 @@ func (osHost) run(ctx context.Context, name string, args ...string) string {
 	if !ok {
 		return ""
 	}
+	ctx, cancel := context.WithTimeout(ctx, coreCommandTimeout)
+	defer cancel()
 	cmd := exec.CommandContext(ctx, cmdName, args...)
 	cmd.Env = coreCommandEnv(os.Environ(), runtime.GOOS)
 	data, err := cmd.Output()

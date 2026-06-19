@@ -162,6 +162,24 @@ func TestCoreCommandEnvSanitizesPath(t *testing.T) {
 	}
 }
 
+func TestOSHostRunTimesOutWedgedCommand(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses the POSIX sleep command")
+	}
+	prev := coreCommandTimeout
+	coreCommandTimeout = 50 * time.Millisecond
+	t.Cleanup(func() { coreCommandTimeout = prev })
+
+	start := time.Now()
+	got := (osHost{}).run(context.Background(), "sleep", "30")
+	if elapsed := time.Since(start); elapsed > 10*time.Second {
+		t.Fatalf("osHost.run did not honor coreCommandTimeout: ran for %s", elapsed)
+	}
+	if got != "" {
+		t.Fatalf("osHost.run() = %q, want empty output on timeout", got)
+	}
+}
+
 func TestCoreCommandEnvWindowsKeepsEnvButOverridesPathAndRoot(t *testing.T) {
 	// coreWindowsRoot() resolves to C:\Windows on non-Windows builds, so this
 	// test is deterministic on the Linux/macOS CI runners.
