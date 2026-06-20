@@ -7,7 +7,12 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-if (-not $IsWindows) {
+$isWindowsHost = $IsWindows
+if ($null -eq $isWindowsHost) {
+    $isWindowsHost = $env:OS -eq "Windows_NT"
+}
+
+if (-not $isWindowsHost) {
     Write-Error "windows-release-gate.ps1 must run on Windows"
     exit 1
 }
@@ -54,7 +59,11 @@ if ($LASTEXITCODE -ne 0) {
 
 $json = $output -join [Environment]::NewLine
 Write-Output $json
-$facts = $json | ConvertFrom-Json -AsHashtable
+$factsObject = $json | ConvertFrom-Json
+$facts = New-Object 'System.Collections.Hashtable' -ArgumentList ([System.StringComparer]::Ordinal)
+foreach ($property in $factsObject.PSObject.Properties) {
+    $facts[$property.Name] = $property.Value
+}
 
 function Assert-Key($key) {
     if (-not $facts.ContainsKey($key)) {
@@ -81,9 +90,13 @@ function Assert-NonEmpty($key) {
 function Assert-Map($key) {
     Assert-Key $key
     $got = $facts[$key]
-    if ($null -eq $got -or -not ($got -is [System.Collections.IDictionary]) -or $got.Count -eq 0) {
-        throw "$key = '$got', want non-empty map"
+    if ($got -is [System.Collections.IDictionary] -and $got.Count -gt 0) {
+        return
     }
+    if ($got -is [pscustomobject] -and $got.PSObject.Properties.Count -gt 0) {
+        return
+    }
+    throw "$key = '$got', want non-empty map"
 }
 
 foreach ($fact in $factSet) {

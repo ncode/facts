@@ -97,6 +97,14 @@ type freeBSDVirtualizationInput struct {
 
 type openBSDVirtualizationInput struct {
 	ProductName string
+	Vendor      string
+}
+
+type dmiVirtualizationInput struct {
+	Manufacturer string
+	ProductName  string
+	BIOSVendor   string
+	PCIOutput    string
 }
 
 type windowsVirtualizationInput struct {
@@ -118,6 +126,12 @@ func detectVirtualization(s *Session) virtualization {
 		return detectFreeBSDVirtualization(currentFreeBSDVirtualizationInput(s.commandOutput))
 	case "openbsd":
 		return detectOpenBSDVirtualization(currentOpenBSDVirtualizationInput(s.commandOutput))
+	case "netbsd":
+		return detectDMIHostVirtualization(currentNetBSDVirtualizationInput(s.commandOutput))
+	case "dragonfly":
+		return detectDMIHostVirtualization(currentDragonFlyVirtualizationInput(s.commandOutput))
+	case "illumos":
+		return detectDMIHostVirtualization(currentIllumosVirtualizationInput(s.commandOutput))
 	case "windows":
 		return detectWindowsVirtualization(currentWindowsVirtualizationInput(runtime.GOOS, s.commandOutput))
 	default:
@@ -161,14 +175,82 @@ func detectFreeBSDVirtualization(input freeBSDVirtualizationInput) virtualizatio
 func currentOpenBSDVirtualizationInput(run func(string, ...string) string) openBSDVirtualizationInput {
 	return openBSDVirtualizationInput{
 		ProductName: strings.TrimSpace(run("sysctl", "-n", "hw.product")),
+		Vendor:      strings.TrimSpace(run("sysctl", "-n", "hw.vendor")),
 	}
 }
 
 func detectOpenBSDVirtualization(input openBSDVirtualizationInput) virtualization {
-	if name, ok := openBSDProductHypervisors[input.ProductName]; ok && name != "" {
-		return virtualization{Name: name, IsVirtual: true}
+	if name, ok := openBSDProductHypervisors[input.ProductName]; ok {
+		if name != "" {
+			return virtualization{Name: name, IsVirtual: true}
+		}
+		return virtualization{Name: "physical"}
+	}
+	if virtual := detectDMIHostVirtualization(dmiVirtualizationInput{
+		Manufacturer: input.Vendor,
+		ProductName:  input.ProductName,
+	}); virtual.IsVirtual {
+		return virtual
 	}
 	return virtualization{Name: "physical"}
+}
+
+func currentNetBSDVirtualizationInput(run func(string, ...string) string) dmiVirtualizationInput {
+	return dmiVirtualizationInput{
+		Manufacturer: strings.TrimSpace(run("/sbin/sysctl", "-n", "machdep.dmi.system-vendor")),
+		ProductName:  strings.TrimSpace(run("/sbin/sysctl", "-n", "machdep.dmi.system-product")),
+	}
+}
+
+func currentDragonFlyVirtualizationInput(run func(string, ...string) string) dmiVirtualizationInput {
+	system := parseColonValues(run("/usr/local/sbin/dmidecode", "-t", "system"))
+	bios := parseColonValues(run("/usr/local/sbin/dmidecode", "-t", "bios"))
+	return dmiVirtualizationInput{
+		Manufacturer: strings.TrimSpace(firstNonEmpty(run("kenv", "smbios.system.maker"), system["Manufacturer"])),
+		ProductName:  strings.TrimSpace(firstNonEmpty(run("kenv", "smbios.system.product"), system["Product Name"])),
+		BIOSVendor:   strings.TrimSpace(firstNonEmpty(run("kenv", "smbios.bios.vendor"), bios["Vendor"])),
+		PCIOutput:    run("pciconf", "-lv"),
+	}
+}
+
+func currentIllumosVirtualizationInput(run func(string, ...string) string) dmiVirtualizationInput {
+	system := parseIllumosSMBIOSValues(run("/usr/sbin/smbios", "-t", "SMB_TYPE_SYSTEM"))
+	bios := parseIllumosSMBIOSValues(run("/usr/sbin/smbios", "-t", "SMB_TYPE_BIOS"))
+	return dmiVirtualizationInput{
+		Manufacturer: system["Manufacturer"],
+		ProductName:  system["Product"],
+		BIOSVendor:   bios["Vendor"],
+		PCIOutput:    run("/usr/sbin/prtconf", "-pv"),
+	}
+}
+
+func detectDMIHostVirtualization(input dmiVirtualizationInput) virtualization {
+	manufacturerLower := strings.ToLower(input.Manufacturer)
+	productNameLower := strings.ToLower(input.ProductName)
+	if strings.Contains(manufacturerLower, "qemu") || strings.Contains(productNameLower, "qemu") {
+		return virtualization{Name: "kvm", IsVirtual: true}
+	}
+	biosVendorLower := strings.ToLower(input.BIOSVendor)
+	biosIndicatesKVM := strings.Contains(biosVendorLower, "qemu") || strings.Contains(biosVendorLower, "seabios")
+	name := dmiProductHypervisor(input.ProductName)
+	if name == "hyperv" && biosIndicatesKVM {
+		return virtualization{Name: "kvm", IsVirtual: true}
+	}
+	if name != "" {
+		return virtualization{Name: name, IsVirtual: true}
+	}
+	if biosIndicatesKVM {
+		return virtualization{Name: "kvm", IsVirtual: true}
+	}
+	if name := lspciHypervisor(input.PCIOutput); name != "" {
+		return virtualization{Name: name, IsVirtual: true}
+	}
+	switch {
+	case strings.Contains(strings.ToLower(input.PCIOutput), "virtio"):
+		return virtualization{Name: "kvm", IsVirtual: true}
+	default:
+		return virtualization{Name: "physical"}
+	}
 }
 
 func currentWindowsVirtualizationInput(goos string, run commandRunner) windowsVirtualizationInput {
@@ -197,6 +279,9 @@ func detectWindowsVirtualization(input windowsVirtualizationInput) virtualizatio
 	model := strings.TrimSpace(input.Model)
 	manufacturer := strings.TrimSpace(input.Manufacturer)
 	biosManufacturer := strings.TrimSpace(input.BIOSManufacturer)
+	modelLower := strings.ToLower(model)
+	manufacturerLower := strings.ToLower(manufacturer)
+	biosManufacturerLower := strings.ToLower(biosManufacturer)
 	switch {
 	case strings.Contains(model, "VirtualBox"):
 		return virtualization{Name: "virtualbox", IsVirtual: true}
@@ -213,6 +298,8 @@ func detectWindowsVirtualization(input windowsVirtualizationInput) virtualizatio
 	case strings.Contains(manufacturer, "Xen"):
 		return virtualization{Name: "xen", IsVirtual: true}
 	case strings.Contains(manufacturer, "Amazon EC2"):
+		return virtualization{Name: "kvm", IsVirtual: true}
+	case strings.Contains(manufacturerLower, "qemu"), strings.Contains(modelLower, "qemu"), strings.Contains(modelLower, "standard pc (i440fx"), strings.Contains(biosManufacturerLower, "seabios"):
 		return virtualization{Name: "kvm", IsVirtual: true}
 	case input.NetKVM && strings.Contains(biosManufacturer, "Google"):
 		return virtualization{Name: "gce", IsVirtual: true}
@@ -434,8 +521,9 @@ func lspciHypervisor(output string) string {
 }
 
 func dmiProductHypervisor(productName string) string {
+	productName = strings.ToLower(productName)
 	for _, hypervisor := range dmiProductHypervisors {
-		if strings.Contains(productName, hypervisor.substring) {
+		if strings.Contains(productName, strings.ToLower(hypervisor.substring)) {
 			return hypervisor.name
 		}
 	}

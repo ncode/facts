@@ -134,6 +134,13 @@ func networkingDHCPValue(goos string, interfaces map[string]any, primaryIP strin
 	return dhcp
 }
 
+func optionalNetworkingString(value string) any {
+	if value == "" {
+		return nil
+	}
+	return value
+}
+
 type networkInterfaceSnapshot struct {
 	Interface net.Interface
 	Addrs     []net.Addr
@@ -1669,16 +1676,16 @@ func networkingCoreFacts(s *Session) []ResolvedFact {
 		{Name: "networking.fqdn", Value: fqdnValue},
 		{Name: "networking.domain", Value: domainValue},
 		{Name: "networking.dhcp", Value: primaryDHCP},
-		{Name: "networking.ip", Value: ipv4},
-		{Name: "networking.ip6", Value: ipv6},
+		{Name: "networking.ip", Value: optionalNetworkingString(ipv4)},
+		{Name: "networking.ip6", Value: optionalNetworkingString(ipv6)},
 		{Name: "networking.interfaces", Value: interfaces},
-		{Name: "networking.mac", Value: primaryMAC},
+		{Name: "networking.mac", Value: optionalNetworkingString(primaryMAC)},
 		{Name: "networking.mtu", Value: primaryMTU},
-		{Name: "networking.netmask", Value: primaryNetmask},
-		{Name: "networking.netmask6", Value: primaryNetmask6},
-		{Name: "networking.network", Value: primaryNetwork},
-		{Name: "networking.network6", Value: primaryNetwork6},
-		{Name: "networking.primary", Value: primaryInterfaceName},
-		{Name: "networking.scope6", Value: primaryScope6},
+		{Name: "networking.netmask", Value: optionalNetworkingString(primaryNetmask)},
+		{Name: "networking.netmask6", Value: optionalNetworkingString(primaryNetmask6)},
+		{Name: "networking.network", Value: optionalNetworkingString(primaryNetwork)},
+		{Name: "networking.network6", Value: optionalNetworkingString(primaryNetwork6)},
+		{Name: "networking.primary", Value: optionalNetworkingString(primaryInterfaceName)},
+		{Name: "networking.scope6", Value: optionalNetworkingString(primaryScope6)},
 	}
 }

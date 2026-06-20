@@ -155,7 +155,7 @@ $ facts --json
 | `memory.system.total_bytes` | `integer` | no | The total physical memory, in bytes. |
 | `memory.system.used` | `string` | no | The display amount of physical memory in use, such as 1.00 GiB. |
 | `memory.system.used_bytes` | `integer` | no | The physical memory in use, in bytes. |
-| `mountpoints.*` | `map` | no | A mounted filesystem, keyed by mount path. |
+| `mountpoints.*` | `map` | yes | A mounted filesystem, keyed by mount path. |
 | `mountpoints.*.available` | `string` | no | The display amount of free space on the mount, such as 1.00 GiB. |
 | `mountpoints.*.available_bytes` | `integer` | no | The free space on the mount, in bytes. |
 | `mountpoints.*.capacity` | `string` | no | The percentage of the mount's space in use. |
@@ -188,15 +188,15 @@ $ facts --json
 | `networking.interfaces.*.scope6` | `string` | yes | The IPv6 scope of the interface's first binding, such as global or link. |
 | `networking.interfaces.*.speed` | `integer` | yes | The negotiated speed of the interface, in Mbit/s. |
 | `networking.ip` | `string` | no | The IPv4 address of the primary interface. |
-| `networking.ip6` | `string` | no | The IPv6 address of the primary interface. |
+| `networking.ip6` | `string` | yes | The IPv6 address of the primary interface. |
 | `networking.mac` | `string` | no | The MAC address of the primary interface. |
 | `networking.mtu` | `integer` | yes | The maximum transmission unit of the primary interface. |
 | `networking.netmask` | `string` | no | The IPv4 netmask of the primary interface. |
-| `networking.netmask6` | `string` | no | The IPv6 netmask of the primary interface. |
+| `networking.netmask6` | `string` | yes | The IPv6 netmask of the primary interface. |
 | `networking.network` | `string` | no | The IPv4 network of the primary interface. |
-| `networking.network6` | `string` | no | The IPv6 network of the primary interface. |
+| `networking.network6` | `string` | yes | The IPv6 network of the primary interface. |
 | `networking.primary` | `string` | no | The name of the primary interface. |
-| `networking.scope6` | `string` | no | The IPv6 scope of the primary interface, such as global or link. |
+| `networking.scope6` | `string` | yes | The IPv6 scope of the primary interface, such as global or link. |
 | `os.architecture` | `string` | no | The operating system's hardware architecture, such as x86_64 or arm64. |
 | `os.distro.codename` | `string` | yes | The codename of the distribution release, such as noble. |
 | `os.distro.description` | `string` | no | The full description of the distribution release. |

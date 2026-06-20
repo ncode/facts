@@ -692,6 +692,23 @@ func TestPartitionsFacts_omittedWhenNoDevicesEnumerate(t *testing.T) {
 	}
 }
 
+func TestMountpointsFacts_omittedWhenUnresolved(t *testing.T) {
+	t.Parallel()
+
+	if got := mountpointsFacts(nil); got != nil {
+		t.Fatalf("mountpointsFacts(nil) = %#v, want nil", got)
+	}
+	if got := mountpointsFacts(map[string]any{}); got != nil {
+		t.Fatalf("mountpointsFacts(empty) = %#v, want nil", got)
+	}
+
+	mountpoints := map[string]any{"/": map[string]any{"size": "8.00 GiB"}}
+	want := []ResolvedFact{{Name: "mountpoints", Value: mountpoints}}
+	if got := mountpointsFacts(mountpoints); !reflect.DeepEqual(got, want) {
+		t.Fatalf("mountpointsFacts() = %#v, want %#v", got, want)
+	}
+}
+
 func TestParseZFSPoolFacts_matchesRubyFacterFixtures(t *testing.T) {
 	zfsOutput, err := os.ReadFile(filepath.Join("testdata", "zfs"))
 	if err != nil {
@@ -1007,6 +1024,17 @@ func TestMountpointsFactIncludesDeviceFilesystemAndOptions(t *testing.T) {
 
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("mountpointsFact() = %#v, want %#v", got, want)
+	}
+}
+
+func TestMountpointsFactOmitsEmptyEntries(t *testing.T) {
+	t.Parallel()
+
+	got := mountpointsFact([]mountEntry{{Path: "/"}}, func(string) (mountStat, bool) {
+		return mountStat{}, false
+	})
+	if got != nil {
+		t.Fatalf("mountpointsFact(empty entry) = %#v, want nil", got)
 	}
 }
 

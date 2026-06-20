@@ -93,7 +93,7 @@ $ facts --json
 | `memory.system.total_bytes` | `integer` | no | The total physical memory, in bytes. |
 | `memory.system.used` | `string` | no | The display amount of physical memory in use, such as 1.00 GiB. |
 | `memory.system.used_bytes` | `integer` | no | The physical memory in use, in bytes. |
-| `mountpoints.*` | `map` | no | A mounted filesystem, keyed by mount path. |
+| `mountpoints.*` | `map` | yes | A mounted filesystem, keyed by mount path. |
 | `networking.dhcp` | `string` | no | The DHCP server of the primary interface, when known. |
 | `networking.domain` | `string` | yes | The DNS domain of the host, when one is configured. |
 | `networking.fqdn` | `string` | no | The fully qualified domain name of the host. |
@@ -113,15 +113,15 @@ $ facts --json
 | `networking.interfaces.*.network6` | `string` | yes | The IPv6 network of the interface's first binding. |
 | `networking.interfaces.*.scope6` | `string` | yes | The IPv6 scope of the interface's first binding, such as global or link. |
 | `networking.ip` | `string` | no | The IPv4 address of the primary interface. |
-| `networking.ip6` | `string` | no | The IPv6 address of the primary interface. |
+| `networking.ip6` | `string` | yes | The IPv6 address of the primary interface. |
 | `networking.mac` | `string` | no | The MAC address of the primary interface. |
 | `networking.mtu` | `integer` | yes | The maximum transmission unit of the primary interface. |
 | `networking.netmask` | `string` | no | The IPv4 netmask of the primary interface. |
-| `networking.netmask6` | `string` | no | The IPv6 netmask of the primary interface. |
+| `networking.netmask6` | `string` | yes | The IPv6 netmask of the primary interface. |
 | `networking.network` | `string` | no | The IPv4 network of the primary interface. |
-| `networking.network6` | `string` | no | The IPv6 network of the primary interface. |
+| `networking.network6` | `string` | yes | The IPv6 network of the primary interface. |
 | `networking.primary` | `string` | no | The name of the primary interface. |
-| `networking.scope6` | `string` | no | The IPv6 scope of the primary interface, such as global or link. |
+| `networking.scope6` | `string` | yes | The IPv6 scope of the primary interface, such as global or link. |
 | `os.architecture` | `string` | no | The operating system's hardware architecture, such as x86_64 or arm64. |
 | `os.family` | `string` | no | The operating system family, such as Debian, RedHat, Darwin, or windows. |
 | `os.hardware` | `string` | no | The hardware model of the machine, such as x86_64. |
