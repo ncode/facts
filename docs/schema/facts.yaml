@@ -121,12 +121,12 @@ dmi.board.serial_number:
 dmi.chassis.asset_tag:
   type: string
   description: The asset tag of the chassis.
-  platforms: [linux, illumos]
+  platforms: [linux, dragonfly, illumos]
   conditional: true
 dmi.chassis.type:
   type: string
   description: The chassis type of the system, such as Desktop or Rack Mount Chassis.
-  platforms: [linux, illumos]
+  platforms: [linux, dragonfly, illumos]
   conditional: true
 dmi.manufacturer:
   type: string

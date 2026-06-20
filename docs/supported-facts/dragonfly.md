@@ -67,7 +67,7 @@ $ facts --json
 
 ## Fact Contract
 
-113 schema entries include `dragonfly`.
+115 schema entries include `dragonfly`.
 
 | Fact | Type | Conditional | Description |
 | --- | --- | --- | --- |
@@ -78,6 +78,8 @@ $ facts --json
 | `dmi.bios.release_date` | `string` | yes | The release date of the system BIOS. |
 | `dmi.bios.vendor` | `string` | yes | The vendor of the system BIOS. |
 | `dmi.bios.version` | `string` | yes | The version of the system BIOS. |
+| `dmi.chassis.asset_tag` | `string` | yes | The asset tag of the chassis. |
+| `dmi.chassis.type` | `string` | yes | The chassis type of the system, such as Desktop or Rack Mount Chassis. |
 | `dmi.manufacturer` | `string` | yes | The manufacturer of the system. |
 | `dmi.product.name` | `string` | yes | The product name of the system (the hardware model on macOS). |
 | `dmi.product.serial_number` | `string` | yes | The serial number of the system. |
