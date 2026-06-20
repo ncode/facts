@@ -93,10 +93,11 @@ the pipeline (`.github/workflows/unit_tests.yaml`):
   packages and `tools/openbsd-release-gate.sh` /
   `tools/netbsd-release-gate.sh`. Local QEMU guests under `.local/bsd-vms`
   can run the same checks through `make local-bsd-smoke`.
-- **DragonFly BSD** and **illumos**: native gates use
-  `tools/dragonfly-release-gate.sh` and `tools/illumos-release-gate.sh`
-  through local, untracked SSH wrappers. These validate `dragonfly/amd64` and
-  `illumos/amd64`; Oracle Solaris is not covered by the illumos gate.
+- **DragonFly BSD** and **illumos**: hosted VM jobs run the platform-sensitive
+  packages and `tools/dragonfly-release-gate.sh` /
+  `tools/illumos-release-gate.sh`. Local, untracked SSH wrappers can run the
+  same checks for `dragonfly/amd64` and `illumos/amd64`; Oracle Solaris is not
+  covered by the illumos gate.
 
 Local equivalents: `make lima-freebsd-smoke`, `make lima-linux-flavor-smoke`,
 `make local-bsd-smoke`, `make local-amd64-bsd-smoke`,
