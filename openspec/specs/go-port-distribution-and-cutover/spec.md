@@ -8,7 +8,7 @@ The Go port SHALL produce versioned, installable release artifacts for all suppo
 
 #### Scenario: dist target builds the artifact matrix
 - **WHEN** `make dist` runs after DragonFly and illumos promotion
-- **THEN** it MUST produce checksummed archives named `facts-<version>-<os>-<arch>` for linux/amd64, linux/arm64, darwin/amd64, darwin/arm64, windows/amd64, windows/arm64, freebsd/amd64, openbsd/amd64, netbsd/amd64, dragonfly/amd64, and illumos/amd64, with the version embedded in the binary and reported by `facts --version`
+- **THEN** it MUST produce checksummed archives named `facts-<version>-<os>-<arch>` for linux/amd64, linux/arm64, darwin/amd64, darwin/arm64, windows/amd64, windows/arm64, freebsd/amd64, freebsd/arm, freebsd/arm64, openbsd/amd64, openbsd/arm, openbsd/arm64, netbsd/amd64, netbsd/arm, netbsd/arm64, dragonfly/amd64, and illumos/amd64, with the version embedded in the binary and reported by `facts --version`
 
 #### Scenario: install target
 - **WHEN** `make install` runs with an optional `PREFIX`
