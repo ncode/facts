@@ -204,6 +204,12 @@ jobs:
             export PATH=/usr/local/go/bin:$PATH
             export GOFLAGS=-buildvcs=false
             go version
+            echo "=== DMI PROBE BEGIN ==="
+            ( command -v kenv; ls -la /bin/kenv /sbin/kenv /usr/bin/kenv /usr/sbin/kenv 2>&1 ) || true
+            ( kenv 2>/dev/null | grep -iE "smbios|maker|product|serial|uuid|vendor|chassis|board" ) || echo "kenv: no smbios-ish keys"
+            ( sysctl hw machdep 2>/dev/null | grep -iE "smbios|product|vendor|serial|uuid|dmi|maker" ) || echo "sysctl: none"
+            ( /usr/sbin/dmidecode -t system 2>&1 | head -20 ) || echo "no dmidecode"
+            echo "=== DMI PROBE END ==="
             go test . ./internal/engine ./internal/app ./tests/acceptance
             go build -o /tmp/facts ./cmd/facts
             sh tools/dragonfly-release-gate.sh /tmp/facts
