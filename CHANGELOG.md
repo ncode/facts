@@ -6,8 +6,8 @@
 
 - DragonFly BSD and illumos are now supported `amd64` targets with core
   OS/kernel, networking, memory/swap, processor, uptime/load, mountpoint,
-  schema, dist, cross-compile, and native release-gate coverage. illumos is
-  validated as illumos/OmniOS only; Oracle Solaris remains out of scope.
+  schema, dist, cross-compile, and GitHub VM release-gate coverage. illumos
+  is validated as illumos/OmniOS only; Oracle Solaris remains out of scope.
 - OpenBSD and NetBSD are being promoted to supported targets with core fact
   resolvers, schema metadata, local smoke targets, release-gate scripts, and
   GitHub VM/cross-compile coverage.
@@ -17,6 +17,9 @@
   BSD interface operational state, FreeBSD interface DHCP/speed/duplex,
   FreeBSD GEOM partition type and disk rotation metadata, and OpenBSD/NetBSD
   `dmi.product.version` when the native DMI source exposes it.
+- FreeBSD mounted partitions now report `partitions.*.filesystem` from the
+  mounted filesystem, and illumos now emits partition size/filesystem facts
+  from VTOC slices when the native tools expose them.
 - Added generated per-platform supported fact pages under
   `docs/supported-facts/`, derived from `docs/schema/facts.yaml` and checked
   by `go test ./...`.

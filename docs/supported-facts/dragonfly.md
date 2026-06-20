@@ -67,7 +67,7 @@ $ facts --json
 
 ## Fact Contract
 
-105 schema entries include `dragonfly`.
+107 schema entries include `dragonfly`.
 
 | Fact | Type | Conditional | Description |
 | --- | --- | --- | --- |
@@ -118,13 +118,14 @@ $ facts --json
 | `mountpoints.*.size_bytes` | `integer` | no | The size of the mount, in bytes. |
 | `mountpoints.*.used` | `string` | no | The display amount of space in use on the mount, such as 1.00 GiB. |
 | `mountpoints.*.used_bytes` | `integer` | no | The space in use on the mount, in bytes. |
+| `networking.dhcp` | `string` | no | The DHCP server of the primary interface, when known. |
 | `networking.domain` | `string` | yes | The DNS domain of the host, when one is configured. |
 | `networking.fqdn` | `string` | no | The fully qualified domain name of the host. |
 | `networking.hostname` | `string` | no | The short host name of the machine. |
-| `networking.interfaces` | `map` | yes | The network interface map, which may be empty when the host exposes no usable interfaces. |
 | `networking.interfaces.*` | `map` | yes | A network interface, keyed by interface name. |
 | `networking.interfaces.*.bindings` | `array` | yes | The IPv4 bindings of the interface (address, netmask, network). |
 | `networking.interfaces.*.bindings6` | `array` | yes | The IPv6 bindings of the interface (address, netmask, network, scope6, flags). |
+| `networking.interfaces.*.dhcp` | `string` | yes | The DHCP server of the interface, when known (null on Windows interfaces without one). |
 | `networking.interfaces.*.ip` | `string` | yes | The first IPv4 address bound to the interface. |
 | `networking.interfaces.*.ip6` | `string` | yes | The first IPv6 address bound to the interface. |
 | `networking.interfaces.*.mac` | `string` | yes | The MAC address of the interface. |
@@ -133,6 +134,7 @@ $ facts --json
 | `networking.interfaces.*.netmask6` | `string` | yes | The IPv6 netmask of the interface's first binding. |
 | `networking.interfaces.*.network` | `string` | yes | The IPv4 network of the interface's first binding. |
 | `networking.interfaces.*.network6` | `string` | yes | The IPv6 network of the interface's first binding. |
+| `networking.interfaces.*.operational_state` | `string` | yes | The operational state of the interface, such as up or down. |
 | `networking.interfaces.*.scope6` | `string` | yes | The IPv6 scope of the interface's first binding, such as global or link. |
 | `networking.ip` | `string` | no | The IPv4 address of the primary interface. |
 | `networking.ip6` | `string` | no | The IPv6 address of the primary interface. |

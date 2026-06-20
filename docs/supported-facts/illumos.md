@@ -89,7 +89,7 @@ $ facts --json
 
 ## Fact Contract
 
-99 schema entries include `illumos`.
+106 schema entries include `illumos`.
 
 | Fact | Type | Conditional | Description |
 | --- | --- | --- | --- |
@@ -131,17 +131,20 @@ $ facts --json
 | `mountpoints.*.available_bytes` | `integer` | no | The free space on the mount, in bytes. |
 | `mountpoints.*.capacity` | `string` | no | The percentage of the mount's space in use. |
 | `mountpoints.*.device` | `string` | no | The device backing the mount. |
+| `mountpoints.*.filesystem` | `string` | no | The filesystem type of the mount. |
 | `mountpoints.*.options` | `array` | no | The mount options the filesystem is mounted with. |
 | `mountpoints.*.size` | `string` | no | The display size of the mount, such as 100.00 GiB. |
 | `mountpoints.*.size_bytes` | `integer` | no | The size of the mount, in bytes. |
 | `mountpoints.*.used` | `string` | no | The display amount of space in use on the mount, such as 1.00 GiB. |
 | `mountpoints.*.used_bytes` | `integer` | no | The space in use on the mount, in bytes. |
+| `networking.dhcp` | `string` | no | The DHCP server of the primary interface, when known. |
 | `networking.domain` | `string` | yes | The DNS domain of the host, when one is configured. |
 | `networking.fqdn` | `string` | no | The fully qualified domain name of the host. |
 | `networking.hostname` | `string` | no | The short host name of the machine. |
 | `networking.interfaces.*` | `map` | yes | A network interface, keyed by interface name. |
 | `networking.interfaces.*.bindings` | `array` | yes | The IPv4 bindings of the interface (address, netmask, network). |
 | `networking.interfaces.*.bindings6` | `array` | yes | The IPv6 bindings of the interface (address, netmask, network, scope6, flags). |
+| `networking.interfaces.*.dhcp` | `string` | yes | The DHCP server of the interface, when known (null on Windows interfaces without one). |
 | `networking.interfaces.*.ip` | `string` | yes | The first IPv4 address bound to the interface. |
 | `networking.interfaces.*.ip6` | `string` | yes | The first IPv6 address bound to the interface. |
 | `networking.interfaces.*.mac` | `string` | yes | The MAC address of the interface. |
@@ -167,6 +170,10 @@ $ facts --json
 | `os.name` | `string` | no | The operating system name, such as Ubuntu, Darwin, or windows. |
 | `os.release.full` | `string` | no | The full release number of the operating system. |
 | `os.release.major` | `string` | no | The major release number of the operating system. |
+| `partitions.*` | `map` | yes | A disk partition (or device-mapper/loop device), keyed by device path. |
+| `partitions.*.filesystem` | `string` | yes | The filesystem type of the partition. |
+| `partitions.*.size` | `string` | yes | The display size of the partition, such as 1.00 GiB. |
+| `partitions.*.size_bytes` | `integer` | yes | The size of the partition, in bytes. |
 | `path` | `array` | no | The PATH environment entries of the Facts process, in lookup order. |
 | `processors.cores` | `integer` | no | The number of cores per processor socket. |
 | `processors.count` | `integer` | no | The number of logical processors. |

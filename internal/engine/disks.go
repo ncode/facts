@@ -186,6 +186,8 @@ func currentPartitions(s *Session) map[string]any {
 		return currentOpenBSDPartitions(s.commandOutput)
 	case "netbsd":
 		return currentNetBSDPartitions(s.commandOutput)
+	case "illumos":
+		return currentIllumosPartitions(s.commandOutput, filepath.Glob)
 	case "linux":
 		return currentLinuxPartitions("/sys/class/block", s.commandOutput, s.host)
 	default:
@@ -728,6 +730,96 @@ func parseDragonFlyDisklabelPartitions(device, input string) map[string]any {
 	return partitions
 }
 
+type pathGlobber func(string) ([]string, error)
+
+func currentIllumosPartitions(run commandRunner, glob pathGlobber) map[string]any {
+	if run == nil || glob == nil {
+		return nil
+	}
+	wholeSlices, err := glob("/dev/rdsk/*s2")
+	if err != nil {
+		return nil
+	}
+
+	partitions := map[string]any{}
+	for _, wholeSlice := range wholeSlices {
+		disk, ok := illumosWholeSliceDisk(wholeSlice)
+		if !ok {
+			continue
+		}
+		for name, partition := range parseIllumosVTOCPartitions(disk, run("prtvtoc", wholeSlice)) {
+			if fs := illumosPartitionFilesystem(run("fstyp", illumosRawPartitionDevice(name))); fs != "" {
+				partition["filesystem"] = fs
+			}
+			partitions[name] = partition
+		}
+	}
+	if len(partitions) == 0 {
+		return nil
+	}
+	return partitions
+}
+
+func illumosWholeSliceDisk(path string) (string, bool) {
+	name := strings.TrimPrefix(path, "/dev/rdsk/")
+	disk, ok := strings.CutSuffix(name, "s2")
+	return disk, ok && disk != ""
+}
+
+func parseIllumosVTOCPartitions(disk, input string) map[string]map[string]any {
+	sectorSize := parseIllumosVTOCSectorSize(input)
+	if sectorSize <= 0 {
+		return nil
+	}
+	partitions := map[string]map[string]any{}
+	for line := range strings.Lines(input) {
+		fields := strings.Fields(line)
+		if len(fields) < 6 || !isDecimalString(fields[0]) || fields[0] == "2" {
+			continue
+		}
+		count, err := strconv.Atoi(fields[4])
+		if err != nil || count <= 0 {
+			continue
+		}
+		sizeBytes := count * sectorSize
+		partitions["/dev/dsk/"+disk+"s"+fields[0]] = map[string]any{
+			"size":       bytesToHumanReadable(sizeBytes),
+			"size_bytes": sizeBytes,
+		}
+	}
+	if len(partitions) == 0 {
+		return nil
+	}
+	return partitions
+}
+
+func parseIllumosVTOCSectorSize(input string) int {
+	for line := range strings.Lines(input) {
+		fields := strings.Fields(line)
+		for i := 1; i < len(fields); i++ {
+			if fields[i] == "bytes/sector" {
+				size, err := strconv.Atoi(fields[i-1])
+				if err == nil {
+					return size
+				}
+			}
+		}
+	}
+	return 0
+}
+
+func illumosRawPartitionDevice(blockDevice string) string {
+	return strings.Replace(blockDevice, "/dev/dsk/", "/dev/rdsk/", 1)
+}
+
+func illumosPartitionFilesystem(output string) string {
+	fields := strings.Fields(output)
+	if len(fields) == 0 || fields[0] == "unknown_fstyp" || strings.Contains(fields[0], ":") {
+		return ""
+	}
+	return fields[0]
+}
+
 func parseBSDDisklabelPartitions(device, input string) map[string]any {
 	sectorSize := parseBSDDisklabelSectorSize(input)
 	if sectorSize <= 0 {
@@ -856,11 +948,47 @@ func partitionsFactWithMountEntries(partitions map[string]any, mountEntries []mo
 
 func addPartitionMount(partitions map[string]any, path string, mountpoint map[string]any) {
 	device, _ := mountpoint["device"].(string)
-	partition, ok := partitions[device].(map[string]any)
-	if !ok || partition["mount"] != nil {
+	partition := partitionForMountDevice(partitions, device)
+	if partition == nil {
 		return
 	}
-	partition["mount"] = path
+	if partition["mount"] == nil {
+		partition["mount"] = path
+	}
+	if partition["filesystem"] == nil {
+		if filesystem, ok := mountpoint["filesystem"].(string); ok && filesystem != "" {
+			partition["filesystem"] = filesystem
+		}
+	}
+}
+
+func partitionForMountDevice(partitions map[string]any, device string) map[string]any {
+	if partition, ok := partitions[device].(map[string]any); ok {
+		return partition
+	}
+	if partition, ok := partitions[strings.TrimPrefix(device, "/dev/")].(map[string]any); ok {
+		return partition
+	}
+	if label, ok := strings.CutPrefix(device, "/dev/gpt/"); ok {
+		return partitionByStringField(partitions, "partlabel", label)
+	}
+	if uuid, ok := strings.CutPrefix(device, "/dev/gptid/"); ok {
+		return partitionByStringField(partitions, "partuuid", uuid)
+	}
+	return nil
+}
+
+func partitionByStringField(partitions map[string]any, field, value string) map[string]any {
+	for _, name := range sortedKeys(partitions) {
+		partition, ok := partitions[name].(map[string]any)
+		if !ok {
+			continue
+		}
+		if got, ok := partition[field].(string); ok && got == value {
+			return partition
+		}
+	}
+	return nil
 }
 
 type mountEntry struct {
@@ -927,7 +1055,7 @@ func currentDragonFlyMountpoints(s *Session) map[string]any {
 }
 
 func currentIllumosMountpoints(s *Session) map[string]any {
-	mountOutput := s.commandOutput("mount")
+	mountOutput := s.commandOutput("mount", "-v")
 	if mountOutput == "" {
 		return mountpointsFact([]mountEntry{{Path: "/"}}, statMountpoint)
 	}
@@ -1209,14 +1337,30 @@ func illumosMountpointsFact(mountOutput, dfOutput string) map[string]any {
 func parseIllumosMountEntries(input string) []mountEntry {
 	entries := make([]mountEntry, 0, strings.Count(input, "\n"))
 	for line := range strings.SplitSeq(input, "\n") {
-		path, rest, ok := strings.Cut(line, " on ")
+		first, rest, ok := strings.Cut(line, " on ")
 		if !ok {
 			continue
 		}
+		if path, afterType, ok := strings.Cut(rest, " type "); ok {
+			filesystem, optionsText, ok := strings.Cut(strings.TrimSpace(afterType), " ")
+			if !ok || filesystem == "" {
+				continue
+			}
+			optionsText, _, _ = strings.Cut(optionsText, " on ")
+			entries = append(entries, mountEntry{
+				Device:     first,
+				Path:       path,
+				Filesystem: filesystem,
+				Options:    strings.Split(strings.TrimSpace(optionsText), "/"),
+			})
+			continue
+		}
+
 		fields := strings.Fields(rest)
 		if len(fields) < 2 {
 			continue
 		}
+		path := first
 		entries = append(entries, mountEntry{
 			Device:  fields[0],
 			Path:    path,

@@ -454,7 +454,7 @@ mountpoints.*.device:
 mountpoints.*.filesystem:
   type: string
   description: The filesystem type of the mount.
-  platforms: [linux, darwin, freebsd, openbsd, netbsd, dragonfly]
+  platforms: [linux, darwin, freebsd, openbsd, netbsd, dragonfly, illumos]
 mountpoints.*.options:
   type: array
   description: The mount options the filesystem is mounted with.
@@ -479,7 +479,7 @@ mountpoints.*.used_bytes:
 networking.dhcp:
   type: string
   description: The DHCP server of the primary interface, when known.
-  platforms: [linux, darwin, windows, freebsd, openbsd]
+  platforms: [linux, darwin, windows, freebsd, openbsd, dragonfly, illumos]
 networking.domain:
   type: string
   description: The DNS domain of the host, when one is configured.
@@ -493,11 +493,6 @@ networking.hostname:
   type: string
   description: The short host name of the machine.
   platforms: [linux, darwin, windows, freebsd, openbsd, netbsd, dragonfly, illumos]
-networking.interfaces:
-  type: map
-  description: The network interface map, which may be empty when the host exposes no usable interfaces.
-  platforms: [dragonfly]
-  conditional: true
 networking.interfaces.*:
   type: map
   description: A network interface, keyed by interface name.
@@ -516,7 +511,7 @@ networking.interfaces.*.bindings6:
 networking.interfaces.*.dhcp:
   type: string
   description: The DHCP server of the interface, when known (null on Windows interfaces without one).
-  platforms: [linux, darwin, windows, freebsd, openbsd]
+  platforms: [linux, darwin, windows, freebsd, openbsd, dragonfly, illumos]
   conditional: true
 networking.interfaces.*.dns_suffix:
   type: string
@@ -571,7 +566,7 @@ networking.interfaces.*.network6:
 networking.interfaces.*.operational_state:
   type: string
   description: The operational state of the interface, such as up or down.
-  platforms: [linux, freebsd, openbsd, netbsd]
+  platforms: [linux, freebsd, openbsd, netbsd, dragonfly]
   conditional: true
 networking.interfaces.*.physical:
   type: boolean
@@ -786,7 +781,7 @@ os.windows.system32:
 partitions.*:
   type: map
   description: A disk partition (or device-mapper/loop device), keyed by device path.
-  platforms: [linux, freebsd, openbsd, netbsd, dragonfly]
+  platforms: [linux, freebsd, openbsd, netbsd, dragonfly, illumos]
   conditional: true
 partitions.*.backing_file:
   type: string
@@ -796,7 +791,7 @@ partitions.*.backing_file:
 partitions.*.filesystem:
   type: string
   description: The filesystem type of the partition.
-  platforms: [linux, openbsd, netbsd, dragonfly]
+  platforms: [linux, freebsd, openbsd, netbsd, dragonfly, illumos]
   conditional: true
 partitions.*.label:
   type: string
@@ -826,12 +821,12 @@ partitions.*.partuuid:
 partitions.*.size:
   type: string
   description: The display size of the partition, such as 1.00 GiB.
-  platforms: [linux, freebsd, openbsd, netbsd, dragonfly]
+  platforms: [linux, freebsd, openbsd, netbsd, dragonfly, illumos]
   conditional: true
 partitions.*.size_bytes:
   type: integer
   description: The size of the partition, in bytes.
-  platforms: [linux, freebsd, openbsd, netbsd, dragonfly]
+  platforms: [linux, freebsd, openbsd, netbsd, dragonfly, illumos]
   conditional: true
 partitions.*.uuid:
   type: string

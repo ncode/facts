@@ -64,7 +64,7 @@ $ facts --json
 
 ## Fact Contract
 
-129 schema entries include `freebsd`.
+130 schema entries include `freebsd`.
 
 | Fact | Type | Conditional | Description |
 | --- | --- | --- | --- |
@@ -166,6 +166,7 @@ $ facts --json
 | `os.release.minor` | `string` | yes | The minor release number of the operating system, when it has one. |
 | `os.release.patchlevel` | `string` | yes | The FreeBSD patch level of the installed userland. |
 | `partitions.*` | `map` | yes | A disk partition (or device-mapper/loop device), keyed by device path. |
+| `partitions.*.filesystem` | `string` | yes | The filesystem type of the partition. |
 | `partitions.*.mount` | `string` | yes | The path the partition is mounted on. |
 | `partitions.*.partlabel` | `string` | yes | The partition label from the partition table. |
 | `partitions.*.parttype` | `string` | yes | The partition type GUID or identifier. |

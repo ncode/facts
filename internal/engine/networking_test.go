@@ -994,6 +994,193 @@ func TestCurrentNetworkingDataKeepsNetBSDDHCPAbsent(t *testing.T) {
 	}
 }
 
+const dragonFlyIfconfigFixture = `vtnet0: flags=8843<UP,BROADCAST,RUNNING,SIMPLEX,MULTICAST> metric 0 mtu 1500
+	options=2a<TXCSUM,VLAN_MTU,JUMBO_MTU>
+	ether 52:54:00:12:34:56
+	inet6 fe80::5054:ff:fe12:3456%vtnet0 prefixlen 64 scopeid 0x1
+	inet 10.0.2.15 netmask 0xffffff00 broadcast 10.0.2.255
+	media: Ethernet 1000baseT <full-duplex>
+	status: active
+lo0: flags=8049<UP,LOOPBACK,RUNNING,MULTICAST> metric 0 mtu 16384
+	options=43<RXCSUM,TXCSUM,RSS>
+	inet 127.0.0.1 netmask 0xff000000
+	inet6 ::1 prefixlen 128
+	inet6 fe80::1%lo0 prefixlen 64 scopeid 0x2
+	groups: lo
+`
+
+func TestNetworkingInterfacesForPlatformDragonFlyFallsBackToIfconfigWhenGoHasNoInterfaces(t *testing.T) {
+	t.Parallel()
+
+	session := NewSession()
+	session.host = &fakeHostOS{runOutput: dragonFlyIfconfigFixture}
+	got := networkingInterfacesForPlatform(session, "dragonfly", func() ([]networkInterfaceSnapshot, error) {
+		return nil, nil
+	})
+
+	vtnet0, ok := got["vtnet0"].(map[string]any)
+	if !ok {
+		t.Fatalf("vtnet0 = %#v, want interface map", got["vtnet0"])
+	}
+	if got, want := vtnet0["mtu"], 1500; got != want {
+		t.Fatalf("vtnet0 mtu = %#v, want %#v", got, want)
+	}
+	if got, want := vtnet0["mac"], "52:54:00:12:34:56"; got != want {
+		t.Fatalf("vtnet0 mac = %#v, want %#v", got, want)
+	}
+	bindings, ok := vtnet0["bindings"].([]any)
+	if !ok || len(bindings) != 1 {
+		t.Fatalf("vtnet0 bindings = %#v, want one IPv4 binding", vtnet0["bindings"])
+	}
+	if got, want := bindings[0].(map[string]any)["network"], "10.0.2.0"; got != want {
+		t.Fatalf("vtnet0 IPv4 network = %#v, want %#v", got, want)
+	}
+	bindings6, ok := vtnet0["bindings6"].([]any)
+	if !ok || len(bindings6) != 1 {
+		t.Fatalf("vtnet0 bindings6 = %#v, want one IPv6 binding", vtnet0["bindings6"])
+	}
+	if got, want := bindings6[0].(map[string]any)["scope6"], "link"; got != want {
+		t.Fatalf("vtnet0 IPv6 scope6 = %#v, want %#v", got, want)
+	}
+}
+
+func TestNetworkingInterfacesForPlatformDragonFlyMergesIfconfigIntoPartialSnapshot(t *testing.T) {
+	t.Parallel()
+
+	session := NewSession()
+	session.host = &fakeHostOS{runOutput: dragonFlyIfconfigFixture}
+	got := networkingInterfacesForPlatform(session, "dragonfly", func() ([]networkInterfaceSnapshot, error) {
+		return []networkInterfaceSnapshot{{Interface: net.Interface{Name: "vtnet0"}}}, nil
+	})
+
+	vtnet0, ok := got["vtnet0"].(map[string]any)
+	if !ok {
+		t.Fatalf("vtnet0 = %#v, want interface map", got["vtnet0"])
+	}
+	if got, want := vtnet0["mtu"], 1500; got != want {
+		t.Fatalf("vtnet0 mtu = %#v, want %#v", got, want)
+	}
+	if got, want := vtnet0["mac"], "52:54:00:12:34:56"; got != want {
+		t.Fatalf("vtnet0 mac = %#v, want %#v", got, want)
+	}
+	if bindings, ok := vtnet0["bindings"].([]any); !ok || len(bindings) != 1 {
+		t.Fatalf("vtnet0 bindings = %#v, want one IPv4 binding", vtnet0["bindings"])
+	}
+}
+
+func TestMergeMissingInterfaceFactsMergesBindingsByAddress(t *testing.T) {
+	t.Parallel()
+
+	values := map[string]any{
+		"vtnet0": map[string]any{
+			"bindings": []any{map[string]any{"address": "10.0.2.15"}},
+		},
+	}
+	fallback := map[string]any{
+		"vtnet0": map[string]any{
+			"bindings": []any{
+				map[string]any{"address": "10.0.2.15", "netmask": "255.255.255.0", "network": "10.0.2.0"},
+				map[string]any{"address": "10.0.2.16", "netmask": "255.255.255.0", "network": "10.0.2.0"},
+			},
+		},
+	}
+
+	mergeMissingInterfaceFacts(values, fallback)
+
+	bindings := values["vtnet0"].(map[string]any)["bindings"].([]any)
+	if len(bindings) != 2 {
+		t.Fatalf("bindings = %#v, want existing binding filled and fallback alias appended", bindings)
+	}
+	first := bindings[0].(map[string]any)
+	if first["netmask"] != "255.255.255.0" || first["network"] != "10.0.2.0" {
+		t.Fatalf("first binding = %#v, want netmask/network filled", first)
+	}
+}
+
+func TestCurrentNetworkingDataDragonFlyExpandsIfconfigFallback(t *testing.T) {
+	t.Parallel()
+
+	interfaces := dragonFlyInterfacesFromIfconfig(dragonFlyIfconfigFixture)
+	run := func(name string, args ...string) string {
+		if name == "route" && reflect.DeepEqual(args, []string{"-n", "get", "default"}) {
+			return "route to: default\ninterface: vtnet0\n"
+		}
+		if name == "ifconfig" {
+			return dragonFlyIfconfigFixture
+		}
+		t.Fatalf("unexpected command %q %#v", name, args)
+		return ""
+	}
+	readFile := func(path string) ([]byte, error) {
+		if path != "/var/db/dhclient.leases.vtnet0" {
+			return nil, os.ErrNotExist
+		}
+		return []byte("lease {\n  option dhcp-server-identifier 10.0.2.2;\n}\n"), nil
+	}
+
+	primary, got := currentNetworkingData("dragonfly", interfaces, run, readFile)
+	if primary != "vtnet0" {
+		t.Fatalf("primary = %q, want vtnet0", primary)
+	}
+	vtnet0 := got["vtnet0"].(map[string]any)
+	for key, want := range map[string]any{
+		"dhcp":              "10.0.2.2",
+		"ip":                "10.0.2.15",
+		"netmask":           "255.255.255.0",
+		"network":           "10.0.2.0",
+		"ip6":               "fe80::5054:ff:fe12:3456",
+		"netmask6":          "ffff:ffff:ffff:ffff::",
+		"network6":          "fe80::",
+		"scope6":            "link",
+		"operational_state": "active",
+	} {
+		if got := vtnet0[key]; got != want {
+			t.Fatalf("vtnet0[%s] = %#v, want %#v", key, got, want)
+		}
+	}
+}
+
+func TestCurrentNetworkingDataAddsIllumosDHCPServer(t *testing.T) {
+	t.Parallel()
+
+	interfaces := map[string]any{
+		"vioif0": map[string]any{
+			"bindings": []any{map[string]any{"address": "192.168.122.240", "netmask": "255.255.255.0", "network": "192.168.122.0"}},
+		},
+		"lo0": map[string]any{
+			"bindings": []any{map[string]any{"address": "127.0.0.1", "netmask": "255.0.0.0", "network": "127.0.0.0"}},
+		},
+	}
+	run := func(name string, args ...string) string {
+		if name == "route" && reflect.DeepEqual(args, []string{"-n", "get", "default"}) {
+			return "route to: default\ninterface: vioif0\n"
+		}
+		if name == "dhcpinfo" && reflect.DeepEqual(args, []string{"-i", "vioif0", "ServerID"}) {
+			return "192.168.122.1\n"
+		}
+		if name == "dhcpinfo" {
+			return ""
+		}
+		t.Fatalf("unexpected command %q %#v", name, args)
+		return ""
+	}
+
+	primary, got := currentNetworkingData("illumos", interfaces, run)
+	if primary != "vioif0" {
+		t.Fatalf("primary = %q, want vioif0", primary)
+	}
+	vioif0 := got["vioif0"].(map[string]any)
+	if got, want := vioif0["dhcp"], "192.168.122.1"; got != want {
+		t.Fatalf("vioif0 dhcp = %#v, want %#v", got, want)
+	}
+	if got, want := vioif0["ip"], "192.168.122.240"; got != want {
+		t.Fatalf("vioif0 ip = %#v, want %#v", got, want)
+	}
+	if dhcp := networkingDHCPFact(got, "192.168.122.240"); dhcp != "192.168.122.1" {
+		t.Fatalf("networkingDHCPFact() = %q, want 192.168.122.1", dhcp)
+	}
+}
+
 func TestCurrentNetworkingDataAddsDarwinDHCPServer(t *testing.T) {
 	t.Parallel()
 

@@ -69,6 +69,27 @@ func TestPartitionsFactWithMountEntriesUsesResolverOrderForDuplicateDeviceLikeRu
 	}
 }
 
+func TestPartitionsFactMatchesFreeBSDGPTMountsByPartlabel(t *testing.T) {
+	partitions := map[string]any{
+		"vtbd0p2": map[string]any{"partlabel": "efiesp"},
+		"vtbd0p5": map[string]any{"partlabel": "rootfs"},
+	}
+	mountpoints := map[string]any{
+		"/":         map[string]any{"device": "/dev/gpt/rootfs", "filesystem": "ufs"},
+		"/boot/efi": map[string]any{"device": "/dev/gpt/efiesp", "filesystem": "msdosfs"},
+	}
+
+	got := partitionsFact(partitions, mountpoints)
+	root := got["vtbd0p5"].(map[string]any)
+	if root["mount"] != "/" || root["filesystem"] != "ufs" {
+		t.Fatalf("root partition = %#v, want mount and filesystem from mountpoint", root)
+	}
+	efi := got["vtbd0p2"].(map[string]any)
+	if efi["mount"] != "/boot/efi" || efi["filesystem"] != "msdosfs" {
+		t.Fatalf("efi partition = %#v, want mount and filesystem from mountpoint", efi)
+	}
+}
+
 func TestPartitionsFactReturnsPartitionsWithoutMountpoints(t *testing.T) {
 	partitions := map[string]any{
 		"/dev/sda1": map[string]any{"filesystem": "ext3"},
@@ -592,6 +613,48 @@ func TestCurrentDragonFlyPartitionsTriesOtherSlices(t *testing.T) {
 	})
 	if _, ok := got["/dev/da0s2d"]; !ok {
 		t.Fatalf("currentDragonFlyPartitions() = %#v, want /dev/da0s2d", got)
+	}
+}
+
+func TestCurrentIllumosPartitionsReadsVTOCSlices(t *testing.T) {
+	vtoc := `* /dev/rdsk/c9t0d0s2 EFI partition map
+*
+* Dimensions:
+*         512 bytes/sector
+*
+*                            First       Sector      Last
+* Partition  Tag  Flags      Sector       Count      Sector  Mount Directory
+       0     12    00          256        2048        2303
+       1      4    00         2304        4096        6399
+       2      5    01            0        8192        8191
+`
+	run := func(name string, args ...string) string {
+		switch strings.Join(append([]string{name}, args...), " ") {
+		case "prtvtoc /dev/rdsk/c9t0d0s2":
+			return vtoc
+		case "fstyp /dev/rdsk/c9t0d0s0":
+			return "pcfs\n"
+		case "fstyp /dev/rdsk/c9t0d0s1":
+			return "zfs\n"
+		default:
+			t.Fatalf("unexpected command %q %#v", name, args)
+			return ""
+		}
+	}
+	glob := func(pattern string) ([]string, error) {
+		if pattern != "/dev/rdsk/*s2" {
+			t.Fatalf("glob pattern = %q, want /dev/rdsk/*s2", pattern)
+		}
+		return []string{"/dev/rdsk/c9t0d0s2"}, nil
+	}
+
+	got := currentIllumosPartitions(run, glob)
+	want := map[string]any{
+		"/dev/dsk/c9t0d0s0": map[string]any{"filesystem": "pcfs", "size": "1.00 MiB", "size_bytes": 1_048_576},
+		"/dev/dsk/c9t0d0s1": map[string]any{"filesystem": "zfs", "size": "2.00 MiB", "size_bytes": 2_097_152},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("currentIllumosPartitions() = %#v, want %#v", got, want)
 	}
 }
 
@@ -1244,15 +1307,15 @@ func TestDragonFlyMountDeviceOnlyNormalizesDiskPartitions(t *testing.T) {
 }
 
 func TestIllumosMountpointsFactParsesMountAndDFOutput(t *testing.T) {
-	mountOutput := `/ on rpool/ROOT/omnios-r151058 read/write/setuid/devices/dev=4310002 on Thu Jan  1 00:00:00 1970
-/tmp on swap read/write/setuid/devices/xattr/dev=8b80002 on Fri Jun 19 19:05:19 2026`
+	mountOutput := `rpool/ROOT/omnios-r151058 on / type zfs read/write/setuid/devices/dev=4310002 on Thu Jan  1 00:00:00 1970
+swap on /tmp type tmpfs read/write/setuid/devices/xattr/dev=8b80002 on Fri Jun 19 19:05:19 2026`
 	dfOutput := `Filesystem            512-blocks        Used   Available Capacity  Mounted on
 rpool/ROOT/omnios-r151058    59932672     1902744    57629848     4%    /
 swap                     5046424      133048     4913376     3%    /tmp`
 
 	got := illumosMountpointsFact(mountOutput, dfOutput)
 	root := got["/"].(map[string]any)
-	if root["device"] != "rpool/ROOT/omnios-r151058" || root["size_bytes"] != 30_685_528_064 {
+	if root["device"] != "rpool/ROOT/omnios-r151058" || root["filesystem"] != "zfs" || root["size_bytes"] != 30_685_528_064 {
 		t.Fatalf("illumosMountpointsFact()[/] = %#v", root)
 	}
 }

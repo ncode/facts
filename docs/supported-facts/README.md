@@ -9,8 +9,8 @@ These pages are generated from [`docs/schema/facts.yaml`](../schema/facts.yaml).
 | [Linux](linux.md) | 175 |
 | [macOS / Darwin](darwin.md) | 107 |
 | [Windows](windows.md) | 101 |
-| [FreeBSD](freebsd.md) | 129 |
+| [FreeBSD](freebsd.md) | 130 |
 | [OpenBSD](openbsd.md) | 113 |
 | [NetBSD](netbsd.md) | 117 |
-| [DragonFly BSD](dragonfly.md) | 105 |
-| [illumos](illumos.md) | 99 |
+| [DragonFly BSD](dragonfly.md) | 107 |
+| [illumos](illumos.md) | 106 |
