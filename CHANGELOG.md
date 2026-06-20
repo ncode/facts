@@ -24,6 +24,8 @@
   BIOS, chassis, manufacturer, and product metadata.
 - DragonFly BSD now emits DMI facts from `kenv smbios.*`, mirroring the
   FreeBSD BIOS, manufacturer, and product metadata.
+- DragonFly BSD falls back to `/usr/local/sbin/dmidecode` for DMI facts when
+  the host exposes no usable `kenv smbios.*` keys.
 - Added generated per-platform supported fact pages under
   `docs/supported-facts/`, derived from `docs/schema/facts.yaml` and checked
   by `go test ./...`.

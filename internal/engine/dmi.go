@@ -94,7 +94,14 @@ func currentDragonFlyDMIFacts(s *Session) []ResolvedFact {
 	for _, key := range freeBSDDMIKeys {
 		values[key] = s.commandOutput("kenv", key)
 	}
-	return freeBSDDMIFacts(values)
+	if facts := freeBSDDMIFacts(values); len(facts) > 0 {
+		return facts
+	}
+	return dragonFlyDMIDecodeFacts(
+		s.commandOutput("/usr/local/sbin/dmidecode", "-t", "bios"),
+		s.commandOutput("/usr/local/sbin/dmidecode", "-t", "system"),
+		s.commandOutput("/usr/local/sbin/dmidecode", "-t", "chassis"),
+	)
 }
 
 func currentOpenBSDDMIFacts(s *Session) []ResolvedFact {
@@ -181,6 +188,48 @@ func freeBSDDMIFacts(values map[string]string) []ResolvedFact {
 		return nil
 	}
 	return []ResolvedFact{{Name: "dmi", Value: dmi}}
+}
+
+func dragonFlyDMIFacts(values map[string]string, biosOutput, systemOutput, chassisOutput string) []ResolvedFact {
+	if facts := freeBSDDMIFacts(values); len(facts) > 0 {
+		return facts
+	}
+	return dragonFlyDMIDecodeFacts(biosOutput, systemOutput, chassisOutput)
+}
+
+func dragonFlyDMIDecodeFacts(biosOutput, systemOutput, chassisOutput string) []ResolvedFact {
+	biosValues := parseColonValues(biosOutput)
+	systemValues := parseColonValues(systemOutput)
+	chassisValues := parseColonValues(chassisOutput)
+
+	dmi := make(map[string]any, 4)
+	bios := mapFromValues(biosValues, map[string]string{
+		"vendor":       "Vendor",
+		"version":      "Version",
+		"release_date": "Release Date",
+	})
+	if len(bios) > 0 {
+		dmi["bios"] = bios
+	}
+	chassis := mapFromValues(chassisValues, map[string]string{
+		"asset_tag": "Asset Tag",
+		"type":      "Type",
+	})
+	if len(chassis) > 0 {
+		dmi["chassis"] = chassis
+	}
+	product := mapFromValues(systemValues, map[string]string{
+		"name":          "Product Name",
+		"serial_number": "Serial Number",
+		"uuid":          "UUID",
+	})
+	if len(product) > 0 {
+		dmi["product"] = product
+	}
+	if manufacturer := strings.TrimSpace(systemValues["Manufacturer"]); manufacturer != "" {
+		dmi["manufacturer"] = manufacturer
+	}
+	return dmiFacts(dmi)
 }
 
 func openBSDDMIFacts(values map[string]string) []ResolvedFact {
@@ -278,6 +327,10 @@ func illumosDMIFacts(biosOutput, systemOutput, chassisOutput string) []ResolvedF
 }
 
 func parseIllumosSMBIOSValues(output string) map[string]string {
+	return parseColonValues(output)
+}
+
+func parseColonValues(output string) map[string]string {
 	values := map[string]string{}
 	for line := range strings.SplitSeq(output, "\n") {
 		key, value, ok := strings.Cut(strings.TrimSpace(line), ":")

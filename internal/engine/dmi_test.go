@@ -228,6 +228,54 @@ func TestFreeBSDDMIFacts_returnsStructuredFacts(t *testing.T) {
 	}
 }
 
+func TestDragonFlyDMIFacts_fallsBackToDMIDecodeWhenKenvHasNoSMBIOS(t *testing.T) {
+	bios := `BIOS Information
+	Vendor: SeaBIOS
+	Version: 1.16.3-debian-1.16.3-2
+	Release Date: 04/01/2014
+`
+	system := `System Information
+	Manufacturer: QEMU
+	Product Name: Standard PC (i440FX + PIIX, 1996)
+	Version: pc-i440fx-10.0
+	Serial Number: Not Specified
+	UUID: 5641762d-4a52-4876-8ea2-46464bba9824
+`
+	chassis := `Chassis Information
+	Manufacturer: QEMU
+	Type: Other
+	Version: pc-i440fx-10.0
+	Serial Number: Not Specified
+	Asset Tag: Not Specified
+`
+
+	facts := dragonFlyDMIFacts(map[string]string{}, bios, system, chassis)
+	collection := Collection(facts)
+
+	want := map[string]any{
+		"dmi": map[string]any{
+			"bios": map[string]any{
+				"vendor":       "SeaBIOS",
+				"version":      "1.16.3-debian-1.16.3-2",
+				"release_date": "04/01/2014",
+			},
+			"chassis": map[string]any{
+				"asset_tag": "Not Specified",
+				"type":      "Other",
+			},
+			"manufacturer": "QEMU",
+			"product": map[string]any{
+				"name":          "Standard PC (i440FX + PIIX, 1996)",
+				"serial_number": "Not Specified",
+				"uuid":          "5641762d-4a52-4876-8ea2-46464bba9824",
+			},
+		},
+	}
+	if !reflect.DeepEqual(collection, want) {
+		t.Fatalf("dragonFlyDMIFacts() = %#v, want %#v", collection, want)
+	}
+}
+
 func TestOpenBSDDMIFacts_returnsStructuredFacts(t *testing.T) {
 	values := map[string]string{
 		"hw.vendor":    "Phoenix Technologies LTD",
