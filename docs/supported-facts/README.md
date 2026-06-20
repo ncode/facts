@@ -13,4 +13,4 @@ These pages are generated from [`docs/schema/facts.yaml`](../schema/facts.yaml).
 | [OpenBSD](openbsd.md) | 113 |
 | [NetBSD](netbsd.md) | 117 |
 | [DragonFly BSD](dragonfly.md) | 107 |
-| [illumos](illumos.md) | 106 |
+| [illumos](illumos.md) | 114 |

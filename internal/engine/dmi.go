@@ -105,6 +105,17 @@ func currentNetBSDDMIFacts(s *Session) []ResolvedFact {
 	return netBSDDMIFacts(values)
 }
 
+func currentIllumosDMIFacts(s *Session) []ResolvedFact {
+	if runtime.GOOS != "illumos" {
+		return nil
+	}
+	return illumosDMIFacts(
+		s.commandOutput("/usr/sbin/smbios", "-t", "SMB_TYPE_BIOS"),
+		s.commandOutput("/usr/sbin/smbios", "-t", "SMB_TYPE_SYSTEM"),
+		s.commandOutput("/usr/sbin/smbios", "-t", "SMB_TYPE_CHASSIS"),
+	)
+}
+
 var freeBSDDMIKeys = []string{
 	"smbios.bios.reldate",
 	"smbios.bios.vendor",
@@ -210,6 +221,58 @@ func netBSDDMIFacts(values map[string]string) []ResolvedFact {
 		return nil
 	}
 	return []ResolvedFact{{Name: "dmi", Value: dmi}}
+}
+
+func illumosDMIFacts(biosOutput, systemOutput, chassisOutput string) []ResolvedFact {
+	biosValues := parseIllumosSMBIOSValues(biosOutput)
+	systemValues := parseIllumosSMBIOSValues(systemOutput)
+	chassisValues := parseIllumosSMBIOSValues(chassisOutput)
+
+	dmi := make(map[string]any, 4)
+	bios := mapFromValues(biosValues, map[string]string{
+		"vendor":       "Vendor",
+		"version":      "Version String",
+		"release_date": "Release Date",
+	})
+	if len(bios) > 0 {
+		dmi["bios"] = bios
+	}
+	chassis := mapFromValues(chassisValues, map[string]string{
+		"asset_tag": "Asset Tag",
+		"type":      "Chassis Type",
+	})
+	if _, ok := chassis["type"]; !ok {
+		if value := strings.TrimSpace(chassisValues["Type"]); value != "" {
+			chassis["type"] = value
+		}
+	}
+	if len(chassis) > 0 {
+		dmi["chassis"] = chassis
+	}
+	product := mapFromValues(systemValues, map[string]string{
+		"name":          "Product",
+		"serial_number": "Serial Number",
+		"uuid":          "UUID",
+	})
+	if len(product) > 0 {
+		dmi["product"] = product
+	}
+	if manufacturer := strings.TrimSpace(systemValues["Manufacturer"]); manufacturer != "" {
+		dmi["manufacturer"] = manufacturer
+	}
+	return dmiFacts(dmi)
+}
+
+func parseIllumosSMBIOSValues(output string) map[string]string {
+	values := map[string]string{}
+	for line := range strings.SplitSeq(output, "\n") {
+		key, value, ok := strings.Cut(strings.TrimSpace(line), ":")
+		if !ok || key == "" {
+			continue
+		}
+		values[key] = strings.TrimSpace(value)
+	}
+	return values
 }
 
 func mapFromDMI(root string, names map[string]string, readFiles ...fileReader) map[string]any {
@@ -352,7 +415,7 @@ func macOSDMIFacts(model string) []ResolvedFact {
 
 // dmiCoreFacts assembles the dmi category facts (the /sys/class/dmi bios/board/
 // chassis/product facts plus the platform-specific FreeBSD, OpenBSD, NetBSD,
-// Windows, and macOS DMI facts) for the current host.
+// illumos, Windows, and macOS DMI facts) for the current host.
 func dmiCoreFacts(s *Session) []ResolvedFact {
 	dmi := s.cachedDMI()
 	facts := dmiFacts(dmi)
@@ -361,5 +424,6 @@ func dmiCoreFacts(s *Session) []ResolvedFact {
 	facts = append(facts, currentFreeBSDDMIFacts(s)...)
 	facts = append(facts, currentOpenBSDDMIFacts(s)...)
 	facts = append(facts, currentNetBSDDMIFacts(s)...)
+	facts = append(facts, currentIllumosDMIFacts(s)...)
 	return facts
 }

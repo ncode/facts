@@ -89,12 +89,20 @@ $ facts --json
 
 ## Fact Contract
 
-106 schema entries include `illumos`.
+114 schema entries include `illumos`.
 
 | Fact | Type | Conditional | Description |
 | --- | --- | --- | --- |
 | `augeas.version` | `string` | yes | The Augeas version reported by augparse, when Augeas is installed. |
+| `dmi.bios.release_date` | `string` | yes | The release date of the system BIOS. |
+| `dmi.bios.vendor` | `string` | yes | The vendor of the system BIOS. |
+| `dmi.bios.version` | `string` | yes | The version of the system BIOS. |
+| `dmi.chassis.asset_tag` | `string` | yes | The asset tag of the chassis. |
+| `dmi.chassis.type` | `string` | yes | The chassis type of the system, such as Desktop or Rack Mount Chassis. |
+| `dmi.manufacturer` | `string` | yes | The manufacturer of the system. |
 | `dmi.product.name` | `string` | yes | The product name of the system (the hardware model on macOS). |
+| `dmi.product.serial_number` | `string` | yes | The serial number of the system. |
+| `dmi.product.uuid` | `string` | yes | The hardware UUID of the system. |
 | `facterversion` | `string` | no | The Facter compatibility version of the Facts engine. |
 | `identity.gid` | `integer` | no | The group identifier of the user running Facts. |
 | `identity.group` | `string` | no | The group name of the user running Facts. |

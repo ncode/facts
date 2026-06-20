@@ -293,6 +293,61 @@ func TestNetBSDDMIFacts_returnsStructuredFacts(t *testing.T) {
 	}
 }
 
+func TestIllumosDMIFacts_returnsStructuredFactsFromSMBIOS(t *testing.T) {
+	bios := `ID    SIZE TYPE
+0     65   SMB_TYPE_BIOS (type 0) (BIOS information)
+  Vendor: SeaBIOS
+  Version String: 1.16.3-debian-1.16.3-2
+  Release Date: 04/01/2014
+`
+	system := `ID    SIZE TYPE
+256   80   SMB_TYPE_SYSTEM (type 1) (system information)
+  Manufacturer: QEMU
+  Product: Standard PC (i440FX + PIIX, 1996)
+  Version: pc-i440fx-10.0
+  Serial Number: vm-42
+  UUID: ee850d94-5288-714f-b992-0a71f8df356f
+  UUID (Endian-corrected): 940d85ee-8852-4f71-b992-0a71f8df356f
+`
+	chassis := `ID    SIZE TYPE
+768   41   SMB_TYPE_CHASSIS (type 3) (system enclosure or chassis)
+  Asset Tag: chassis-42
+  Chassis Type: 0x1 (other)
+`
+
+	facts := illumosDMIFacts(bios, system, chassis)
+	collection := Collection(facts)
+
+	want := map[string]any{
+		"dmi": map[string]any{
+			"bios": map[string]any{
+				"vendor":       "SeaBIOS",
+				"version":      "1.16.3-debian-1.16.3-2",
+				"release_date": "04/01/2014",
+			},
+			"chassis": map[string]any{
+				"asset_tag": "chassis-42",
+				"type":      "0x1 (other)",
+			},
+			"manufacturer": "QEMU",
+			"product": map[string]any{
+				"name":          "Standard PC (i440FX + PIIX, 1996)",
+				"serial_number": "vm-42",
+				"uuid":          "ee850d94-5288-714f-b992-0a71f8df356f",
+			},
+		},
+	}
+	if !reflect.DeepEqual(collection, want) {
+		t.Fatalf("illumosDMIFacts() = %#v, want %#v", collection, want)
+	}
+}
+
+func TestIllumosDMIFacts_omitsDMIWhenSMBIOSHasNoValues(t *testing.T) {
+	if got := illumosDMIFacts("", "", ""); got != nil {
+		t.Fatalf("illumosDMIFacts(empty) = %#v, want nil", got)
+	}
+}
+
 func TestMacOSDMIFacts_returnsProductName(t *testing.T) {
 	core := macOSDMIFacts("MacBookPro11,4")
 
