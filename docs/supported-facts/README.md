@@ -12,5 +12,5 @@ These pages are generated from [`docs/schema/facts.yaml`](../schema/facts.yaml).
 | [FreeBSD](freebsd.md) | 130 |
 | [OpenBSD](openbsd.md) | 113 |
 | [NetBSD](netbsd.md) | 117 |
-| [DragonFly BSD](dragonfly.md) | 107 |
+| [DragonFly BSD](dragonfly.md) | 113 |
 | [illumos](illumos.md) | 114 |

@@ -86,17 +86,17 @@ disks.*.wwn:
 dmi.bios.release_date:
   type: string
   description: The release date of the system BIOS.
-  platforms: [linux, freebsd, illumos]
+  platforms: [linux, freebsd, dragonfly, illumos]
   conditional: true
 dmi.bios.vendor:
   type: string
   description: The vendor of the system BIOS.
-  platforms: [linux, freebsd, openbsd, netbsd, illumos]
+  platforms: [linux, freebsd, openbsd, netbsd, dragonfly, illumos]
   conditional: true
 dmi.bios.version:
   type: string
   description: The version of the system BIOS.
-  platforms: [linux, freebsd, openbsd, netbsd, illumos]
+  platforms: [linux, freebsd, openbsd, netbsd, dragonfly, illumos]
   conditional: true
 dmi.board.asset_tag:
   type: string
@@ -131,7 +131,7 @@ dmi.chassis.type:
 dmi.manufacturer:
   type: string
   description: The manufacturer of the system.
-  platforms: [linux, windows, freebsd, openbsd, netbsd, illumos]
+  platforms: [linux, windows, freebsd, openbsd, netbsd, dragonfly, illumos]
   conditional: true
 dmi.product.name:
   type: string
@@ -141,12 +141,12 @@ dmi.product.name:
 dmi.product.serial_number:
   type: string
   description: The serial number of the system.
-  platforms: [linux, windows, freebsd, openbsd, netbsd, illumos]
+  platforms: [linux, windows, freebsd, openbsd, netbsd, dragonfly, illumos]
   conditional: true
 dmi.product.uuid:
   type: string
   description: The hardware UUID of the system.
-  platforms: [linux, windows, freebsd, openbsd, netbsd, illumos]
+  platforms: [linux, windows, freebsd, openbsd, netbsd, dragonfly, illumos]
   conditional: true
 dmi.product.version:
   type: string

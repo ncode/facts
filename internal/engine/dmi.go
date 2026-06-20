@@ -83,6 +83,20 @@ func currentFreeBSDDMIFacts(s *Session) []ResolvedFact {
 	return freeBSDDMIFacts(values)
 }
 
+// DragonFly BSD inherits FreeBSD's kenv smbios.* keys, so it reuses the
+// FreeBSD builder. kenv is PATH-resolved here (DragonFly ships it outside
+// FreeBSD's /bin/kenv path).
+func currentDragonFlyDMIFacts(s *Session) []ResolvedFact {
+	if runtime.GOOS != "dragonfly" {
+		return nil
+	}
+	values := make(map[string]string, len(freeBSDDMIKeys))
+	for _, key := range freeBSDDMIKeys {
+		values[key] = s.commandOutput("kenv", key)
+	}
+	return freeBSDDMIFacts(values)
+}
+
 func currentOpenBSDDMIFacts(s *Session) []ResolvedFact {
 	if runtime.GOOS != "openbsd" {
 		return nil
@@ -422,6 +436,7 @@ func dmiCoreFacts(s *Session) []ResolvedFact {
 	facts = append(facts, macOSDMIFacts(s.cachedMacOSModel())...)
 	facts = append(facts, windowsDMIFacts(currentWindowsDMI(runtime.GOOS, s.commandOutput, s.logr()))...)
 	facts = append(facts, currentFreeBSDDMIFacts(s)...)
+	facts = append(facts, currentDragonFlyDMIFacts(s)...)
 	facts = append(facts, currentOpenBSDDMIFacts(s)...)
 	facts = append(facts, currentNetBSDDMIFacts(s)...)
 	facts = append(facts, currentIllumosDMIFacts(s)...)

@@ -22,6 +22,8 @@
   from VTOC slices when the native tools expose them.
 - illumos now emits DMI facts from `/usr/sbin/smbios` when the host exposes
   BIOS, chassis, manufacturer, and product metadata.
+- DragonFly BSD now emits DMI facts from `kenv smbios.*`, mirroring the
+  FreeBSD BIOS, manufacturer, and product metadata.
 - Added generated per-platform supported fact pages under
   `docs/supported-facts/`, derived from `docs/schema/facts.yaml` and checked
   by `go test ./...`.

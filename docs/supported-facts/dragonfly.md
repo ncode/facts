@@ -67,7 +67,7 @@ $ facts --json
 
 ## Fact Contract
 
-107 schema entries include `dragonfly`.
+113 schema entries include `dragonfly`.
 
 | Fact | Type | Conditional | Description |
 | --- | --- | --- | --- |
@@ -75,7 +75,13 @@ $ facts --json
 | `disks.*` | `map` | yes | A block device attached to the system, keyed by device name. |
 | `disks.*.size` | `string` | yes | The display size of the disk, such as 1.00 GiB. |
 | `disks.*.size_bytes` | `integer` | yes | The size of the disk, in bytes. |
+| `dmi.bios.release_date` | `string` | yes | The release date of the system BIOS. |
+| `dmi.bios.vendor` | `string` | yes | The vendor of the system BIOS. |
+| `dmi.bios.version` | `string` | yes | The version of the system BIOS. |
+| `dmi.manufacturer` | `string` | yes | The manufacturer of the system. |
 | `dmi.product.name` | `string` | yes | The product name of the system (the hardware model on macOS). |
+| `dmi.product.serial_number` | `string` | yes | The serial number of the system. |
+| `dmi.product.uuid` | `string` | yes | The hardware UUID of the system. |
 | `facterversion` | `string` | no | The Facter compatibility version of the Facts engine. |
 | `identity.gid` | `integer` | no | The group identifier of the user running Facts. |
 | `identity.group` | `string` | no | The group name of the user running Facts. |
