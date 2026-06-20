@@ -228,11 +228,14 @@ jobs:
             if ! command -v curl >/dev/null 2>&1; then
               pkg install web/curl || pkg install curl
             fi
+            if ! command -v gtar >/dev/null 2>&1; then
+              pkg install archiver/gnu-tar
+            fi
             ver=$(awk '$1=="go"{print $2; exit}' go.mod)
             curl -fsSL -o /tmp/go.tgz "https://go.dev/dl/go${ver}.illumos-amd64.tar.gz"
             mkdir -p /usr/local
             rm -rf /usr/local/go
-            gzip -dc /tmp/go.tgz | (cd /usr/local && tar xf -)
+            gtar -xzf /tmp/go.tgz -C /usr/local
           run: |
             set -e
             export PATH=/usr/local/go/bin:$PATH
