@@ -17,8 +17,15 @@ LIMA_DEV_TEMPLATE ?= ubuntu-lts
 LIMA_DEV_INSTANCE ?= $(LIMA_INSTANCE_PREFIX)-dev
 LIMA_DOCKER_INSTANCE ?= $(LIMA_INSTANCE_PREFIX)-docker
 LIMA_FREEBSD_INSTANCE ?= $(LIMA_INSTANCE_PREFIX)-freebsd
-LOCAL_OPENBSD_SSH ?= .local/bsd-vms/ssh-openbsd.sh
-LOCAL_NETBSD_SSH ?= .local/bsd-vms/ssh-netbsd.sh
+LOCAL_OPENBSD_ARM64_SSH ?= .local/bsd-vms/ssh-openbsd.sh
+LOCAL_NETBSD_ARM64_SSH ?= .local/bsd-vms/ssh-netbsd.sh
+LOCAL_FREEBSD_AMD64_SSH ?=
+LOCAL_OPENBSD_AMD64_SSH ?=
+LOCAL_NETBSD_AMD64_SSH ?=
+LOCAL_DRAGONFLY_AMD64_SSH ?=
+LOCAL_ILLUMOS_AMD64_SSH ?=
+LOCAL_OPENBSD_SSH ?= $(LOCAL_OPENBSD_ARM64_SSH)
+LOCAL_NETBSD_SSH ?= $(LOCAL_NETBSD_ARM64_SSH)
 
 LIMA_DEV_FLAGS ?= --vm-type=vz --rosetta --mount-writable --cpus $(LIMA_CPUS) --memory $(LIMA_MEMORY) --disk $(LIMA_DISK)
 LIMA_DOCKER_FLAGS ?= --vm-type=vz --rosetta --mount-writable --cpus $(LIMA_CPUS) --memory $(LIMA_MEMORY) --disk $(LIMA_DISK)
@@ -29,12 +36,17 @@ LIMA_FREEBSD_FLAGS ?= --mount-none --cpus 2 --memory 4 --disk 40
 LIMA_GO_CONTAINER_IMAGES ?= golang:1.26-bookworm golang:1.26-alpine
 LIMA_DISTRO_IMAGES ?= debian:12-slim ubuntu:24.04 archlinux:latest oraclelinux:9
 LIMA_LINUX_FLAVORS ?= ubuntu-lts debian fedora opensuse oraclelinux rocky almalinux alpine archlinux
-LIMA_CROSS_TARGETS ?= linux/amd64 linux/arm64 windows/amd64 windows/arm64 darwin/amd64 darwin/arm64 freebsd/amd64 openbsd/amd64 netbsd/amd64
+LIMA_CROSS_TARGETS ?= linux/amd64 linux/arm64 windows/amd64 windows/arm64 darwin/amd64 darwin/arm64 freebsd/amd64 openbsd/amd64 netbsd/amd64 dragonfly/amd64 illumos/amd64
 
 LIMA_LINUX_BINARY ?= dist/facts-linux-$(LIMA_GOARCH)
 LIMA_FREEBSD_BINARY ?= dist/facts-freebsd-$(LIMA_GOARCH)
 LOCAL_OPENBSD_BINARY ?= dist/facts-openbsd-$(LIMA_GOARCH)
 LOCAL_NETBSD_BINARY ?= dist/facts-netbsd-$(LIMA_GOARCH)
+LOCAL_FREEBSD_AMD64_BINARY ?= dist/facts-freebsd-amd64
+LOCAL_OPENBSD_AMD64_BINARY ?= dist/facts-openbsd-amd64
+LOCAL_NETBSD_AMD64_BINARY ?= dist/facts-netbsd-amd64
+LOCAL_DRAGONFLY_AMD64_BINARY ?= dist/facts-dragonfly-amd64
+LOCAL_ILLUMOS_AMD64_BINARY ?= dist/facts-illumos-amd64
 
 # VERSION is the exact git tag at HEAD (release builds); dev builds with no tag
 # at HEAD fall back to dev-<short-commit>. Override with `make VERSION=...`.
@@ -43,7 +55,7 @@ LDFLAGS ?= -X github.com/ncode/facts/internal/engine.Version=$(VERSION)
 PREFIX ?= /usr/local
 DESTDIR ?=
 DIST_DIR ?= dist
-DIST_TARGETS ?= linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64 freebsd/amd64 openbsd/amd64 netbsd/amd64
+DIST_TARGETS ?= linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64 freebsd/amd64 openbsd/amd64 netbsd/amd64 dragonfly/amd64 illumos/amd64
 SHA256 := $(shell command -v sha256sum >/dev/null 2>&1 && echo "sha256sum" || echo "shasum -a 256")
 
 .PHONY: test race bench bench-stable build clean dist install docs
@@ -53,6 +65,10 @@ SHA256 := $(shell command -v sha256sum >/dev/null 2>&1 && echo "sha256sum" || ec
 .PHONY: lima-linux-flavors lima-linux-flavor-smoke lima-build-freebsd-binary lima-freebsd-start
 .PHONY: lima-freebsd-smoke lima-stop
 .PHONY: local-build-openbsd-binary local-build-netbsd-binary local-openbsd-smoke local-netbsd-smoke local-bsd-smoke
+.PHONY: local-build-freebsd-amd64-binary local-build-openbsd-amd64-binary local-build-netbsd-amd64-binary
+.PHONY: local-build-dragonfly-amd64-binary local-build-illumos-amd64-binary
+.PHONY: local-freebsd-amd64-smoke local-openbsd-amd64-smoke local-netbsd-amd64-smoke
+.PHONY: local-dragonfly-amd64-smoke local-illumos-amd64-smoke local-amd64-bsd-smoke local-candidate-smoke
 
 test:
 	$(GO) test $(PACKAGES)
@@ -117,7 +133,9 @@ lima-help:
 	@printf '%s\n' '  make lima-docker-workloads# CI-like Go container and Linux distro fact smoke tests'
 	@printf '%s\n' '  make lima-linux-flavors   # Smoke the built Linux CLI in each Lima Linux flavor'
 	@printf '%s\n' '  make lima-freebsd-smoke   # Copy-built FreeBSD binary into Lima FreeBSD and smoke it'
-	@printf '%s\n' '  make local-bsd-smoke      # Smoke OpenBSD + NetBSD using .local/bsd-vms SSH wrappers'
+	@printf '%s\n' '  make local-bsd-smoke      # Smoke arm64 OpenBSD + NetBSD using .local/bsd-vms SSH wrappers'
+	@printf '%s\n' '  make local-amd64-bsd-smoke# Smoke amd64 FreeBSD/OpenBSD/NetBSD using LOCAL_*_AMD64_SSH wrappers'
+	@printf '%s\n' '  make local-candidate-smoke# Smoke DragonFly + illumos using LOCAL_*_AMD64_SSH wrappers'
 	@printf '%s\n' 'Set LIMA_KEEP_RUNNING=1 to leave flavor/FreeBSD VMs running after smoke tests.'
 
 lima-all: lima-ci lima-linux-flavors lima-freebsd-smoke
@@ -295,21 +313,115 @@ local-build-netbsd-binary:
 	@mkdir -p dist
 	CGO_ENABLED=0 GOOS=netbsd GOARCH=$(LIMA_GOARCH) $(GO) build -o "$(LOCAL_NETBSD_BINARY)" ./cmd/facts
 
+local-build-freebsd-amd64-binary:
+	@mkdir -p dist
+	CGO_ENABLED=0 GOOS=freebsd GOARCH=amd64 $(GO) build -o "$(LOCAL_FREEBSD_AMD64_BINARY)" ./cmd/facts
+
+local-build-openbsd-amd64-binary:
+	@mkdir -p dist
+	CGO_ENABLED=0 GOOS=openbsd GOARCH=amd64 $(GO) build -o "$(LOCAL_OPENBSD_AMD64_BINARY)" ./cmd/facts
+
+local-build-netbsd-amd64-binary:
+	@mkdir -p dist
+	CGO_ENABLED=0 GOOS=netbsd GOARCH=amd64 $(GO) build -o "$(LOCAL_NETBSD_AMD64_BINARY)" ./cmd/facts
+
+local-build-dragonfly-amd64-binary:
+	@mkdir -p dist
+	CGO_ENABLED=0 GOOS=dragonfly GOARCH=amd64 $(GO) build -o "$(LOCAL_DRAGONFLY_AMD64_BINARY)" ./cmd/facts
+
+local-build-illumos-amd64-binary:
+	@mkdir -p dist
+	CGO_ENABLED=0 GOOS=illumos GOARCH=amd64 $(GO) build -o "$(LOCAL_ILLUMOS_AMD64_BINARY)" ./cmd/facts
+
 local-openbsd-smoke: local-build-openbsd-binary
 	@test -x "$(LOCAL_OPENBSD_SSH)" || (echo "missing $(LOCAL_OPENBSD_SSH); start/provision .local/bsd-vms first" >&2; exit 2)
-	$(LOCAL_OPENBSD_SSH) 'cat > /tmp/facts' < "$(LOCAL_OPENBSD_BINARY)"
-	$(LOCAL_OPENBSD_SSH) 'cat > /tmp/openbsd-release-gate.sh' < tools/openbsd-release-gate.sh
-	$(LOCAL_OPENBSD_SSH) chmod +x /tmp/facts /tmp/openbsd-release-gate.sh
-	$(LOCAL_OPENBSD_SSH) sh /tmp/openbsd-release-gate.sh /tmp/facts
+	@set -e; \
+		tmp="$$( $(LOCAL_OPENBSD_SSH) mktemp -d )"; \
+		case "$$tmp" in /*[!A-Za-z0-9._/-]*|"") echo "remote mktemp returned invalid path: $$tmp" >&2; exit 2 ;; /*) ;; *) echo "remote mktemp returned non-absolute path: $$tmp" >&2; exit 2 ;; esac; \
+		cleanup() { $(LOCAL_OPENBSD_SSH) rm -rf "$$tmp"; }; \
+		trap cleanup EXIT; \
+		$(LOCAL_OPENBSD_SSH) "cat > $$tmp/facts" < "$(LOCAL_OPENBSD_BINARY)"; \
+		$(LOCAL_OPENBSD_SSH) "cat > $$tmp/openbsd-release-gate.sh" < tools/openbsd-release-gate.sh; \
+		$(LOCAL_OPENBSD_SSH) chmod +x "$$tmp/facts" "$$tmp/openbsd-release-gate.sh"; \
+		$(LOCAL_OPENBSD_SSH) sudo -n sh "$$tmp/openbsd-release-gate.sh" "$$tmp/facts"
 
 local-netbsd-smoke: local-build-netbsd-binary
 	@test -x "$(LOCAL_NETBSD_SSH)" || (echo "missing $(LOCAL_NETBSD_SSH); start/provision .local/bsd-vms first" >&2; exit 2)
-	$(LOCAL_NETBSD_SSH) 'cat > /tmp/facts' < "$(LOCAL_NETBSD_BINARY)"
-	$(LOCAL_NETBSD_SSH) 'cat > /tmp/netbsd-release-gate.sh' < tools/netbsd-release-gate.sh
-	$(LOCAL_NETBSD_SSH) chmod +x /tmp/facts /tmp/netbsd-release-gate.sh
-	$(LOCAL_NETBSD_SSH) sh /tmp/netbsd-release-gate.sh /tmp/facts
+	@set -e; \
+		tmp="$$( $(LOCAL_NETBSD_SSH) mktemp -d )"; \
+		case "$$tmp" in /*[!A-Za-z0-9._/-]*|"") echo "remote mktemp returned invalid path: $$tmp" >&2; exit 2 ;; /*) ;; *) echo "remote mktemp returned non-absolute path: $$tmp" >&2; exit 2 ;; esac; \
+		cleanup() { $(LOCAL_NETBSD_SSH) rm -rf "$$tmp"; }; \
+		trap cleanup EXIT; \
+		$(LOCAL_NETBSD_SSH) "cat > $$tmp/facts" < "$(LOCAL_NETBSD_BINARY)"; \
+		$(LOCAL_NETBSD_SSH) "cat > $$tmp/netbsd-release-gate.sh" < tools/netbsd-release-gate.sh; \
+		$(LOCAL_NETBSD_SSH) chmod +x "$$tmp/facts" "$$tmp/netbsd-release-gate.sh"; \
+		$(LOCAL_NETBSD_SSH) sudo -n sh "$$tmp/netbsd-release-gate.sh" "$$tmp/facts"
 
 local-bsd-smoke: local-openbsd-smoke local-netbsd-smoke
+
+local-freebsd-amd64-smoke: local-build-freebsd-amd64-binary
+	@test -x "$(LOCAL_FREEBSD_AMD64_SSH)" || (echo "missing executable $(LOCAL_FREEBSD_AMD64_SSH); set LOCAL_FREEBSD_AMD64_SSH to an untracked SSH wrapper" >&2; exit 2)
+	@set -e; \
+		tmp="$$( $(LOCAL_FREEBSD_AMD64_SSH) mktemp -d )"; \
+		case "$$tmp" in /*[!A-Za-z0-9._/-]*|"") echo "remote mktemp returned invalid path: $$tmp" >&2; exit 2 ;; /*) ;; *) echo "remote mktemp returned non-absolute path: $$tmp" >&2; exit 2 ;; esac; \
+		cleanup() { $(LOCAL_FREEBSD_AMD64_SSH) rm -rf "$$tmp"; }; \
+		trap cleanup EXIT; \
+		$(LOCAL_FREEBSD_AMD64_SSH) "cat > $$tmp/facts" < "$(LOCAL_FREEBSD_AMD64_BINARY)"; \
+		$(LOCAL_FREEBSD_AMD64_SSH) "cat > $$tmp/freebsd-release-gate.sh" < tools/freebsd-release-gate.sh; \
+		$(LOCAL_FREEBSD_AMD64_SSH) chmod +x "$$tmp/facts" "$$tmp/freebsd-release-gate.sh"; \
+		$(LOCAL_FREEBSD_AMD64_SSH) sh "$$tmp/freebsd-release-gate.sh" "$$tmp/facts"
+
+local-openbsd-amd64-smoke: local-build-openbsd-amd64-binary
+	@test -x "$(LOCAL_OPENBSD_AMD64_SSH)" || (echo "missing executable $(LOCAL_OPENBSD_AMD64_SSH); set LOCAL_OPENBSD_AMD64_SSH to an untracked SSH wrapper" >&2; exit 2)
+	@set -e; \
+		tmp="$$( $(LOCAL_OPENBSD_AMD64_SSH) mktemp -d )"; \
+		case "$$tmp" in /*[!A-Za-z0-9._/-]*|"") echo "remote mktemp returned invalid path: $$tmp" >&2; exit 2 ;; /*) ;; *) echo "remote mktemp returned non-absolute path: $$tmp" >&2; exit 2 ;; esac; \
+		cleanup() { $(LOCAL_OPENBSD_AMD64_SSH) rm -rf "$$tmp"; }; \
+		trap cleanup EXIT; \
+		$(LOCAL_OPENBSD_AMD64_SSH) "cat > $$tmp/facts" < "$(LOCAL_OPENBSD_AMD64_BINARY)"; \
+		$(LOCAL_OPENBSD_AMD64_SSH) "cat > $$tmp/openbsd-release-gate.sh" < tools/openbsd-release-gate.sh; \
+		$(LOCAL_OPENBSD_AMD64_SSH) chmod +x "$$tmp/facts" "$$tmp/openbsd-release-gate.sh"; \
+		$(LOCAL_OPENBSD_AMD64_SSH) sudo -n sh "$$tmp/openbsd-release-gate.sh" "$$tmp/facts"
+
+local-netbsd-amd64-smoke: local-build-netbsd-amd64-binary
+	@test -x "$(LOCAL_NETBSD_AMD64_SSH)" || (echo "missing executable $(LOCAL_NETBSD_AMD64_SSH); set LOCAL_NETBSD_AMD64_SSH to an untracked SSH wrapper" >&2; exit 2)
+	@set -e; \
+		tmp="$$( $(LOCAL_NETBSD_AMD64_SSH) mktemp -d )"; \
+		case "$$tmp" in /*[!A-Za-z0-9._/-]*|"") echo "remote mktemp returned invalid path: $$tmp" >&2; exit 2 ;; /*) ;; *) echo "remote mktemp returned non-absolute path: $$tmp" >&2; exit 2 ;; esac; \
+		cleanup() { $(LOCAL_NETBSD_AMD64_SSH) rm -rf "$$tmp"; }; \
+		trap cleanup EXIT; \
+		$(LOCAL_NETBSD_AMD64_SSH) "cat > $$tmp/facts" < "$(LOCAL_NETBSD_AMD64_BINARY)"; \
+		$(LOCAL_NETBSD_AMD64_SSH) "cat > $$tmp/netbsd-release-gate.sh" < tools/netbsd-release-gate.sh; \
+		$(LOCAL_NETBSD_AMD64_SSH) chmod +x "$$tmp/facts" "$$tmp/netbsd-release-gate.sh"; \
+		$(LOCAL_NETBSD_AMD64_SSH) sudo -n sh "$$tmp/netbsd-release-gate.sh" "$$tmp/facts"
+
+local-dragonfly-amd64-smoke: local-build-dragonfly-amd64-binary
+	@test -x "$(LOCAL_DRAGONFLY_AMD64_SSH)" || (echo "missing executable $(LOCAL_DRAGONFLY_AMD64_SSH); set LOCAL_DRAGONFLY_AMD64_SSH to an untracked SSH wrapper" >&2; exit 2)
+	@set -e; \
+		tmp="$$( $(LOCAL_DRAGONFLY_AMD64_SSH) mktemp -d )"; \
+		case "$$tmp" in /*[!A-Za-z0-9._/-]*|"") echo "remote mktemp returned invalid path: $$tmp" >&2; exit 2 ;; /*) ;; *) echo "remote mktemp returned non-absolute path: $$tmp" >&2; exit 2 ;; esac; \
+		cleanup() { $(LOCAL_DRAGONFLY_AMD64_SSH) rm -rf "$$tmp"; }; \
+		trap cleanup EXIT; \
+		$(LOCAL_DRAGONFLY_AMD64_SSH) "cat > $$tmp/facts" < "$(LOCAL_DRAGONFLY_AMD64_BINARY)"; \
+		$(LOCAL_DRAGONFLY_AMD64_SSH) "cat > $$tmp/dragonfly-release-gate.sh" < tools/dragonfly-release-gate.sh; \
+		$(LOCAL_DRAGONFLY_AMD64_SSH) chmod +x "$$tmp/facts" "$$tmp/dragonfly-release-gate.sh"; \
+		$(LOCAL_DRAGONFLY_AMD64_SSH) sudo -n sh "$$tmp/dragonfly-release-gate.sh" "$$tmp/facts"
+
+local-illumos-amd64-smoke: local-build-illumos-amd64-binary
+	@test -x "$(LOCAL_ILLUMOS_AMD64_SSH)" || (echo "missing executable $(LOCAL_ILLUMOS_AMD64_SSH); set LOCAL_ILLUMOS_AMD64_SSH to an untracked SSH wrapper" >&2; exit 2)
+	@set -e; \
+		tmp="$$( $(LOCAL_ILLUMOS_AMD64_SSH) mktemp -d )"; \
+		case "$$tmp" in /*[!A-Za-z0-9._/-]*|"") echo "remote mktemp returned invalid path: $$tmp" >&2; exit 2 ;; /*) ;; *) echo "remote mktemp returned non-absolute path: $$tmp" >&2; exit 2 ;; esac; \
+		cleanup() { $(LOCAL_ILLUMOS_AMD64_SSH) rm -rf "$$tmp"; }; \
+		trap cleanup EXIT; \
+		$(LOCAL_ILLUMOS_AMD64_SSH) "cat > $$tmp/facts" < "$(LOCAL_ILLUMOS_AMD64_BINARY)"; \
+		$(LOCAL_ILLUMOS_AMD64_SSH) "cat > $$tmp/illumos-release-gate.sh" < tools/illumos-release-gate.sh; \
+		$(LOCAL_ILLUMOS_AMD64_SSH) chmod +x "$$tmp/facts" "$$tmp/illumos-release-gate.sh"; \
+		$(LOCAL_ILLUMOS_AMD64_SSH) sh "$$tmp/illumos-release-gate.sh" "$$tmp/facts"
+
+local-amd64-bsd-smoke: local-freebsd-amd64-smoke local-openbsd-amd64-smoke local-netbsd-amd64-smoke
+
+local-candidate-smoke: local-dragonfly-amd64-smoke local-illumos-amd64-smoke
 
 lima-stop:
 	@for instance in '$(LIMA_DEV_INSTANCE)' '$(LIMA_DOCKER_INSTANCE)' '$(LIMA_FREEBSD_INSTANCE)'; do \

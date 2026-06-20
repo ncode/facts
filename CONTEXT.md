@@ -45,9 +45,33 @@ _Avoid_: available fact (too host-specific), implemented fact (too code-centric)
 The one documented dot-notation path for a supported fact concept across supported release targets. Facts favors schema predictability over preserving upstream spelling differences for the same concept.
 _Avoid_: platform alias, compatibility duplicate
 
+**Facts-native extension**:
+A supported fact that exposes accurate host information beyond Ruby Facter's fact set for that platform. It must use canonical fact spelling, be documented in the schema, and be validated like any other supported fact.
+_Avoid_: byte-parity exception, extra Facter fact
+
 **Supported release target**:
 A platform that Facts builds, validates, and treats as release-blocking. Supported release targets are broader than the host running a single discovery and narrower than every OS family with some compatible code path.
 _Avoid_: supported OS, supported platform (unless the context is casual)
+
+**Candidate release target**:
+A platform being evaluated for promotion into the supported release target set. It may have lab validation and working facts, but it is not release-blocking until an OpenSpec change updates the target set and validation gates.
+_Avoid_: supported target, best-effort support
+
+**illumos target**:
+The SunOS-family release target validated by Facts through OmniOS. Solaris Facter behavior can inform shared SunOS-compatible facts, but Oracle Solaris is a separate target until Facts has a repeatable Oracle Solaris validation host.
+_Avoid_: Solaris when referring to the OmniOS lab guest
+
+**Oracle Solaris target**:
+A separate SunOS-family candidate release target for Oracle Solaris. It is not covered by the illumos target and needs its own repeatable validation host before Facts treats Oracle Solaris behavior as release-blocking.
+_Avoid_: assuming OmniOS validates Oracle Solaris
+
+**DragonFly target identity**:
+DragonFly BSD reports as `DragonFly` for `os.name`, `os.family`, and `kernel.name` when Facts promotes DragonFly facts. It follows the BSD-family shape without collapsing into FreeBSD or generic BSD naming.
+_Avoid_: FreeBSD, BSD
+
+**illumos target identity**:
+The illumos target reports the validated distribution as `os.name` (`OmniOS` in the lab), the OS family as `illumos`, and the kernel as `SunOS`.
+_Avoid_: Solaris for `os.name` or `os.family` on OmniOS
 
 ### Contracts
 

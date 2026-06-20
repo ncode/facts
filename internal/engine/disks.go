@@ -104,6 +104,8 @@ func currentDisks(goos string, run commandRunner, hosts ...hostOS) map[string]an
 	switch goos {
 	case "freebsd":
 		return parseFreeBSDGeomDisks(run("sysctl", "-n", "kern.geom.confxml"))
+	case "dragonfly":
+		return currentDragonFlyDisks(run)
 	case "openbsd", "netbsd":
 		return currentBSDDisks(goos, run)
 	case "linux":
@@ -178,10 +180,14 @@ func currentPartitions(s *Session) map[string]any {
 	switch runtime.GOOS {
 	case "freebsd":
 		return parseFreeBSDGeomPartitions(s.commandOutput("sysctl", "-n", "kern.geom.confxml"))
+	case "dragonfly":
+		return currentDragonFlyPartitions(s.commandOutput)
 	case "openbsd":
 		return currentOpenBSDPartitions(s.commandOutput)
 	case "netbsd":
 		return currentNetBSDPartitions(s.commandOutput)
+	case "illumos":
+		return currentIllumosPartitions(s.commandOutput, filepath.Glob)
 	case "linux":
 		return currentLinuxPartitions("/sys/class/block", s.commandOutput, s.host)
 	default:
@@ -470,6 +476,41 @@ func freeBSDDiskType(rotationRate string) string {
 	return ""
 }
 
+func currentDragonFlyDisks(run commandRunner) map[string]any {
+	if run == nil {
+		return nil
+	}
+	disks := map[string]any{}
+	for _, device := range strings.Fields(run("sysctl", "-n", "kern.disks")) {
+		disk := parseDragonFlyDiskInfo(run("diskinfo", "/dev/"+device))
+		if len(disk) > 0 {
+			disks[device] = disk
+		}
+	}
+	if len(disks) == 0 {
+		return nil
+	}
+	return disks
+}
+
+func parseDragonFlyDiskInfo(input string) map[string]any {
+	for _, field := range strings.Fields(input) {
+		value, ok := strings.CutPrefix(field, "size=")
+		if !ok {
+			continue
+		}
+		sizeBytes, err := strconv.ParseInt(value, 0, 64)
+		if err != nil || sizeBytes <= 0 {
+			return nil
+		}
+		return map[string]any{
+			"size":       bytesToHumanReadable(sizeBytes),
+			"size_bytes": int(sizeBytes),
+		}
+	}
+	return nil
+}
+
 func currentBSDDisks(goos string, run commandRunner) map[string]any {
 	if run == nil {
 		return nil
@@ -628,6 +669,157 @@ func parseBSDDisklabelInt(input, key string) int {
 	return 0
 }
 
+func currentDragonFlyPartitions(run commandRunner) map[string]any {
+	if run == nil {
+		return nil
+	}
+	partitions := map[string]any{}
+	for _, device := range strings.Fields(run("sysctl", "-n", "kern.disks")) {
+		for _, target := range dragonFlyDisklabelTargets(device) {
+			for name, partition := range parseDragonFlyDisklabelPartitions(target, run("disklabel", target)) {
+				partitions[name] = partition
+			}
+		}
+	}
+	if len(partitions) == 0 {
+		return nil
+	}
+	return partitions
+}
+
+func dragonFlyDisklabelTargets(device string) []string {
+	return []string{device, device + "s1", device + "s2", device + "s3", device + "s4"}
+}
+
+func parseDragonFlyDisklabelPartitions(device, input string) map[string]any {
+	blockSize := parseBSDDisklabelInt(input, "display block size:")
+	if blockSize <= 0 {
+		blockSize = parseBSDDisklabelSectorSize(input)
+	}
+	if blockSize <= 0 {
+		return nil
+	}
+	partitions := map[string]any{}
+	for line := range strings.Lines(input) {
+		fields := strings.Fields(strings.TrimSpace(line))
+		if len(fields) < 4 || !strings.HasSuffix(fields[0], ":") {
+			continue
+		}
+		label := strings.TrimSuffix(fields[0], ":")
+		if len(label) != 1 || label == "c" {
+			continue
+		}
+		sizeBlocks, err := strconv.Atoi(fields[1])
+		if err != nil || sizeBlocks <= 0 {
+			continue
+		}
+		filesystem := fields[3]
+		if filesystem == "" || filesystem == "unused" {
+			continue
+		}
+		sizeBytes := sizeBlocks * blockSize
+		partitions["/dev/"+device+label] = map[string]any{
+			"filesystem": filesystem,
+			"size":       bytesToHumanReadable(sizeBytes),
+			"size_bytes": sizeBytes,
+		}
+	}
+	if len(partitions) == 0 {
+		return nil
+	}
+	return partitions
+}
+
+type pathGlobber func(string) ([]string, error)
+
+func currentIllumosPartitions(run commandRunner, glob pathGlobber) map[string]any {
+	if run == nil || glob == nil {
+		return nil
+	}
+	wholeSlices, err := glob("/dev/rdsk/*s2")
+	if err != nil {
+		return nil
+	}
+
+	partitions := map[string]any{}
+	for _, wholeSlice := range wholeSlices {
+		disk, ok := illumosWholeSliceDisk(wholeSlice)
+		if !ok {
+			continue
+		}
+		for name, partition := range parseIllumosVTOCPartitions(disk, run("prtvtoc", wholeSlice)) {
+			if fs := illumosPartitionFilesystem(run("fstyp", illumosRawPartitionDevice(name))); fs != "" {
+				partition["filesystem"] = fs
+			}
+			partitions[name] = partition
+		}
+	}
+	if len(partitions) == 0 {
+		return nil
+	}
+	return partitions
+}
+
+func illumosWholeSliceDisk(path string) (string, bool) {
+	name := strings.TrimPrefix(path, "/dev/rdsk/")
+	disk, ok := strings.CutSuffix(name, "s2")
+	return disk, ok && disk != ""
+}
+
+func parseIllumosVTOCPartitions(disk, input string) map[string]map[string]any {
+	sectorSize := parseIllumosVTOCSectorSize(input)
+	if sectorSize <= 0 {
+		return nil
+	}
+	partitions := map[string]map[string]any{}
+	for line := range strings.Lines(input) {
+		fields := strings.Fields(line)
+		if len(fields) < 6 || !isDecimalString(fields[0]) || fields[0] == "2" {
+			continue
+		}
+		count, err := strconv.Atoi(fields[4])
+		if err != nil || count <= 0 {
+			continue
+		}
+		sizeBytes := count * sectorSize
+		partitions["/dev/dsk/"+disk+"s"+fields[0]] = map[string]any{
+			"size":       bytesToHumanReadable(sizeBytes),
+			"size_bytes": sizeBytes,
+		}
+	}
+	if len(partitions) == 0 {
+		return nil
+	}
+	return partitions
+}
+
+func parseIllumosVTOCSectorSize(input string) int {
+	for line := range strings.Lines(input) {
+		fields := strings.Fields(line)
+		for i := 1; i < len(fields); i++ {
+			if fields[i] == "bytes/sector" {
+				size, err := strconv.Atoi(fields[i-1])
+				if err == nil {
+					return size
+				}
+			}
+		}
+	}
+	return 0
+}
+
+func illumosRawPartitionDevice(blockDevice string) string {
+	return strings.Replace(blockDevice, "/dev/dsk/", "/dev/rdsk/", 1)
+}
+
+func illumosPartitionFilesystem(output string) string {
+	fields := strings.Fields(output)
+	if len(fields) == 0 || fields[0] == "unknown_fstyp" || strings.Contains(fields[0], ":") {
+		return ""
+	}
+	return fields[0]
+}
+
 func parseBSDDisklabelPartitions(device, input string) map[string]any {
 	sectorSize := parseBSDDisklabelSectorSize(input)
 	if sectorSize <= 0 {
@@ -756,11 +948,47 @@ func partitionsFactWithMountEntries(partitions map[string]any, mountEntries []mo
 
 func addPartitionMount(partitions map[string]any, path string, mountpoint map[string]any) {
 	device, _ := mountpoint["device"].(string)
-	partition, ok := partitions[device].(map[string]any)
-	if !ok || partition["mount"] != nil {
+	partition := partitionForMountDevice(partitions, device)
+	if partition == nil {
 		return
 	}
-	partition["mount"] = path
+	if partition["mount"] == nil {
+		partition["mount"] = path
+	}
+	if partition["filesystem"] == nil {
+		if filesystem, ok := mountpoint["filesystem"].(string); ok && filesystem != "" {
+			partition["filesystem"] = filesystem
+		}
+	}
+}
+
+func partitionForMountDevice(partitions map[string]any, device string) map[string]any {
+	if partition, ok := partitions[device].(map[string]any); ok {
+		return partition
+	}
+	if partition, ok := partitions[strings.TrimPrefix(device, "/dev/")].(map[string]any); ok {
+		return partition
+	}
+	if label, ok := strings.CutPrefix(device, "/dev/gpt/"); ok {
+		return partitionByStringField(partitions, "partlabel", label)
+	}
+	if uuid, ok := strings.CutPrefix(device, "/dev/gptid/"); ok {
+		return partitionByStringField(partitions, "partuuid", uuid)
+	}
+	return nil
+}
+
+func partitionByStringField(partitions map[string]any, field, value string) map[string]any {
+	for _, name := range sortedKeys(partitions) {
+		partition, ok := partitions[name].(map[string]any)
+		if !ok {
+			continue
+		}
+		if got, ok := partition[field].(string); ok && got == value {
+			return partition
+		}
+	}
+	return nil
 }
 
 type mountEntry struct {
@@ -782,6 +1010,12 @@ func rootMountpoint(s *Session) map[string]any {
 	}
 	if runtime.GOOS == "netbsd" {
 		return currentNetBSDMountpoints(s)
+	}
+	if runtime.GOOS == "dragonfly" {
+		return currentDragonFlyMountpoints(s)
+	}
+	if runtime.GOOS == "illumos" {
+		return currentIllumosMountpoints(s)
 	}
 
 	entries := currentMountEntries(s)
@@ -810,6 +1044,22 @@ func currentNetBSDMountpoints(s *Session) map[string]any {
 	}
 	dfOutput := s.commandOutput("df", "-P")
 	return netBSDMountpointsFact(mountOutput, dfOutput)
+}
+
+func currentDragonFlyMountpoints(s *Session) map[string]any {
+	mountOutput := s.commandOutput("mount")
+	if mountOutput == "" {
+		return mountpointsFact([]mountEntry{{Path: "/"}}, statMountpoint)
+	}
+	return dragonFlyMountpointsFact(mountOutput, s.commandOutput("df", "-P"))
+}
+
+func currentIllumosMountpoints(s *Session) map[string]any {
+	mountOutput := s.commandOutput("mount", "-v")
+	if mountOutput == "" {
+		return mountpointsFact([]mountEntry{{Path: "/"}}, statMountpoint)
+	}
+	return illumosMountpointsFact(mountOutput, s.commandOutput("df", "-P"))
 }
 
 func currentMountEntries(s *Session) []mountEntry {
@@ -1028,6 +1278,98 @@ func netBSDMountpointsFact(mountOutput, dfOutput string) map[string]any {
 	})
 }
 
+func dragonFlyMountpointsFact(mountOutput, dfOutput string) map[string]any {
+	stats := parseDFP512Stats(dfOutput)
+	entries := parseBSDMountEntries(mountOutput)
+	for i := range entries {
+		entries[i].Device = dragonFlyMountDevice(entries[i].Device)
+	}
+	return mountpointsFact(entries, func(path string) (mountStat, bool) {
+		stat, ok := stats[path]
+		return stat, ok
+	})
+}
+
+func dragonFlyMountDevice(device string) string {
+	if strings.HasPrefix(device, "/") || !isDragonFlyPartitionName(device) {
+		return device
+	}
+	return "/dev/" + device
+}
+
+func isDragonFlyPartitionName(name string) bool {
+	if name == "" || strings.ContainsAny(name, "/:") {
+		return false
+	}
+	i := 0
+	for i < len(name) && ((name[i] >= 'a' && name[i] <= 'z') || (name[i] >= 'A' && name[i] <= 'Z')) {
+		i++
+	}
+	if i == 0 {
+		return false
+	}
+	for i < len(name) && name[i] >= '0' && name[i] <= '9' {
+		i++
+	}
+	if i >= len(name) || name[i] != 's' {
+		return false
+	}
+	i++
+	startSlice := i
+	for i < len(name) && name[i] >= '0' && name[i] <= '9' {
+		i++
+	}
+	if i == startSlice || i != len(name)-1 {
+		return false
+	}
+	last := name[i]
+	return last >= 'a' && last <= 'p' || last >= 'A' && last <= 'P'
+}
+
+func illumosMountpointsFact(mountOutput, dfOutput string) map[string]any {
+	stats := parseDFP512Stats(dfOutput)
+	return mountpointsFact(parseIllumosMountEntries(mountOutput), func(path string) (mountStat, bool) {
+		stat, ok := stats[path]
+		return stat, ok
+	})
+}
+
+func parseIllumosMountEntries(input string) []mountEntry {
+	entries := make([]mountEntry, 0, strings.Count(input, "\n"))
+	for line := range strings.SplitSeq(input, "\n") {
+		first, rest, ok := strings.Cut(line, " on ")
+		if !ok {
+			continue
+		}
+		if path, afterType, ok := strings.Cut(rest, " type "); ok {
+			filesystem, optionsText, ok := strings.Cut(strings.TrimSpace(afterType), " ")
+			if !ok || filesystem == "" {
+				continue
+			}
+			optionsText, _, _ = strings.Cut(optionsText, " on ")
+			entries = append(entries, mountEntry{
+				Device:     first,
+				Path:       path,
+				Filesystem: filesystem,
+				Options:    strings.Split(strings.TrimSpace(optionsText), "/"),
+			})
+			continue
+		}
+
+		fields := strings.Fields(rest)
+		if len(fields) < 2 {
+			continue
+		}
+		path := first
+		entries = append(entries, mountEntry{
+			Device:  fields[0],
+			Path:    path,
+			Options: strings.Split(fields[1], "/"),
+		})
+	}
+	return entries
+}
+
 func darwinMountpointsFact(entries []mountEntry, stat func(string) (mountStat, bool)) map[string]any {
 	missingStats := make(map[string]bool)
 	mountpoints := mountpointsFactWithSkip(entries, func(path string) (mountStat, bool) {
@@ -1162,7 +1504,7 @@ func skipMountEntry(entry mountEntry) bool {
 }
 
 func currentZFSFacts(goos string, run commandRunner) []ResolvedFact {
-	if run == nil || goos != "freebsd" && goos != "netbsd" {
+	if run == nil || goos != "freebsd" && goos != "netbsd" && goos != "illumos" {
 		return nil
 	}
 	facts := zfsFactsFromUpgradeOutput(run("zfs", "upgrade", "-v"))

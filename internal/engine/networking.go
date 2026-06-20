@@ -170,6 +170,9 @@ func networkingInterfacesForPlatform(s *Session, goos string, snapshotProvider f
 	}
 
 	values := networkingInterfacesFromSnapshots(snapshots, goos)
+	if goos == "dragonfly" {
+		mergeMissingInterfaceFacts(values, dragonFlyInterfacesFromIfconfig(s.commandOutput("ifconfig")))
+	}
 	if goos == "linux" {
 		addLinuxDHCPServersFromSnapshots(s, values, snapshots)
 		addLinuxRouteSourceBindings(s, values)
@@ -178,6 +181,71 @@ func networkingInterfacesForPlatform(s *Session, goos string, snapshotProvider f
 		addLinuxInterfaceMetadataFromRootWithHost("/", values, s.host)
 	}
 	return values
+}
+
+func mergeMissingInterfaceFacts(values, fallback map[string]any) {
+	for name, fallbackValue := range fallback {
+		fallbackInterface, ok := fallbackValue.(map[string]any)
+		if !ok {
+			continue
+		}
+		value, ok := values[name].(map[string]any)
+		if !ok {
+			values[name] = fallbackInterface
+			continue
+		}
+		for key, fact := range fallbackInterface {
+			if key == "bindings" || key == "bindings6" {
+				if bindings, ok := mergeInterfaceBindings(value[key], fact); ok {
+					value[key] = bindings
+					continue
+				}
+			}
+			if value[key] == nil {
+				value[key] = fact
+			}
+		}
+	}
+}
+
+func mergeInterfaceBindings(value, fallback any) ([]any, bool) {
+	bindings, ok := value.([]any)
+	if !ok {
+		return nil, false
+	}
+	fallbackBindings, ok := fallback.([]any)
+	if !ok {
+		return nil, false
+	}
+
+	merged := append([]any(nil), bindings...)
+	byAddress := map[string]map[string]any{}
+	for _, binding := range merged {
+		fields, ok := binding.(map[string]any)
+		if !ok {
+			continue
+		}
+		if address, ok := fields["address"].(string); ok && address != "" {
+			byAddress[address] = fields
+		}
+	}
+	for _, binding := range fallbackBindings {
+		fields, ok := binding.(map[string]any)
+		if !ok {
+			continue
+		}
+		address, _ := fields["address"].(string)
+		if existing := byAddress[address]; address != "" && existing != nil {
+			for key, fact := range fields {
+				if existing[key] == nil {
+					existing[key] = fact
+				}
+			}
+			continue
+		}
+		merged = append(merged, fields)
+	}
+	return merged, true
 }
 
 func networkingInterfacesFromSnapshots(snapshots []networkInterfaceSnapshot, goos string) map[string]any {
@@ -282,6 +350,15 @@ func currentNetworkingData(goos string, interfaces map[string]any, run commandRu
 		return primaryInterfaceFromRoute(run("route", "-n", "get", "default")), interfaces
 	case "netbsd":
 		addBSDInterfaceOperationalStates(interfaces, run)
+		expandInterfaceBindings(interfaces)
+		return primaryInterfaceFromRoute(run("route", "-n", "get", "default")), interfaces
+	case "dragonfly":
+		addBSDInterfaceOperationalStates(interfaces, run)
+		addFreeBSDDHCPServers(interfaces, readFile)
+		expandInterfaceBindings(interfaces)
+		return primaryInterfaceFromRoute(run("route", "-n", "get", "default")), interfaces
+	case "illumos":
+		addIllumosDHCPServers(interfaces, run)
 		expandInterfaceBindings(interfaces)
 		return primaryInterfaceFromRoute(run("route", "-n", "get", "default")), interfaces
 	case "openbsd":
@@ -557,6 +634,26 @@ func addOpenBSDDHCPServers(interfaces map[string]any, run commandRunner) {
 	}
 }
 
+func addIllumosDHCPServers(interfaces map[string]any, run commandRunner) {
+	for _, name := range sortedKeys(interfaces) {
+		iface, ok := interfaces[name].(map[string]any)
+		if !ok {
+			continue
+		}
+		if server := illumosDHCPServer(run("dhcpinfo", "-i", name, "ServerID")); server != "" {
+			iface["dhcp"] = server
+		}
+	}
+}
+
+func illumosDHCPServer(output string) string {
+	server := strings.TrimSpace(output)
+	if net.ParseIP(server) == nil {
+		return ""
+	}
+	return server
+}
+
 func addBSDInterfaceOperationalStates(interfaces map[string]any, run commandRunner) {
 	for _, name := range sortedKeys(interfaces) {
 		iface, ok := interfaces[name].(map[string]any)
@@ -596,6 +693,116 @@ func addFreeBSDDHCPServers(interfaces map[string]any, readFile fileReader) {
 			iface["dhcp"] = server
 		}
 	}
+}
+
+func dragonFlyInterfacesFromIfconfig(output string) map[string]any {
+	interfaces := map[string]any{}
+	var current map[string]any
+	for line := range strings.SplitSeq(output, "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		if line[0] != ' ' && line[0] != '\t' {
+			name, rest, ok := strings.Cut(line, ":")
+			if !ok || name == "" {
+				current = nil
+				continue
+			}
+			current = map[string]any{}
+			if mtu := ifconfigMTU(rest); mtu > 0 {
+				current["mtu"] = mtu
+			}
+			interfaces[name] = current
+			continue
+		}
+		if current == nil {
+			continue
+		}
+		fields := strings.Fields(strings.TrimSpace(line))
+		if len(fields) < 2 {
+			continue
+		}
+		switch fields[0] {
+		case "ether":
+			current["mac"] = fields[1]
+		case "inet":
+			if binding, ok := dragonFlyIPv4Binding(fields); ok {
+				appendInterfaceBinding(current, "bindings", binding)
+			}
+		case "inet6":
+			if binding, ok := dragonFlyIPv6Binding(fields); ok {
+				appendInterfaceBinding(current, "bindings6", binding)
+			}
+		}
+	}
+	return interfaces
+}
+
+func ifconfigMTU(text string) int {
+	fields := strings.Fields(text)
+	for i := 0; i+1 < len(fields); i++ {
+		if fields[i] != "mtu" {
+			continue
+		}
+		mtu, err := strconv.Atoi(fields[i+1])
+		if err == nil && mtu > 0 {
+			return mtu
+		}
+	}
+	return 0
+}
+
+func dragonFlyIPv4Binding(fields []string) (map[string]any, bool) {
+	ip := net.ParseIP(fields[1]).To4()
+	if ip == nil {
+		return nil, false
+	}
+	mask := dragonFlyIPv4Mask(fieldAfter(fields, "netmask"))
+	if mask == nil {
+		return interfaceBinding(ip, nil), true
+	}
+	return interfaceBinding(ip, &net.IPNet{IP: ip, Mask: mask}), true
+}
+
+func dragonFlyIPv4Mask(value string) net.IPMask {
+	if value == "" {
+		return nil
+	}
+	if raw, err := strconv.ParseUint(value, 0, 32); err == nil {
+		return net.IPv4Mask(byte(raw>>24), byte(raw>>16), byte(raw>>8), byte(raw))
+	}
+	ip := net.ParseIP(value).To4()
+	if ip == nil {
+		return nil
+	}
+	return net.IPMask(ip)
+}
+
+func dragonFlyIPv6Binding(fields []string) (map[string]any, bool) {
+	address, _, _ := strings.Cut(fields[1], "%")
+	ip := net.ParseIP(address)
+	if ip == nil || ip.To4() != nil {
+		return nil, false
+	}
+	prefix, err := strconv.Atoi(fieldAfter(fields, "prefixlen"))
+	if err != nil || prefix < 0 || prefix > 128 {
+		return interfaceBinding(ip, nil), true
+	}
+	return interfaceBinding(ip, &net.IPNet{IP: ip, Mask: net.CIDRMask(prefix, 128)}), true
+}
+
+func fieldAfter(fields []string, key string) string {
+	for i := 0; i+1 < len(fields); i++ {
+		if fields[i] == key {
+			return fields[i+1]
+		}
+	}
+	return ""
+}
+
+func appendInterfaceBinding(iface map[string]any, key string, binding map[string]any) {
+	bindings, _ := iface[key].([]any)
+	iface[key] = append(bindings, binding)
 }
 
 func bsdInterfaceStatus(output string) string {

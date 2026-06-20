@@ -175,3 +175,72 @@ jobs:
             go test . ./internal/engine ./internal/app ./tests/acceptance
             go build -o /tmp/facts ./cmd/facts
             sh tools/netbsd-release-gate.sh /tmp/facts
+
+  dragonfly_tests:
+    name: DragonFly BSD 6.4.2 (VM)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout current PR
+        uses: actions/checkout@v4
+
+      - name: Test and smoke in DragonFly BSD VM
+        uses: vmactions/dragonflybsd-vm@v1
+        with:
+          release: "6.4.2"
+          usesh: true
+          prepare: |
+            set -e
+            # Official Go pinned to go.mod's go directive. The release gate
+            # must run on real DragonFly, not just cross-compile on Linux.
+            pkg install -y curl ca_root_nss dmidecode
+            ver=$(awk '$1=="go"{print $2; exit}' go.mod)
+            curl -fsSL -o /tmp/go.tgz "https://go.dev/dl/go${ver}.dragonfly-amd64.tar.gz"
+            mkdir -p /usr/local
+            rm -rf /usr/local/go
+            tar -xzf /tmp/go.tgz -C /usr/local
+          run: |
+            set -e
+            export PATH=/usr/local/go/bin:$PATH
+            export GOFLAGS=-buildvcs=false
+            go version
+            go test . ./internal/engine ./internal/app ./tests/acceptance
+            go build -o /tmp/facts ./cmd/facts
+            sh tools/dragonfly-release-gate.sh /tmp/facts
+
+  omnios_tests:
+    name: OmniOS r151058 (VM)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout current PR
+        uses: actions/checkout@v4
+
+      - name: Test and smoke in OmniOS VM
+        uses: vmactions/omnios-vm@v1
+        with:
+          release: "r151058"
+          usesh: true
+          prepare: |
+            set -e
+            # Official illumos Go pinned to go.mod's go directive. OmniOS
+            # validates illumos only; Oracle Solaris stays out of this gate.
+            if ! command -v curl >/dev/null 2>&1; then
+              pkg install web/curl || pkg install curl
+            fi
+            if ! command -v gtar >/dev/null 2>&1; then
+              pkg install archiver/gnu-tar
+            fi
+            ver=$(awk '$1=="go"{print $2; exit}' go.mod)
+            curl -fsSL -o /tmp/go.tgz "https://go.dev/dl/go${ver}.illumos-amd64.tar.gz"
+            mkdir -p /usr/local
+            rm -rf /usr/local/go
+            gtar -xzf /tmp/go.tgz -C /usr/local
+          run: |
+            set -e
+            export PATH=/usr/local/go/bin:$PATH
+            export GOFLAGS=-buildvcs=false
+            go version
+            go test . ./internal/engine ./internal/app ./tests/acceptance
+            go build -o /tmp/facts ./cmd/facts
+            sh tools/illumos-release-gate.sh /tmp/facts

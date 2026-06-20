@@ -292,12 +292,18 @@ func probeLoadAverages(s *Session) map[string]any {
 
 func currentLoadAverages(goos string, readFile fileReader, run commandRunner) map[string]any {
 	switch goos {
-	case "darwin", "freebsd", "netbsd", "openbsd":
+	case "darwin", "freebsd", "netbsd", "openbsd", "dragonfly":
 		out := run("sysctl", "-n", "vm.loadavg")
 		if out == "" {
 			return emptyLoadAverages()
 		}
 		return parseLoadAverages(out)
+	case "illumos":
+		out := run("uptime")
+		if out == "" {
+			return emptyLoadAverages()
+		}
+		return parseIllumosLoadAverages(out)
 	case "linux":
 		data, err := readFile("/proc/loadavg")
 		if err != nil {
@@ -324,6 +330,14 @@ func parseLoadAverages(input string) map[string]any {
 		averages[key] = value
 	}
 	return averages
+}
+
+func parseIllumosLoadAverages(input string) map[string]any {
+	_, after, ok := strings.Cut(input, "load average:")
+	if !ok {
+		return emptyLoadAverages()
+	}
+	return parseLoadAverages(strings.ReplaceAll(after, ",", " "))
 }
 
 func emptyLoadAverages() map[string]any {

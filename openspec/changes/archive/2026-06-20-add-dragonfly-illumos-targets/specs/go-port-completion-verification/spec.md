@@ -1,8 +1,5 @@
-# go-port-completion-verification Specification
+## MODIFIED Requirements
 
-## Purpose
-TBD - created by archiving change complete-supported-platform-go-port. Update Purpose after archive.
-## Requirements
 ### Requirement: Supported-platform verification matrix
 The Go port SHALL pass a defined verification matrix before release completion.
 
@@ -30,10 +27,12 @@ The Go port SHALL pass a defined verification matrix before release completion.
 #### Scenario: OpenBSD validation gates
 - **WHEN** maintainers validate OpenBSD behavior
 - **THEN** OpenBSD CI or an approved OpenBSD VM runner MUST pass platform-sensitive Go tests and CLI fact smoke checks for OS, networking, memory, processors, DMI when supported, disks, partitions, mountpoints, uptime, virtualization, SSH, and timezone, using structured fact names only
+- **AND** arm64 local and amd64 lab wrapper paths MAY both exist for local validation
 
 #### Scenario: NetBSD validation gates
 - **WHEN** maintainers validate NetBSD behavior
 - **THEN** NetBSD CI or an approved NetBSD VM runner MUST pass platform-sensitive Go tests and CLI fact smoke checks for OS, networking, memory, processors, DMI when supported, disks, partitions, mountpoints, uptime, virtualization, SSH, and timezone, using structured fact names only
+- **AND** arm64 local and amd64 lab wrapper paths MAY both exist for local validation
 
 #### Scenario: DragonFly validation gates
 - **WHEN** maintainers validate DragonFly after promotion
@@ -42,14 +41,3 @@ The Go port SHALL pass a defined verification matrix before release completion.
 #### Scenario: illumos validation gates
 - **WHEN** maintainers validate illumos after promotion
 - **THEN** illumos CI or an approved illumos VM runner MUST pass platform-sensitive Go tests and CLI fact smoke checks for the illumos release-gate fact set, using structured fact names only
-
-### Requirement: Benchmark and performance evidence
-The Go port SHALL preserve performance discipline for hot-path changes.
-
-#### Scenario: Hot-path benchmark requirement
-- **WHEN** a change touches core fact collection, query/formatting, cache, config parsing, external fact loading, cloud metadata normalization, networking parsers, memory parsers, processor parsers, or mount/disk/partition parsers
-- **THEN** maintainers MUST run repeated focused benchmarks before and after the change, record representative results in the change record (PR description or CHANGELOG), and avoid accepting unjustified regressions
-
-#### Scenario: Cold compatibility exception
-- **WHEN** a change only adds cold diagnostic compatibility or an error branch that does not run in normal collection paths
-- **THEN** maintainers MAY skip benchmarks if the change record notes why no benchmark is needed

@@ -69,6 +69,27 @@ func TestPartitionsFactWithMountEntriesUsesResolverOrderForDuplicateDeviceLikeRu
 	}
 }
 
+func TestPartitionsFactMatchesFreeBSDGPTMountsByPartlabel(t *testing.T) {
+	partitions := map[string]any{
+		"vtbd0p2": map[string]any{"partlabel": "efiesp"},
+		"vtbd0p5": map[string]any{"partlabel": "rootfs"},
+	}
+	mountpoints := map[string]any{
+		"/":         map[string]any{"device": "/dev/gpt/rootfs", "filesystem": "ufs"},
+		"/boot/efi": map[string]any{"device": "/dev/gpt/efiesp", "filesystem": "msdosfs"},
+	}
+
+	got := partitionsFact(partitions, mountpoints)
+	root := got["vtbd0p5"].(map[string]any)
+	if root["mount"] != "/" || root["filesystem"] != "ufs" {
+		t.Fatalf("root partition = %#v, want mount and filesystem from mountpoint", root)
+	}
+	efi := got["vtbd0p2"].(map[string]any)
+	if efi["mount"] != "/boot/efi" || efi["filesystem"] != "msdosfs" {
+		t.Fatalf("efi partition = %#v, want mount and filesystem from mountpoint", efi)
+	}
+}
+
 func TestPartitionsFactReturnsPartitionsWithoutMountpoints(t *testing.T) {
 	partitions := map[string]any{
 		"/dev/sda1": map[string]any{"filesystem": "ext3"},
@@ -327,6 +348,37 @@ dk0: EFI, 163840 blocks at 32768, type: msdos
 dk1: netbsd-root, 20766720 blocks at 196608, type: ffs
 `
 
+const dragonFlyDisklabelDA0S1 = `# /dev/da0s1:
+#
+# Calculated informational fields for the slice:
+#
+# boot space:    1012224 bytes
+# data space:  134213632 blocks	# 131068.00 MB (137434759168 bytes)
+#
+# NOTE: The partition data base and stop are physically
+#       aligned instead of slice-relative aligned.
+#
+# All byte equivalent offsets must be aligned.
+#
+diskid: 206f7902-abb6-11ee-8d16-010000000000
+label:
+boot2 data base:      0x000000001000
+partitions data base: 0x0000000f8200
+partitions data stop: 0x001fffcf8200
+backup label:         0x001fffd57c00
+total size:           0x001fffd58c00	# 131069.35 MB
+alignment: 4096
+display block size: 1024	# for partition display and edit only
+16 partitions:
+#          size     offset    fstype   fsuuid
+  a:     786432          0    4.2BSD	#     768.000MB
+  b:    2097152     786432      swap	#    2048.000MB
+  d:  131330048    2883584   HAMMER2	#  128252.000MB
+  a-stor_uuid: 20778a7a-abb6-11ee-8d16-010000000000
+  b-stor_uuid: 20778b27-abb6-11ee-8d16-010000000000
+  d-stor_uuid: 20778bb3-abb6-11ee-8d16-010000000000
+`
+
 func TestParseBSDDisklabelDisk_returnsSizeFacts(t *testing.T) {
 	for _, tt := range []struct {
 		name  string
@@ -342,6 +394,14 @@ func TestParseBSDDisklabelDisk_returnsSizeFacts(t *testing.T) {
 				t.Fatalf("parseBSDDisklabelDisk() = %#v, want %#v", got, want)
 			}
 		})
+	}
+}
+
+func TestParseDragonFlyDiskInfo_returnsSizeFacts(t *testing.T) {
+	got := parseDragonFlyDiskInfo("/dev/da0         blksize=512  offset=0x000000000000 size=0x002000000000  128.00 GB\n")
+	want := map[string]any{"size": "128.00 GiB", "size_bytes": 137_438_953_472}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("parseDragonFlyDiskInfo() = %#v, want %#v", got, want)
 	}
 }
 
@@ -476,6 +536,125 @@ func TestCurrentDisksUsesBSDDisklabel(t *testing.T) {
 				t.Fatalf("currentDisks(%q) = %#v, want %#v", tt.goos, got, want)
 			}
 		})
+	}
+}
+
+func TestCurrentDisksUsesDragonFlyDiskinfo(t *testing.T) {
+	got := currentDisks("dragonfly", func(name string, args ...string) string {
+		switch strings.Join(append([]string{name}, args...), " ") {
+		case "sysctl -n kern.disks":
+			return "da0 vn3 vn2\n"
+		case "diskinfo /dev/da0":
+			return "/dev/da0         blksize=512  offset=0x000000000000 size=0x002000000000  128.00 GB\n"
+		case "diskinfo /dev/vn3", "diskinfo /dev/vn2":
+			return "No such file or directory\n"
+		default:
+			t.Fatalf("unexpected command %q %#v", name, args)
+			return ""
+		}
+	})
+	want := map[string]any{
+		"da0": map[string]any{"size": "128.00 GiB", "size_bytes": 137_438_953_472},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("currentDisks(dragonfly) = %#v, want %#v", got, want)
+	}
+}
+
+func TestParseDragonFlyDisklabelPartitions_returnsDevicePartitions(t *testing.T) {
+	got := parseDragonFlyDisklabelPartitions("da0s1", dragonFlyDisklabelDA0S1)
+	want := map[string]any{
+		"/dev/da0s1a": map[string]any{"filesystem": "4.2BSD", "size": "768.00 MiB", "size_bytes": 805_306_368},
+		"/dev/da0s1b": map[string]any{"filesystem": "swap", "size": "2.00 GiB", "size_bytes": 2_147_483_648},
+		"/dev/da0s1d": map[string]any{"filesystem": "HAMMER2", "size": "125.25 GiB", "size_bytes": 134_481_969_152},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("parseDragonFlyDisklabelPartitions() = %#v, want %#v", got, want)
+	}
+}
+
+func TestCurrentDragonFlyPartitionsReadsKernelDiskNames(t *testing.T) {
+	got := currentDragonFlyPartitions(func(name string, args ...string) string {
+		switch strings.Join(append([]string{name}, args...), " ") {
+		case "sysctl -n kern.disks":
+			return "da0 vn3\n"
+		case "disklabel da0":
+			return "disklabel: Operation not supported by device\n"
+		case "disklabel da0s1":
+			return dragonFlyDisklabelDA0S1
+		case "disklabel da0s2", "disklabel da0s3", "disklabel da0s4",
+			"disklabel vn3", "disklabel vn3s1", "disklabel vn3s2", "disklabel vn3s3", "disklabel vn3s4":
+			return "disklabel: Operation not supported by device\n"
+		default:
+			t.Fatalf("unexpected command %q %#v", name, args)
+			return ""
+		}
+	})
+	if _, ok := got["/dev/da0s1d"]; !ok {
+		t.Fatalf("currentDragonFlyPartitions() = %#v, want /dev/da0s1d", got)
+	}
+}
+
+func TestCurrentDragonFlyPartitionsTriesOtherSlices(t *testing.T) {
+	got := currentDragonFlyPartitions(func(name string, args ...string) string {
+		switch strings.Join(append([]string{name}, args...), " ") {
+		case "sysctl -n kern.disks":
+			return "da0\n"
+		case "disklabel da0", "disklabel da0s1":
+			return "disklabel: Operation not supported by device\n"
+		case "disklabel da0s2":
+			return strings.ReplaceAll(dragonFlyDisklabelDA0S1, "/dev/da0s1", "/dev/da0s2")
+		case "disklabel da0s3", "disklabel da0s4":
+			return ""
+		default:
+			t.Fatalf("unexpected command %q %#v", name, args)
+			return ""
+		}
+	})
+	if _, ok := got["/dev/da0s2d"]; !ok {
+		t.Fatalf("currentDragonFlyPartitions() = %#v, want /dev/da0s2d", got)
+	}
+}
+
+func TestCurrentIllumosPartitionsReadsVTOCSlices(t *testing.T) {
+	vtoc := `* /dev/rdsk/c9t0d0s2 EFI partition map
+*
+* Dimensions:
+*         512 bytes/sector
+*
+*                            First       Sector      Last
+* Partition  Tag  Flags      Sector       Count      Sector  Mount Directory
+       0     12    00          256        2048        2303
+       1      4    00         2304        4096        6399
+       2      5    01            0        8192        8191
+`
+	run := func(name string, args ...string) string {
+		switch strings.Join(append([]string{name}, args...), " ") {
+		case "prtvtoc /dev/rdsk/c9t0d0s2":
+			return vtoc
+		case "fstyp /dev/rdsk/c9t0d0s0":
+			return "pcfs\n"
+		case "fstyp /dev/rdsk/c9t0d0s1":
+			return "zfs\n"
+		default:
+			t.Fatalf("unexpected command %q %#v", name, args)
+			return ""
+		}
+	}
+	glob := func(pattern string) ([]string, error) {
+		if pattern != "/dev/rdsk/*s2" {
+			t.Fatalf("glob pattern = %q, want /dev/rdsk/*s2", pattern)
+		}
+		return []string{"/dev/rdsk/c9t0d0s2"}, nil
+	}
+
+	got := currentIllumosPartitions(run, glob)
+	want := map[string]any{
+		"/dev/dsk/c9t0d0s0": map[string]any{"filesystem": "pcfs", "size": "1.00 MiB", "size_bytes": 1_048_576},
+		"/dev/dsk/c9t0d0s1": map[string]any{"filesystem": "zfs", "size": "2.00 MiB", "size_bytes": 2_097_152},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("currentIllumosPartitions() = %#v, want %#v", got, want)
 	}
 }
 
@@ -1089,6 +1268,55 @@ ptyfs on /dev/pts type ptyfs (local)
 	devpts := got["/dev/pts"].(map[string]any)
 	if _, ok := devpts["size_bytes"]; ok {
 		t.Fatalf("/dev/pts size_bytes = %#v, want omitted without df row", devpts["size_bytes"])
+	}
+}
+
+func TestDragonFlyMountpointsFactParsesMountAndDFOutput(t *testing.T) {
+	mountOutput := `da0s1d on / (hammer2, local)
+devfs on /dev (devfs, nosymfollow, local)
+/dev/da0s1a on /boot (ufs, local)`
+	dfOutput := `Filesystem  512-blocks    Used     Avail Capacity  Mounted on
+da0s1d       247916160 2892416 245023744     1%    /
+devfs                2       2         0   100%    /dev
+/dev/da0s1a    1548188 1315440    108896    92%    /boot`
+
+	got := dragonFlyMountpointsFact(mountOutput, dfOutput)
+	root := got["/"].(map[string]any)
+	if root["device"] != "/dev/da0s1d" || root["filesystem"] != "hammer2" || root["size_bytes"] != 126_933_073_920 {
+		t.Fatalf("dragonFlyMountpointsFact()[/] = %#v", root)
+	}
+}
+
+func TestDragonFlyMountDeviceOnlyNormalizesDiskPartitions(t *testing.T) {
+	tests := []struct {
+		in   string
+		want string
+	}{
+		{in: "da0s1d", want: "/dev/da0s1d"},
+		{in: "nvme0s1a", want: "/dev/nvme0s1a"},
+		{in: "/dev/da0s1a", want: "/dev/da0s1a"},
+		{in: "devfs", want: "devfs"},
+		{in: "host10s1:/export", want: "host10s1:/export"},
+	}
+
+	for _, tt := range tests {
+		if got := dragonFlyMountDevice(tt.in); got != tt.want {
+			t.Fatalf("dragonFlyMountDevice(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
+func TestIllumosMountpointsFactParsesMountAndDFOutput(t *testing.T) {
+	mountOutput := `rpool/ROOT/omnios-r151058 on / type zfs read/write/setuid/devices/dev=4310002 on Thu Jan  1 00:00:00 1970
+swap on /tmp type tmpfs read/write/setuid/devices/xattr/dev=8b80002 on Fri Jun 19 19:05:19 2026`
+	dfOutput := `Filesystem            512-blocks        Used   Available Capacity  Mounted on
+rpool/ROOT/omnios-r151058    59932672     1902744    57629848     4%    /
+swap                     5046424      133048     4913376     3%    /tmp`
+
+	got := illumosMountpointsFact(mountOutput, dfOutput)
+	root := got["/"].(map[string]any)
+	if root["device"] != "rpool/ROOT/omnios-r151058" || root["filesystem"] != "zfs" || root["size_bytes"] != 30_685_528_064 {
+		t.Fatalf("illumosMountpointsFact()[/] = %#v", root)
 	}
 }
 

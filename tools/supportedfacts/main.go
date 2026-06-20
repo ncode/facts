@@ -33,6 +33,8 @@ var platforms = []platform{
 	{ID: "freebsd", Label: "FreeBSD"},
 	{ID: "openbsd", Label: "OpenBSD"},
 	{ID: "netbsd", Label: "NetBSD"},
+	{ID: "dragonfly", Label: "DragonFly BSD"},
+	{ID: "illumos", Label: "illumos"},
 }
 
 func main() {
@@ -204,6 +206,26 @@ var exampleJSON = map[string]string{
 		"os": {"family": "NetBSD", "name": "NetBSD", "release": {"major": "10", "minor": "1", "full": "10.1"}},
 		"partitions": {"/dev/dk1": {"filesystem": "ffs", "mount": "/", "partlabel": "netbsd-root", "size": "9.90 GiB", "size_bytes": 10632560640}},
 		"path": ["/sbin", "/bin", "/usr/sbin", "/usr/bin"],
+		"zfs": {"feature_numbers": ["1", "2", "3", "4", "5"], "version": "5"},
+		"zpool": {"feature_numbers": ["1", "2", "3", "4", "5"], "version": "5000"}
+	}`,
+	"dragonfly": `{
+		"kernel": {"name": "DragonFly", "release": {"full": "6.4-RELEASE", "major": "6", "minor": "4-RELEASE"}, "version": {"full": "6.4"}},
+		"load_averages": {"1m": 0.00, "5m": 0.00, "15m": 0.00},
+		"memory": {"system": {"total": "1.97 GiB", "total_bytes": 2110259200}, "swap": {"total": "2.00 GiB", "total_bytes": 2147483648}},
+		"mountpoints": {"/": {"device": "da0s1d", "filesystem": "hammer2", "size": "118.22 GiB", "size_bytes": 126933073920}},
+		"networking": {"hostname": "dragonfly01", "interfaces": {}},
+		"os": {"family": "DragonFly", "name": "DragonFly", "release": {"major": "6", "minor": "4-RELEASE", "full": "6.4-RELEASE"}},
+		"path": ["/sbin", "/usr/sbin", "/bin", "/usr/bin"]
+	}`,
+	"illumos": `{
+		"kernel": {"name": "SunOS", "release": {"full": "5.11", "major": "5"}, "version": {"full": "5"}},
+		"load_averages": {"1m": 0.01, "5m": 0.00, "15m": 0.00},
+		"memory": {"system": {"total": "3.99 GiB", "total_bytes": 4286013440}, "swap": {"total": "2.49 GiB", "total_bytes": 2676846592}},
+		"mountpoints": {"/": {"device": "rpool/ROOT/omnios-r151058", "size": "28.58 GiB", "size_bytes": 30685528064}},
+		"networking": {"hostname": "omnios01", "interfaces": {"net0": {"ip": "192.0.2.70", "mac": "52:54:00:12:34:70", "mtu": 1500}}},
+		"os": {"family": "illumos", "name": "OmniOS", "release": {"major": "151058", "full": "r151058"}},
+		"path": ["/usr/bin", "/usr/sbin", "/sbin"],
 		"zfs": {"feature_numbers": ["1", "2", "3", "4", "5"], "version": "5"},
 		"zpool": {"feature_numbers": ["1", "2", "3", "4", "5"], "version": "5000"}
 	}`,

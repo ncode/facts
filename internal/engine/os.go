@@ -223,6 +223,12 @@ func currentOSRelease(s *Session, goos string, readFile fileReader, run commandR
 		return parseOpenBSDOSRelease(run("uname", "-r"))
 	case "netbsd":
 		return parseOpenBSDOSRelease(run("uname", "-r"))
+	case "dragonfly":
+		return parseOpenBSDOSRelease(run("uname", "-r"))
+	case "illumos":
+		if release := parseIllumosRelease(readFileString("/etc/release", readFile)).Release; len(release) > 0 {
+			return release
+		}
 	case "darwin":
 		return parseDarwinOSRelease(run("uname", "-r"))
 	case "windows":
@@ -614,6 +620,35 @@ func parseOpenBSDOSRelease(output string) map[string]any {
 		release["minor"] = minor
 	}
 	return release
+}
+
+type illumosRelease struct {
+	Name    string
+	Release map[string]any
+}
+
+func parseIllumosRelease(input string) illumosRelease {
+	info := illumosRelease{}
+	for line := range strings.SplitSeq(input, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		if info.Name == "" {
+			info.Name = fields[0]
+		}
+		for _, field := range fields {
+			major, ok := strings.CutPrefix(field, "r")
+			if !ok || major == "" {
+				continue
+			}
+			if _, err := strconv.Atoi(major); err == nil {
+				info.Release = map[string]any{"full": field, "major": major}
+				return info
+			}
+		}
+	}
+	return info
 }
 
 func parseDarwinOSRelease(output string) map[string]any {
@@ -1699,6 +1734,10 @@ func osFamily(goos string, distro linuxDistro) string {
 		return "NetBSD"
 	case "openbsd":
 		return "OpenBSD"
+	case "dragonfly":
+		return "DragonFly"
+	case "illumos":
+		return "illumos"
 	default:
 		return goos
 	}
@@ -1727,6 +1766,13 @@ func osName(goos string, distro linuxDistro) string {
 		return "NetBSD"
 	case "openbsd":
 		return "OpenBSD"
+	case "dragonfly":
+		return "DragonFly"
+	case "illumos":
+		if distro.Name != "" {
+			return distro.Name
+		}
+		return "illumos"
 	default:
 		return goos
 	}
@@ -1746,6 +1792,10 @@ func kernelName(goos string) string {
 		return "NetBSD"
 	case "openbsd":
 		return "OpenBSD"
+	case "dragonfly":
+		return "DragonFly"
+	case "illumos":
+		return "SunOS"
 	default:
 		return goos
 	}
@@ -1782,6 +1832,9 @@ func osCoreFacts(s *Session) []ResolvedFact {
 	hardwareModel := s.cachedHardwareModel()
 	architecture := s.cachedArchitectureName()
 	linuxDistro := s.cachedLinuxDistro()
+	if runtime.GOOS == "illumos" {
+		linuxDistro.Name = parseIllumosRelease(readFileString("/etc/release", s.readFile)).Name
+	}
 	osFamily := osFamily(runtime.GOOS, linuxDistro)
 	osName := osName(runtime.GOOS, linuxDistro)
 	kernelName := kernelName(runtime.GOOS)

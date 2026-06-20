@@ -72,7 +72,7 @@ func probeTotalPhysicalMemoryBytes(s *Session) int {
 		return int(value)
 	case "freebsd":
 		return freeBSDMemoryValue(s.cachedFreeBSDMemoryInfo().System, "total_bytes")
-	case "netbsd", "openbsd":
+	case "netbsd", "openbsd", "dragonfly", "illumos":
 		return freeBSDMemoryValue(s.cachedBSDMemoryInfo().System, "total_bytes")
 	case "linux":
 		return parseLinuxMeminfoBytes(s.cachedLinuxMeminfo(), "MemTotal")
@@ -92,7 +92,7 @@ func probeAvailablePhysicalMemoryBytes(s *Session) int {
 		return parseDarwinVMStatAvailableBytes(out)
 	case "freebsd":
 		return freeBSDMemoryValue(s.cachedFreeBSDMemoryInfo().System, "available_bytes")
-	case "netbsd", "openbsd":
+	case "netbsd", "openbsd", "dragonfly", "illumos":
 		return freeBSDMemoryValue(s.cachedBSDMemoryInfo().System, "available_bytes")
 	case "linux":
 		return parseLinuxMeminfoBytes(s.cachedLinuxMeminfo(), "MemAvailable")
@@ -109,7 +109,7 @@ func probeTotalSwapMemoryBytes(s *Session) int {
 		return s.cachedDarwinSwapUsage().TotalBytes
 	case "freebsd":
 		return freeBSDMemoryValue(s.cachedFreeBSDMemoryInfo().Swap, "total_bytes")
-	case "netbsd", "openbsd":
+	case "netbsd", "openbsd", "dragonfly", "illumos":
 		return freeBSDMemoryValue(s.cachedBSDMemoryInfo().Swap, "total_bytes")
 	case "linux":
 		return parseLinuxMeminfoBytes(s.cachedLinuxMeminfo(), "SwapTotal")
@@ -124,7 +124,7 @@ func probeAvailableSwapMemoryBytes(s *Session) int {
 		return s.cachedDarwinSwapUsage().AvailableBytes
 	case "freebsd":
 		return freeBSDMemoryValue(s.cachedFreeBSDMemoryInfo().Swap, "available_bytes")
-	case "netbsd", "openbsd":
+	case "netbsd", "openbsd", "dragonfly", "illumos":
 		return freeBSDMemoryValue(s.cachedBSDMemoryInfo().Swap, "available_bytes")
 	case "linux":
 		return parseLinuxMeminfoBytes(s.cachedLinuxMeminfo(), "SwapFree")
@@ -170,16 +170,30 @@ func probeFreeBSDMemoryInfo(s *Session) freeBSDMemoryInfo {
 func probeBSDMemoryInfo(s *Session) bsdMemoryInfo {
 	switch runtime.GOOS {
 	case "netbsd", "openbsd":
+		values := map[string]int{
+			"hw.physmem": bsdSysctlInt(s, "hw.physmem64", "hw.physmem"),
+		}
+		for key, value := range parseBSDVMStatCounters(s.commandOutput("vmstat", "-s")) {
+			values[key] = value
+		}
+		return parseBSDMemory(values, s.commandOutput("swapctl", "-sk"))
+	case "dragonfly":
+		values := map[string]int{
+			"hw.physmem": bsdSysctlInt(s, "hw.physmem"),
+		}
+		for key, value := range parseBSDVMStatCounters(s.commandOutput("vmstat", "-s")) {
+			values[key] = value
+		}
+		return parseDragonFlyMemory(values, s.commandOutput("swapinfo", "-k"))
+	case "illumos":
+		return parseIllumosMemory(
+			s.commandOutput("kstat", "-p", "unix:0:system_pages:physmem", "unix:0:system_pages:freemem"),
+			s.commandOutput("pagesize"),
+			s.commandOutput("swap", "-s"),
+		)
 	default:
 		return bsdMemoryInfo{}
 	}
-	values := map[string]int{
-		"hw.physmem": bsdSysctlInt(s, "hw.physmem64", "hw.physmem"),
-	}
-	for key, value := range parseBSDVMStatCounters(s.commandOutput("vmstat", "-s")) {
-		values[key] = value
-	}
-	return parseBSDMemory(values, s.commandOutput("swapctl", "-sk"))
 }
 
 func freeBSDSysctlInt(s *Session, name string) int {
@@ -287,6 +301,55 @@ func parseBSDMemory(sysctlValues map[string]int, swapOutput string) bsdMemoryInf
 	}
 }
 
+func parseDragonFlyMemory(sysctlValues map[string]int, swapOutput string) bsdMemoryInfo {
+	return bsdMemoryInfo{
+		System: parseBSDSystemMemory(sysctlValues),
+		Swap:   parseFreeBSDSwapMemory(swapOutput),
+	}
+}
+
+func parseIllumosMemory(kstatOutput, pagesizeOutput, swapOutput string) bsdMemoryInfo {
+	pagesize := positiveInt(pagesizeOutput)
+	pages := parseIllumosKstatInts(kstatOutput)
+	system := map[string]any(nil)
+	physmem, okPhysmem := pages["physmem"]
+	freemem, okFreemem := pages["freemem"]
+	if pagesize > 0 && okPhysmem && okFreemem && physmem > 0 && freemem >= 0 {
+		total := physmem * pagesize
+		available := freemem * pagesize
+		used := max(0, total-available)
+		system = map[string]any{
+			"available_bytes": available,
+			"capacity":        memoryCapacity(used, total),
+			"total_bytes":     total,
+			"used_bytes":      used,
+		}
+	}
+	return bsdMemoryInfo{
+		System: system,
+		Swap:   parseIllumosSwapMemory(swapOutput),
+	}
+}
+
+func parseIllumosKstatInts(input string) map[string]int {
+	values := map[string]int{}
+	for line := range strings.SplitSeq(input, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		key := fields[0]
+		if i := strings.LastIndexByte(key, ':'); i >= 0 {
+			key = key[i+1:]
+		}
+		value, err := strconv.Atoi(fields[1])
+		if err == nil {
+			values[key] = value
+		}
+	}
+	return values
+}
+
 func parseBSDSystemMemory(values map[string]int) map[string]any {
 	total := values["hw.physmem"]
 	pagesize, okPagesize := values["vmstat.bytes_per_page"]
@@ -359,6 +422,45 @@ func parseBSDSwapMemory(input string) map[string]any {
 		"total_bytes":     total,
 		"used_bytes":      used,
 	}
+}
+
+func parseIllumosSwapMemory(input string) map[string]any {
+	fields := strings.Fields(strings.ReplaceAll(input, ",", ""))
+	usedKB := 0
+	availableKB := 0
+	for i, field := range fields {
+		switch field {
+		case "used":
+			if i > 0 {
+				usedKB = parseIllumosKToken(fields[i-1])
+			}
+		case "available":
+			if i > 0 {
+				availableKB = parseIllumosKToken(fields[i-1])
+			}
+		}
+	}
+	if usedKB == 0 && availableKB == 0 {
+		return nil
+	}
+	used := usedKB * 1024
+	available := availableKB * 1024
+	total := used + available
+	return map[string]any{
+		"available_bytes": available,
+		"capacity":        memoryCapacity(used, total),
+		"total_bytes":     total,
+		"used_bytes":      used,
+	}
+}
+
+func parseIllumosKToken(value string) int {
+	value = strings.TrimSuffix(value, "k")
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return 0
+	}
+	return parsed
 }
 
 func probeDarwinSwapUsage(s *Session) darwinSwapUsage {
