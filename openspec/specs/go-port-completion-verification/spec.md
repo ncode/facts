@@ -24,7 +24,8 @@ The Go port SHALL pass a defined verification matrix before release completion.
 
 #### Scenario: FreeBSD validation gates
 - **WHEN** maintainers validate FreeBSD behavior
-- **THEN** Lima FreeBSD build/smoke coverage MUST pass and MUST be broad enough to exercise the FreeBSD release-gate fact set defined by the supported-platform facts capability
+- **THEN** FreeBSD CI or an approved FreeBSD VM runner MUST pass platform-sensitive Go tests and CLI fact smoke checks for the FreeBSD release-gate fact set
+- **AND** the optional amd64 lab wrapper path MAY provide additional local validation without replacing existing Lima coverage in this change
 
 #### Scenario: OpenBSD validation gates
 - **WHEN** maintainers validate OpenBSD behavior
@@ -33,6 +34,14 @@ The Go port SHALL pass a defined verification matrix before release completion.
 #### Scenario: NetBSD validation gates
 - **WHEN** maintainers validate NetBSD behavior
 - **THEN** NetBSD CI or an approved NetBSD VM runner MUST pass platform-sensitive Go tests and CLI fact smoke checks for OS, networking, memory, processors, DMI when supported, disks, partitions, mountpoints, uptime, virtualization, SSH, and timezone, using structured fact names only
+
+#### Scenario: DragonFly validation gates
+- **WHEN** maintainers validate DragonFly after promotion
+- **THEN** DragonFly CI or an approved DragonFly VM runner MUST pass platform-sensitive Go tests and CLI fact smoke checks for the DragonFly release-gate fact set, using structured fact names only
+
+#### Scenario: illumos validation gates
+- **WHEN** maintainers validate illumos after promotion
+- **THEN** illumos CI or an approved illumos VM runner MUST pass platform-sensitive Go tests and CLI fact smoke checks for the illumos release-gate fact set, using structured fact names only
 
 ### Requirement: Benchmark and performance evidence
 The Go port SHALL preserve performance discipline for hot-path changes.
@@ -44,4 +53,3 @@ The Go port SHALL preserve performance discipline for hot-path changes.
 #### Scenario: Cold compatibility exception
 - **WHEN** a change only adds cold diagnostic compatibility or an error branch that does not run in normal collection paths
 - **THEN** maintainers MAY skip benchmarks if the change record notes why no benchmark is needed
-
