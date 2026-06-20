@@ -1,5 +1,12 @@
 # Facts (Go port)
 
+## Unreleased
+
+### Added
+
+- Release artifacts and cross-compile CI now include `arm` and `arm64` for
+  FreeBSD, OpenBSD, and NetBSD.
+
 ## v0.0.3 - 2026-06-18
 
 ### Added

@@ -36,7 +36,7 @@ LIMA_FREEBSD_FLAGS ?= --mount-none --cpus 2 --memory 4 --disk 40
 LIMA_GO_CONTAINER_IMAGES ?= golang:1.26-bookworm golang:1.26-alpine
 LIMA_DISTRO_IMAGES ?= debian:12-slim ubuntu:24.04 archlinux:latest oraclelinux:9
 LIMA_LINUX_FLAVORS ?= ubuntu-lts debian fedora opensuse oraclelinux rocky almalinux alpine archlinux
-LIMA_CROSS_TARGETS ?= linux/amd64 linux/arm64 windows/amd64 windows/arm64 darwin/amd64 darwin/arm64 freebsd/amd64 openbsd/amd64 netbsd/amd64 dragonfly/amd64 illumos/amd64
+LIMA_CROSS_TARGETS ?= linux/amd64 linux/arm64 windows/amd64 windows/arm64 darwin/amd64 darwin/arm64 freebsd/amd64 freebsd/arm freebsd/arm64 openbsd/amd64 openbsd/arm openbsd/arm64 netbsd/amd64 netbsd/arm netbsd/arm64 dragonfly/amd64 illumos/amd64
 
 LIMA_LINUX_BINARY ?= dist/facts-linux-$(LIMA_GOARCH)
 LIMA_FREEBSD_BINARY ?= dist/facts-freebsd-$(LIMA_GOARCH)
@@ -55,7 +55,7 @@ LDFLAGS ?= -X github.com/ncode/facts/internal/engine.Version=$(VERSION)
 PREFIX ?= /usr/local
 DESTDIR ?=
 DIST_DIR ?= dist
-DIST_TARGETS ?= linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64 freebsd/amd64 openbsd/amd64 netbsd/amd64 dragonfly/amd64 illumos/amd64
+DIST_TARGETS ?= linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64 freebsd/amd64 freebsd/arm freebsd/arm64 openbsd/amd64 openbsd/arm openbsd/arm64 netbsd/amd64 netbsd/arm netbsd/arm64 dragonfly/amd64 illumos/amd64
 SHA256 := $(shell command -v sha256sum >/dev/null 2>&1 && echo "sha256sum" || echo "shasum -a 256")
 
 .PHONY: test race bench bench-stable build clean dist install docs
