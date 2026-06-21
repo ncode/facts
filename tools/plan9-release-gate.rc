@@ -1,0 +1,49 @@
+#!/bin/rc
+# Plan 9 release gate: verifies the first Plan 9 fact set through a built
+# facts binary using Plan 9 rc syntax. It intentionally avoids POSIX sh.
+#
+# Usage: plan9-release-gate.rc [path-to-facts-binary]
+
+rfork e
+
+facts_bin=./facts
+if(! ~ $#* 0)
+	facts_bin=$1
+
+fn fail {
+	echo plan9-release-gate: $* >[1=2]
+	exit fail
+}
+
+fn assert_present {
+	fact=$1
+	if($facts_bin --json $fact | grep null >/dev/null)
+		fail fact $fact is null or missing
+}
+
+fn assert_null {
+	fact=$1
+	if(! $facts_bin --json $fact | grep null >/dev/null)
+		fail unsupported fact $fact is present
+}
+
+fn assert_match {
+	fact=$1
+	pattern=$2
+	if(! $facts_bin --json $fact | grep $pattern >/dev/null)
+		fail fact $fact did not match $pattern
+}
+
+assert_match os.name '"os.name": "Plan 9"'
+assert_match os.family '"os.family": "Plan 9"'
+assert_match kernel.name '"kernel.name": "Plan 9"'
+
+required=(os.architecture os.hardware networking.hostname networking.primary networking.ip networking.netmask networking.network networking.mac memory.system.total memory.system.total_bytes processors.count processors.isa processors.models system_uptime system_uptime.seconds timezone path)
+for(fact in $required)
+	assert_present $fact
+
+unsupported=(os.release os.release.full os.release.major kernel.release.full kernel.release.major kernel.version.full filesystems mountpoints disks partitions load_averages dmi cloud.provider ec2_metadata gce az_metadata fips_enabled virtual is_virtual networking.dhcp networking.mtu)
+for(fact in $unsupported)
+	assert_null $fact
+
+echo plan9-release-gate: first Plan 9 fact set present and unsupported facts absent

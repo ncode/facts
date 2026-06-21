@@ -1,0 +1,11 @@
+cpu Core 2/Xeon 3600 pge
+pge on
+coherence mfence
+cmpswap cmpswap486
+arch ACPI
+cache 0x0000000000000000          655360 wb
+cache 0x00000000000a0000          131072 uc
+cache 0x00000000000c0000          262144 wp
+cache 0x0000000000100000      2146435072 wb
+cache 0x0000000080000000      2147483648 uc
+cache 0x0000000100000000    545460846592 wb

@@ -219,6 +219,8 @@ jobs:
             goarch: amd64
           - goos: illumos
             goarch: amd64
+          - goos: plan9
+            goarch: amd64
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:

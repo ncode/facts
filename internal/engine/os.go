@@ -163,12 +163,18 @@ func currentArchitectureName(goos, machine string) string {
 }
 
 func probeKernelRelease(s *Session) string {
+	if runtime.GOOS == "plan9" {
+		return ""
+	}
 	return strings.TrimSpace(s.commandOutput("uname", "-r"))
 }
 
 func probeHardwareModel(s *Session) string {
 	if runtime.GOOS == "windows" {
 		return windowsHardwareFromGoArch(runtime.GOARCH)
+	}
+	if runtime.GOOS == "plan9" {
+		return plan9Architecture(s.readFile, runtime.GOARCH)
 	}
 	out := s.commandOutput("uname", "-m")
 	if out == "" {
@@ -229,6 +235,8 @@ func currentOSRelease(s *Session, goos string, readFile fileReader, run commandR
 		if release := parseIllumosRelease(readFileString("/etc/release", readFile)).Release; len(release) > 0 {
 			return release
 		}
+	case "plan9":
+		return nil
 	case "darwin":
 		return parseDarwinOSRelease(run("uname", "-r"))
 	case "windows":
@@ -1738,6 +1746,8 @@ func osFamily(goos string, distro linuxDistro) string {
 		return "DragonFly"
 	case "illumos":
 		return "illumos"
+	case "plan9":
+		return "Plan 9"
 	default:
 		return goos
 	}
@@ -1773,6 +1783,8 @@ func osName(goos string, distro linuxDistro) string {
 			return distro.Name
 		}
 		return "illumos"
+	case "plan9":
+		return "Plan 9"
 	default:
 		return goos
 	}
@@ -1796,6 +1808,8 @@ func kernelName(goos string) string {
 		return "DragonFly"
 	case "illumos":
 		return "SunOS"
+	case "plan9":
+		return "Plan 9"
 	default:
 		return goos
 	}
@@ -1838,6 +1852,15 @@ func osCoreFacts(s *Session) []ResolvedFact {
 	osFamily := osFamily(runtime.GOOS, linuxDistro)
 	osName := osName(runtime.GOOS, linuxDistro)
 	kernelName := kernelName(runtime.GOOS)
+	if runtime.GOOS == "plan9" {
+		return []ResolvedFact{
+			{Name: "os.architecture", Value: architecture},
+			{Name: "os.family", Value: osFamily},
+			{Name: "os.hardware", Value: hardwareModel},
+			{Name: "os.name", Value: osName},
+			{Name: "kernel.name", Value: kernelName},
+		}
+	}
 	kernelRelease := s.cachedKernelRelease()
 	osRelease := s.cachedOSRelease()
 	kernelVersion := kernelVersionFact(runtime.GOOS, kernelRelease, "")

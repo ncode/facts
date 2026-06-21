@@ -101,6 +101,9 @@ func numericIdentityValue(value string) any {
 // identityCoreFacts assembles the identity category fact (the current user,
 // group, and privilege state) for the current host.
 func identityCoreFacts(s *Session) []ResolvedFact {
+	if runtime.GOOS == "plan9" {
+		return nil
+	}
 	return []ResolvedFact{
 		{Name: "identity", Value: s.cachedIdentity()},
 	}

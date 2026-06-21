@@ -77,11 +77,12 @@ The Go port SHALL preserve supported-platform Ruby resolver fallback order and d
 - **THEN** it MUST do so through the Session's host seam (e.g. `Session.commandOutput`/`readFile`), and a test MUST be able to substitute a fake host so the resolver runs to completion without touching the real operating system
 
 ### Requirement: Virtualization and cloud parity
-The Go port SHALL match Ruby-compatible virtualization, hypervisor, and cloud metadata behavior on supported platforms.
+The Go port SHALL match Ruby-compatible virtualization, hypervisor, and cloud metadata behavior on supported platforms, and MAY expose accurate Facts-native virtualization detection when a supported platform has stable native indicators not covered by Ruby Facter.
 
 #### Scenario: Virtualization and hypervisor facts
-- **WHEN** supported-platform virtualization facts are resolved from Linux `virt-what`, cgroups, DMI, VMware, Xen, OpenVZ, Windows OEM/netkvm/WMI indicators, macOS indicators, FreeBSD virtualization indicators, OpenBSD DMI product indicators, or NetBSD indicators identified by the parity audit
+- **WHEN** supported-platform virtualization facts are resolved from Linux `virt-what`, cgroups, DMI, VMware, Xen, OpenVZ, Windows OEM/netkvm/WMI indicators, macOS indicators, FreeBSD virtualization indicators, OpenBSD DMI product/vendor indicators, NetBSD DMI indicators, DragonFly DMI/PCI indicators, illumos SMBIOS/PCI indicators, or other indicators identified by the parity audit
 - **THEN** the Go port MUST match Ruby `virtual`, `is_virtual`, `hypervisors.*`, Xen, container, and nil/unknown behavior for supported detection paths
+- **AND** it MUST report QEMU/KVM guests as virtual when those supported native indicators expose QEMU, SeaBIOS, or Virtio metadata
 
 #### Scenario: Cloud metadata facts
 - **WHEN** EC2, GCE, or Azure metadata is available, invalid, blocked by virtualization/provider checks, empty, or unavailable
@@ -124,6 +125,16 @@ A fact that cannot resolve a value or does not apply to the host platform SHALL 
 #### Scenario: Unresolvable facts are absent
 - **WHEN** a fact's source cannot produce a value (no augparse binary for `augeas.version`, no enumerable devices for `disks`/`partitions`, unknown `processors.speed`)
 - **THEN** the fact (or key) MUST be absent from every output mode, not rendered as an empty string or empty map
+
+#### Scenario: Optional primary networking values are absent when unresolved
+- **WHEN** supported-platform networking facts are rendered for full structured output
+- **THEN** optional top-level primary fields such as `networking.ip`, `networking.ip6`, `networking.mac`, `networking.netmask`, `networking.netmask6`, `networking.network`, `networking.network6`, `networking.primary`, and `networking.scope6` MUST be absent when unresolved
+- **AND** populated primary networking values MUST still be emitted
+
+#### Scenario: Empty mountpoint entries are absent
+- **WHEN** supported-platform mountpoint facts are rendered for full structured output
+- **THEN** entries with no mountpoint fields MUST be absent instead of rendering an empty map
+- **AND** populated mountpoint entries MUST still be emitted
 
 #### Scenario: Platform-inapplicable facts are absent
 - **WHEN** discovery runs on a platform where Ruby Facter does not resolve a fact (`fips_enabled` outside Linux and Windows, `os.selinux` outside Linux)
@@ -277,3 +288,50 @@ Facts SHALL extend FreeBSD, OpenBSD, and NetBSD structured fact coverage only wh
 #### Scenario: Unstable NetBSD DHCP source remains absent
 - **WHEN** NetBSD DHCP data is available only from an unstable or binary lease source
 - **THEN** `networking.interfaces.<name>.dhcp` and `networking.dhcp` MUST remain absent unless a stable text source is selected and tested
+
+### Requirement: Kernel facts are structured
+
+Kernel facts SHALL be emitted as a structured `kernel` map rather than as flat top-level facts.
+
+#### Scenario: Kernel output shape
+
+- **WHEN** core facts are resolved on any supported release target
+- **THEN** `kernel.name` MUST contain the kernel name
+- **AND** `kernel.release.full` MUST contain the full kernel release
+- **AND** `kernel.release.major` and `kernel.release.minor` MUST contain the parsed release components when available
+- **AND** `kernel.release.patch` MUST be present only when a patch component is available
+- **AND** `kernel.version.full` MUST contain the kernel version
+- **AND** `kernelmajversion`, `kernelrelease`, and `kernelversion` MUST be absent
+
+### Requirement: Collection facts are arrays
+
+Collection facts SHALL be emitted as arrays rather than delimiter-separated strings.
+
+#### Scenario: Filesystems output shape
+
+- **WHEN** filesystem types are resolved on Linux or macOS/Darwin
+- **THEN** `filesystems` MUST be an array of filesystem type strings
+- **AND** it MUST NOT be a comma-separated string
+
+#### Scenario: PATH output shape
+
+- **WHEN** core facts are resolved on any supported release target
+- **THEN** `path` MUST be an array of PATH entries in lookup order
+- **AND** platform path-list separators MUST NOT appear inside entries unless they are part of the entry text itself
+- **AND** empty path entries MUST be omitted
+
+#### Scenario: ZFS output shape
+
+- **WHEN** usable ZFS command output is available on a supported platform
+- **THEN** `zfs.feature_numbers` MUST be an array of supported filesystem version strings
+- **AND** `zfs.version` MUST be the latest supported filesystem version string
+- **AND** `zfs_featurenumbers` and `zfs_version` MUST be absent
+
+#### Scenario: Zpool output shape
+
+- **WHEN** usable Zpool command output is available on a supported platform
+- **THEN** `zpool.feature_numbers` MUST be an array of supported pool version strings
+- **AND** `zpool.feature_flags` MUST be an array of supported pool feature flag strings when feature flags are available
+- **AND** `zpool.version` MUST be the latest supported pool version string, or `5000` when feature flags are present
+- **AND** `zpool_featurenumbers`, `zpool_featureflags`, and `zpool_version` MUST be absent
+

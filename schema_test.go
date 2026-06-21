@@ -59,6 +59,7 @@ var schemaPlatforms = map[string]bool{
 	"netbsd":    true,
 	"dragonfly": true,
 	"illumos":   true,
+	"plan9":     true,
 }
 
 func loadSchema(t *testing.T) map[string]schemaEntry {

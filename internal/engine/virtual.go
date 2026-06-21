@@ -134,6 +134,8 @@ func detectVirtualization(s *Session) virtualization {
 		return detectDMIHostVirtualization(currentIllumosVirtualizationInput(s.commandOutput))
 	case "windows":
 		return detectWindowsVirtualization(currentWindowsVirtualizationInput(runtime.GOOS, s.commandOutput))
+	case "plan9":
+		return virtualization{Unknown: true}
 	default:
 		return virtualization{Name: "physical"}
 	}
