@@ -288,7 +288,6 @@ func wildcardPrefixAbsent(pattern string, paths []string) bool {
 	for i, segment := range patternSegments {
 		if segment == "*" {
 			wildcard = i
-			break
 		}
 	}
 	if wildcard == -1 {

@@ -206,6 +206,37 @@ func TestSchemaMissingEntriesRequiresWildcardChildWhenCollectionExists(t *testin
 	}
 }
 
+func TestSchemaMissingEntriesSkipsAbsentNestedWildcardCollection(t *testing.T) {
+	s := Schema{
+		"a.*.b.*.c": {
+			Type:        "string",
+			Description: "nested child",
+			Platforms:   []string{"linux"},
+		},
+	}
+
+	got := s.MissingEntries([]string{"a.one.name"}, "linux")
+	if len(got) != 0 {
+		t.Fatalf("MissingEntries() = %#v, want none", got)
+	}
+}
+
+func TestSchemaMissingEntriesRequiresNestedWildcardChildWhenCollectionExists(t *testing.T) {
+	s := Schema{
+		"a.*.b.*.c": {
+			Type:        "string",
+			Description: "nested child",
+			Platforms:   []string{"linux"},
+		},
+	}
+
+	got := s.MissingEntries([]string{"a.one.b.two.name"}, "linux")
+	want := []string{"a.*.b.*.c"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("MissingEntries() = %#v, want %#v", got, want)
+	}
+}
+
 func TestValidateRejectsUnknownPlatform(t *testing.T) {
 	s := Schema{
 		"kernel.name": {
