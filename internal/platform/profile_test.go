@@ -13,6 +13,17 @@ func TestProfilesExposeExpectedTargetIDs(t *testing.T) {
 	}
 }
 
+func TestProfileOrderMatchesProfileTable(t *testing.T) {
+	if len(profileOrder) != len(profiles) {
+		t.Fatalf("profileOrder has %d entries, profiles has %d", len(profileOrder), len(profiles))
+	}
+	for _, id := range profileOrder {
+		if _, ok := profiles[id]; !ok {
+			t.Fatalf("profileOrder references unknown profile %q", id)
+		}
+	}
+}
+
 func TestTargetSetsRemainDistinct(t *testing.T) {
 	compileTargets := CompileTargets()
 	distributionTargets := DistributionTargets()

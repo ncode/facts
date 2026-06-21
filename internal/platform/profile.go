@@ -340,7 +340,11 @@ func Lookup(goos string) (Profile, bool) {
 func Profiles() []Profile {
 	out := make([]Profile, 0, len(profileOrder))
 	for _, id := range profileOrder {
-		out = append(out, copyProfile(profiles[id]))
+		profile, ok := profiles[id]
+		if !ok {
+			panic("internal/platform: profileOrder references unknown profile " + id)
+		}
+		out = append(out, copyProfile(profile))
 	}
 	return out
 }

@@ -211,7 +211,8 @@ func probeWindowsOSVersionInput(s *Session) string {
 }
 
 func currentOSRelease(s *Session, goos string, readFile fileReader, run commandRunner) any {
-	if profile, ok := targets.Lookup(goos); ok && !profile.Capabilities.OSRelease {
+	profile, ok := targets.Lookup(goos)
+	if !ok || !profile.Capabilities.OSRelease {
 		return nil
 	}
 	switch goos {

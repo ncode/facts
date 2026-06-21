@@ -37,6 +37,22 @@ func TestCurrentOSReleasePlan9OmitsOSVersionProtocol(t *testing.T) {
 	}
 }
 
+func TestCurrentOSReleaseUnsupportedTargetOmitsOSRelease(t *testing.T) {
+	t.Parallel()
+
+	for _, goos := range []string{"solaris", "aix"} {
+		t.Run(goos, func(t *testing.T) {
+			t.Parallel()
+
+			s := NewSession()
+			s.host = &fakeHostOS{runOutput: "5.11\n"}
+			if got := currentOSRelease(s, goos, nil, func(string, ...string) string { return "5.11\n" }); got != nil {
+				t.Fatalf("currentOSRelease(%s) = %#v, want nil", goos, got)
+			}
+		})
+	}
+}
+
 func TestCurrentLoadAveragesPlan9OmitsLoadAverages(t *testing.T) {
 	t.Parallel()
 
