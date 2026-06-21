@@ -86,19 +86,26 @@ func effectiveExternalDirs(explicit []string) []string {
 }
 
 func configPathFromArgs(args []string) string {
-	for i := range args {
+	for i := 0; i < len(args); i++ {
 		arg := args[i]
-		if value, ok := strings.CutPrefix(arg, "--config="); ok {
-			return value
+		option, ok := cli.LookupOption(arg)
+		if !ok {
+			continue
 		}
-		if value, ok := strings.CutPrefix(arg, "-c="); ok {
-			return value
+		if value, hasInlineValue := inlineOptionValue(arg); hasInlineValue {
+			if option.Canonical == "--config" {
+				return value
+			}
+			continue
 		}
-		if arg == "--config" || arg == "-c" {
+		if option.Canonical == "--config" {
 			if i+1 < len(args) {
 				return args[i+1]
 			}
 			return ""
+		}
+		if option.Arity == cli.RequiredValue && i+1 < len(args) {
+			i++
 		}
 	}
 	return ""
@@ -108,68 +115,55 @@ func externalDirsFromArgs(args []string) []string {
 	dirs := []string{}
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
-		if value, ok := strings.CutPrefix(arg, "--external-dir="); ok {
-			dirs = append(dirs, value)
+		option, ok := cli.LookupOption(arg)
+		if !ok {
 			continue
 		}
-		if arg == "--external-dir" {
+		if value, hasInlineValue := inlineOptionValue(arg); hasInlineValue {
+			if option.Canonical == "--external-dir" {
+				dirs = append(dirs, value)
+			}
+			continue
+		}
+		if option.Canonical == "--external-dir" {
 			if i+1 < len(args) {
 				dirs = append(dirs, args[i+1])
 				i++
 			}
 			continue
 		}
-		if optionTakesValueForGroupListing(arg) && i+1 < len(args) {
+		if option.Arity == cli.RequiredValue && i+1 < len(args) {
 			i++
 		}
 	}
 	return dirs
 }
 
-func optionTakesValueForGroupListing(arg string) bool {
-	switch arg {
-	case "--config", "-c", "--log-level", "-l":
-		return true
-	default:
-		return false
-	}
+func inlineOptionValue(arg string) (string, bool) {
+	_, value, ok := strings.Cut(arg, "=")
+	return value, ok
 }
 
 func helpText() string {
-	return `Usage
+	var b strings.Builder
+	b.WriteString(`Usage
 =====
 
 facts [options] [query] [query] [...]
 
 Options
 =======
-	       [--color]                      Force color output (default: enabled when writing to a terminal). In the default output format, fact keys are colored by nesting depth.
-	       [--no-color]                   Disable color output.
-	    -c [--config]                     The location of the config file.
-	    -d [--debug]                      Enable debug output.
-	       [--external-dir]               A directory to use for external facts.
-	       [--hocon]                      Output in Hocon format.
-	    -j [--json]                       Output in JSON format.
-	    -l [--log-level]                  Set logging level.
-	       [--no-block]                   Disable fact blocking.
-	       [--no-cache]                   Disable loading and refreshing facts from the cache.
-	       [--no-external-facts]          Disable external facts.
-	       [--verbose]                    Enable verbose output.
-	    -y [--yaml]                       Output in YAML format.
-	       [--strict]                     Enable more aggressive error reporting.
-	    -t [--timing]                     Show how much time it took to resolve each fact.
-	       [--sequential]                 Resolve facts sequentially.
-	       [--http-debug]                 Write HTTP request and responses to stderr.
-	    -h [--help]                       Help for all arguments
-	       --version, -v                  Print the version
-	       --man                          Display manual.
-	       --list-block-groups            List block groups
-	       --list-cache-groups            List cache groups
-`
+`)
+	for _, option := range cli.DocumentedOptions() {
+		b.WriteString(option.Documentation.Help)
+		b.WriteByte('\n')
+	}
+	return b.String()
 }
 
 func manText() string {
-	return `facts - collect and display facts about the current system
+	var b strings.Builder
+	b.WriteString(`facts - collect and display facts about the current system
 ==========================================================
 
 SYNOPSIS
@@ -186,27 +180,12 @@ Many command line options can also be set via the HOCON config file. This file c
 
 OPTIONS
 -------
-  * --color: Force color output (default: enabled when writing to a terminal). In the default output format, fact keys are colored by nesting depth.
-  * --no-color: Disable color output.
-  * -c, --config: The location of the config file.
-  * -d, --debug: Enable debug output.
-  * --external-dir: A directory to use for external facts.
-  * --hocon: Output in Hocon format.
-  * -j, --json: Output in JSON format.
-  * -l, --log-level: Set logging level.
-  * --no-block: Disable fact blocking.
-  * --no-cache: Disable loading and refreshing facts from the cache.
-  * --no-external-facts: Disable external facts.
-  * --verbose: Enable verbose output.
-  * -y, --yaml: Output in YAML format.
-  * --strict: Enable more aggressive error reporting.
-  * -t, --timing: Show how much time it took to resolve each fact.
-  * --sequential: Resolve facts sequentially.
-  * --http-debug: Write HTTP request and responses to stderr.
-  * --version, -v: Print the version.
-  * --man: Display manual.
-  * --list-block-groups: List block groups.
-  * --list-cache-groups: List cache groups.
+`)
+	for _, option := range cli.DocumentedOptions() {
+		b.WriteString(option.Documentation.Man)
+		b.WriteByte('\n')
+	}
+	b.WriteString(`
 
 FILES
 -----
@@ -231,7 +210,8 @@ Display a single structured fact:
 Format facts as JSON:
 
     facts --json os.name os.release.major processors.isa
-`
+`)
+	return b.String()
 }
 
 func runQuery(stdout, stderr io.Writer, args []string) error {

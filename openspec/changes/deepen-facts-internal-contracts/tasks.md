@@ -9,11 +9,11 @@
 
 ## 2. CLI Option Contract
 
-- [ ] 2.1 Add shared CLI option metadata for canonical names, aliases, arity, repeatability, task flags, conflicts, and documentation rows.
-- [ ] 2.2 Update CLI validation and argument helpers to read option metadata from the shared contract.
-- [ ] 2.3 Update app helper paths that inspect raw args, including config path discovery, external dir discovery, and group-listing value handling.
-- [ ] 2.4 Add `--force-dot-resolution` to help/man surfaces while it remains accepted.
-- [ ] 2.5 Add drift tests proving accepted non-hidden options appear in help/man output and the installed man page.
+- [x] 2.1 Add shared CLI option metadata for canonical names, aliases, arity, repeatability, task flags, conflicts, and documentation rows.
+- [x] 2.2 Update CLI validation and argument helpers to read option metadata from the shared contract.
+- [x] 2.3 Update app helper paths that inspect raw args, including config path discovery, external dir discovery, and group-listing value handling.
+- [x] 2.4 Add `--force-dot-resolution` to help/man surfaces while it remains accepted.
+- [x] 2.5 Add drift tests proving accepted non-hidden options appear in help/man output and the installed man page.
 
 ## 3. Platform Target Profile
 
