@@ -63,7 +63,7 @@ func (h *fakeHostOS) goos() string {
 }
 
 func (h *fakeHostOS) readFile(path string) ([]byte, error) {
-	data, ok := h.files[path]
+	data, ok := h.files[fakeHostPath(path)]
 	if !ok {
 		return nil, os.ErrNotExist
 	}
@@ -72,7 +72,7 @@ func (h *fakeHostOS) readFile(path string) ([]byte, error) {
 
 func (h *fakeHostOS) readDir(path string) ([]os.DirEntry, error) {
 	h.readDirCalls = append(h.readDirCalls, path)
-	entries, ok := h.dirs[path]
+	entries, ok := h.dirs[fakeHostPath(path)]
 	if !ok {
 		return nil, os.ErrNotExist
 	}
@@ -80,7 +80,7 @@ func (h *fakeHostOS) readDir(path string) ([]os.DirEntry, error) {
 }
 
 func (h *fakeHostOS) stat(path string) (os.FileInfo, error) {
-	info, ok := h.stats[path]
+	info, ok := h.stats[fakeHostPath(path)]
 	if !ok {
 		return nil, os.ErrNotExist
 	}
@@ -88,7 +88,7 @@ func (h *fakeHostOS) stat(path string) (os.FileInfo, error) {
 }
 
 func (h *fakeHostOS) lstat(path string) (os.FileInfo, error) {
-	info, ok := h.lstats[path]
+	info, ok := h.lstats[fakeHostPath(path)]
 	if !ok {
 		return nil, os.ErrNotExist
 	}
@@ -97,7 +97,7 @@ func (h *fakeHostOS) lstat(path string) (os.FileInfo, error) {
 
 func (h *fakeHostOS) glob(pattern string) ([]string, error) {
 	h.globCalls = append(h.globCalls, pattern)
-	matches, ok := h.globs[pattern]
+	matches, ok := h.globs[fakeHostPath(pattern)]
 	if !ok {
 		return nil, nil
 	}
@@ -106,8 +106,12 @@ func (h *fakeHostOS) glob(pattern string) ([]string, error) {
 
 func (h *fakeHostOS) statMountpoint(path string) (mountStat, bool) {
 	h.statMountpointCalls = append(h.statMountpointCalls, path)
-	stat, ok := h.mountStats[path]
+	stat, ok := h.mountStats[fakeHostPath(path)]
 	return stat, ok
+}
+
+func fakeHostPath(path string) string {
+	return filepath.ToSlash(path)
 }
 
 type fakeFileInfo struct {

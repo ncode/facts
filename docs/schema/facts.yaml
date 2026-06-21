@@ -588,7 +588,7 @@ networking.interfaces.*.scope6:
 networking.interfaces.*.speed:
   type: integer
   description: The negotiated speed of the interface, in Mbit/s.
-  platforms: [linux]
+  platforms: [linux, freebsd]
   conditional: true
 networking.ip:
   type: string
