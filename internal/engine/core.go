@@ -37,7 +37,7 @@ func buildCoreFacts(s *Session) []ResolvedFact {
 	facts := []ResolvedFact{
 		{Name: "facterversion", Value: Version},
 		{Name: "is_virtual", Value: isVirtualFact},
-		{Name: "path", Value: pathEntries(os.Getenv("PATH"))},
+		{Name: "path", Value: currentPathEntries(runtime.GOOS, os.Getenv)},
 		{Name: "virtual", Value: virtualFact},
 	}
 	facts = append(facts, networkingCoreFacts(s)...)
@@ -62,12 +62,26 @@ func buildCoreFacts(s *Session) []ResolvedFact {
 	return facts
 }
 
+func currentPathEntries(goos string, getenv func(string) string) []string {
+	key := "PATH"
+	separator := string(os.PathListSeparator)
+	if goos == "plan9" {
+		key = "path"
+		separator = "\x00"
+	}
+	return pathEntriesWithSeparator(getenv(key), separator)
+}
+
 // pathEntries splits a raw PATH value into an ordered array of entries on the
 // host platform's path-list separator, preserving entry order and dropping
 // empty entries.
 func pathEntries(raw string) []string {
+	return pathEntriesWithSeparator(raw, string(os.PathListSeparator))
+}
+
+func pathEntriesWithSeparator(raw, separator string) []string {
 	entries := make([]string, 0)
-	for _, entry := range strings.Split(raw, string(os.PathListSeparator)) {
+	for _, entry := range strings.Split(raw, separator) {
 		if entry == "" {
 			continue
 		}

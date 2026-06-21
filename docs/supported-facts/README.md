@@ -14,3 +14,4 @@ These pages are generated from [`docs/schema/facts.yaml`](../schema/facts.yaml).
 | [NetBSD](netbsd.md) | 117 |
 | [DragonFly BSD](dragonfly.md) | 115 |
 | [illumos](illumos.md) | 114 |
+| [Plan 9](plan9.md) | 29 |

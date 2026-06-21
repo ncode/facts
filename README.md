@@ -120,6 +120,9 @@ make build   # builds ./facts from the project root
 ## Tested where it ships.
 
 Every release target is a blocking CI gate — unit tests, the race detector over the engine, a built-binary smoke, and per-platform release-gate fact checks.
+Plan 9 has lab-validated fact support for `plan9/amd64`; it is not listed as a
+published release artifact target until that tuple is promoted in the release
+matrix.
 
 | Platform | Architectures | Gate | Supported facts |
 | --- | --- | --- | --- |
@@ -131,6 +134,7 @@ Every release target is a blocking CI gate — unit tests, the race detector ove
 | NetBSD | amd64, arm, arm64 | VM job + release-gate fact set | [NetBSD facts](docs/supported-facts/netbsd.md) |
 | DragonFly BSD | amd64 | VM job + release-gate fact set | [DragonFly BSD facts](docs/supported-facts/dragonfly.md) |
 | illumos | amd64 | VM job + release-gate fact set | [illumos facts](docs/supported-facts/illumos.md) |
+| Plan 9 | amd64 | facts-lab release gate | [Plan 9 facts](docs/supported-facts/plan9.md) |
 
 Requires Go 1.26+.
 

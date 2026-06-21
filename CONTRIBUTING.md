@@ -56,10 +56,13 @@ tools).
 
 ## Platform scope
 
-Release targets: **Linux, macOS/Darwin, Windows, FreeBSD, OpenBSD, and
-NetBSD**. Solaris, AIX, DragonFly, and generic BSD-family paths are out of
-scope — do not start work for them until a repeatable validation target
-exists, and do not treat their gaps as blockers.
+Release targets: **Linux, macOS/Darwin, Windows, FreeBSD, OpenBSD, NetBSD,
+DragonFly BSD, and illumos**. Plan 9 has lab-validated fact support for
+`plan9/amd64`, but it is not a published release artifact target until the
+release matrix explicitly promotes it. Solaris, AIX,
+generic BSD-family paths, and unvalidated Plan 9 tuples are out of scope — do
+not start work for them until a repeatable validation target exists, and do not
+treat their gaps as blockers.
 
 ## Benchmark discipline
 
@@ -98,6 +101,14 @@ the pipeline (`.github/workflows/unit_tests.yaml`):
   `tools/illumos-release-gate.sh`. Local, untracked SSH wrappers can run the
   same checks for `dragonfly/amd64` and `illumos/amd64`; Oracle Solaris is not
   covered by the illumos gate.
+- **Plan 9**: `plan9/amd64` facts are validated through the facts-lab Plan 9
+  guest and `tools/plan9-release-gate.rc`. The local flow is:
+  build `CGO_ENABLED=0 GOOS=plan9 GOARCH=amd64 go build ./cmd/facts`, copy the
+  binary and gate script through your configured facts-lab transport, then run
+  the gate with `facts-lab ssh plan9` (or a local untracked wrapper). Keep lab
+  hostnames, keys, guest addresses, and generated credentials out of tracked
+  files. Any Plan 9 release-gate fact must have a matching
+  `docs/schema/facts.yaml` entry and regenerated `docs/supported-facts/plan9.md`.
 
 Local equivalents: `make lima-freebsd-smoke`, `make lima-linux-flavor-smoke`,
 `make local-bsd-smoke`, `make local-amd64-bsd-smoke`,
@@ -110,7 +121,9 @@ The amd64 lab smoke targets are configured only through wrapper variables:
 `LOCAL_NETBSD_AMD64_SSH`, `LOCAL_DRAGONFLY_AMD64_SSH`, and
 `LOCAL_ILLUMOS_AMD64_SSH`. OpenBSD, NetBSD, and DragonFly wrappers must allow
 `sudo -n` because their release gates read privileged disk labels. Real
-`.local` wrapper scripts stay untracked.
+`.local` wrapper scripts stay untracked. Plan 9 wrappers must invoke the
+tracked `tools/plan9-release-gate.rc` and must not add private lab details to
+the repository.
 
 ## The change workflow
 

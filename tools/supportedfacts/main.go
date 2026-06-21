@@ -35,6 +35,7 @@ var platforms = []platform{
 	{ID: "netbsd", Label: "NetBSD"},
 	{ID: "dragonfly", Label: "DragonFly BSD"},
 	{ID: "illumos", Label: "illumos"},
+	{ID: "plan9", Label: "Plan 9"},
 }
 
 func main() {
@@ -228,5 +229,16 @@ var exampleJSON = map[string]string{
 		"path": ["/usr/bin", "/usr/sbin", "/sbin"],
 		"zfs": {"feature_numbers": ["1", "2", "3", "4", "5"], "version": "5"},
 		"zpool": {"feature_numbers": ["1", "2", "3", "4", "5"], "version": "5000"}
+	}`,
+	"plan9": `{
+		"facterversion": "dev",
+		"kernel": {"name": "Plan 9"},
+		"memory": {"system": {"total": "1018.38 MiB", "total_bytes": 1067843584}},
+			"networking": {"hostname": "plan9host", "interfaces": {"ether0": {"bindings": [{"address": "192.0.2.90", "netmask": "255.255.255.0", "network": "192.0.2.0"}], "ip": "192.0.2.90", "netmask": "255.255.255.0", "network": "192.0.2.0", "mac": "52:54:00:12:34:90"}}, "primary": "ether0", "ip": "192.0.2.90", "netmask": "255.255.255.0", "network": "192.0.2.0", "mac": "52:54:00:12:34:90"},
+		"os": {"architecture": "amd64", "family": "Plan 9", "hardware": "amd64", "name": "Plan 9"},
+		"path": ["/bin", "/usr/glenda/bin"],
+		"processors": {"count": 1, "isa": "amd64", "models": ["Core 2/Xeon 3600"]},
+		"system_uptime": {"days": 0, "hours": 23, "seconds": 83717, "uptime": "23:15 hours"},
+		"timezone": "CET"
 	}`,
 }

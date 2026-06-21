@@ -128,7 +128,7 @@ func networkingDHCPFact(interfaces map[string]any, primaryIP string) string {
 
 func networkingDHCPValue(goos string, interfaces map[string]any, primaryIP string) any {
 	dhcp := networkingDHCPFact(interfaces, primaryIP)
-	if goos == "netbsd" && dhcp == "" {
+	if (goos == "netbsd" || goos == "plan9") && dhcp == "" {
 		return nil
 	}
 	return dhcp
@@ -168,6 +168,9 @@ func networkingInterfaces(s *Session) map[string]any {
 }
 
 func networkingInterfacesForPlatform(s *Session, goos string, snapshotProvider func() ([]networkInterfaceSnapshot, error)) map[string]any {
+	if goos == "plan9" {
+		return currentPlan9Interfaces(s.readFile, filepath.Glob)
+	}
 	snapshots, err := snapshotProvider()
 	if err != nil {
 		if goos == "windows" {
@@ -391,6 +394,9 @@ func currentNetworkingData(goos string, interfaces map[string]any, run commandRu
 	case "linux":
 		expandInterfaceBindings(interfaces)
 		return linuxPrimaryInterface(readText("/proc/net/route", readFile), interfaces, run), interfaces
+	case "plan9":
+		expandInterfaceBindings(interfaces)
+		return plan9PrimaryInterface(readText("/net/iproute", readFile), interfaces), interfaces
 	default:
 		return "", interfaces
 	}
@@ -1634,6 +1640,9 @@ func ipFromAddr(addr net.Addr) (net.IP, bool) {
 // domain, interfaces, primary interface and address selection, DHCP, and the
 // IPv4/IPv6 binding facts) for the current host.
 func networkingCoreFacts(s *Session) []ResolvedFact {
+	if runtime.GOOS == "plan9" {
+		return plan9NetworkingCoreFacts(s)
+	}
 	nodeName, nodeNameValue := hostName(s)
 	resolvedFQDN := fqdn(nodeName)
 	hostname, fqdn, domain := currentHostnameFacts(runtime.GOOS, nodeName, resolvedFQDN, "/etc/resolv.conf", s.readFile)

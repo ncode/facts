@@ -36,7 +36,7 @@ LIMA_FREEBSD_FLAGS ?= --mount-none --cpus 2 --memory 4 --disk 40
 LIMA_GO_CONTAINER_IMAGES ?= golang:1.26-bookworm golang:1.26-alpine
 LIMA_DISTRO_IMAGES ?= debian:12-slim ubuntu:24.04 archlinux:latest oraclelinux:9
 LIMA_LINUX_FLAVORS ?= ubuntu-lts debian fedora opensuse oraclelinux rocky almalinux alpine archlinux
-LIMA_CROSS_TARGETS ?= linux/amd64 linux/arm64 windows/amd64 windows/arm64 darwin/amd64 darwin/arm64 freebsd/amd64 freebsd/arm freebsd/arm64 openbsd/amd64 openbsd/arm openbsd/arm64 netbsd/amd64 netbsd/arm netbsd/arm64 dragonfly/amd64 illumos/amd64
+CROSS_TARGETS ?= linux/amd64 linux/arm64 windows/amd64 windows/arm64 darwin/amd64 darwin/arm64 freebsd/amd64 freebsd/arm freebsd/arm64 openbsd/amd64 openbsd/arm openbsd/arm64 netbsd/amd64 netbsd/arm netbsd/arm64 dragonfly/amd64 illumos/amd64 plan9/amd64
 
 LIMA_LINUX_BINARY ?= dist/facts-linux-$(LIMA_GOARCH)
 LIMA_FREEBSD_BINARY ?= dist/facts-freebsd-$(LIMA_GOARCH)
@@ -211,7 +211,7 @@ lima-build-linux-binary: lima-dev-bootstrap
 		CGO_ENABLED=0 GOOS=linux GOARCH=$(LIMA_GOARCH) go build -o "$(LIMA_LINUX_BINARY)" ./cmd/facts'
 
 lima-cross-compile: lima-dev-bootstrap
-	@for target in $(LIMA_CROSS_TARGETS); do \
+	@for target in $(CROSS_TARGETS); do \
 		goos=$${target%/*}; \
 		goarch=$${target#*/}; \
 		echo "==> cross compile $$goos/$$goarch"; \

@@ -6,6 +6,11 @@
 
 - Release artifacts and cross-compile CI now include `arm` and `arm64` for
   FreeBSD, OpenBSD, and NetBSD.
+- Added native-gated Plan 9 (`plan9/amd64`) fact support for canonical
+  OS/kernel identity, hostname, architecture/hardware, memory total, processor
+  count/ISA/models, basic IPv4 networking, uptime, timezone, path, schema docs,
+  a native `rc` release gate, and CI cross-compile coverage. Plan 9 release
+  artifacts remain a separate promotion decision.
 
 ### Fixed
 

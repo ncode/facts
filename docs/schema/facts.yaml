@@ -6,7 +6,7 @@
 #   type:        string | integer | double | boolean | map | array
 #   description: what the fact means, one line
 #   platforms:   the platforms that can emit it (linux, darwin, windows,
-#                freebsd, openbsd, netbsd, dragonfly, illumos)
+#                freebsd, openbsd, netbsd, dragonfly, illumos, plan9)
 #   conditional: true when presence depends on host state (cloud instances,
 #                swap, DMI visibility, installed tools); such entries may be
 #                absent from a discovery without it being a bug
@@ -168,7 +168,7 @@ ec2_userdata:
 facterversion:
   type: string
   description: The Facter compatibility version of the Facts engine.
-  platforms: [linux, darwin, windows, freebsd, openbsd, netbsd, dragonfly, illumos]
+  platforms: [linux, darwin, windows, freebsd, openbsd, netbsd, dragonfly, illumos, plan9]
 
 filesystems:
   type: array
@@ -325,8 +325,8 @@ is_virtual:
 
 kernel.name:
   type: string
-  description: The kernel name, such as Linux, Darwin, windows, or FreeBSD.
-  platforms: [linux, darwin, windows, freebsd, openbsd, netbsd, dragonfly, illumos]
+  description: The kernel name, such as Linux, Darwin, windows, FreeBSD, or Plan 9.
+  platforms: [linux, darwin, windows, freebsd, openbsd, netbsd, dragonfly, illumos, plan9]
 kernel.release.full:
   type: string
   description: The full kernel release reported by the system.
@@ -417,11 +417,13 @@ memory.system.capacity:
 memory.system.total:
   type: string
   description: The display amount of total physical memory, such as 16.00 GiB.
-  platforms: [linux, darwin, windows, freebsd, openbsd, netbsd, dragonfly, illumos]
+  platforms: [linux, darwin, windows, freebsd, openbsd, netbsd, dragonfly, illumos, plan9]
+  conditional: true
 memory.system.total_bytes:
   type: integer
   description: The total physical memory, in bytes.
-  platforms: [linux, darwin, windows, freebsd, openbsd, netbsd, dragonfly, illumos]
+  platforms: [linux, darwin, windows, freebsd, openbsd, netbsd, dragonfly, illumos, plan9]
+  conditional: true
 memory.system.used:
   type: string
   description: The display amount of physical memory in use, such as 1.00 GiB.
@@ -493,16 +495,17 @@ networking.fqdn:
 networking.hostname:
   type: string
   description: The short host name of the machine.
-  platforms: [linux, darwin, windows, freebsd, openbsd, netbsd, dragonfly, illumos]
+  platforms: [linux, darwin, windows, freebsd, openbsd, netbsd, dragonfly, illumos, plan9]
+  conditional: true
 networking.interfaces.*:
   type: map
   description: A network interface, keyed by interface name.
-  platforms: [linux, darwin, windows, freebsd, openbsd, netbsd, dragonfly, illumos]
+  platforms: [linux, darwin, windows, freebsd, openbsd, netbsd, dragonfly, illumos, plan9]
   conditional: true
 networking.interfaces.*.bindings:
   type: array
   description: The IPv4 bindings of the interface (address, netmask, network).
-  platforms: [linux, darwin, windows, freebsd, openbsd, netbsd, dragonfly, illumos]
+  platforms: [linux, darwin, windows, freebsd, openbsd, netbsd, dragonfly, illumos, plan9]
   conditional: true
 networking.interfaces.*.bindings6:
   type: array
@@ -527,7 +530,7 @@ networking.interfaces.*.duplex:
 networking.interfaces.*.ip:
   type: string
   description: The first IPv4 address bound to the interface.
-  platforms: [linux, darwin, windows, freebsd, openbsd, netbsd, dragonfly, illumos]
+  platforms: [linux, darwin, windows, freebsd, openbsd, netbsd, dragonfly, illumos, plan9]
   conditional: true
 networking.interfaces.*.ip6:
   type: string
@@ -537,7 +540,7 @@ networking.interfaces.*.ip6:
 networking.interfaces.*.mac:
   type: string
   description: The MAC address of the interface.
-  platforms: [linux, darwin, windows, freebsd, openbsd, netbsd, dragonfly, illumos]
+  platforms: [linux, darwin, windows, freebsd, openbsd, netbsd, dragonfly, illumos, plan9]
   conditional: true
 networking.interfaces.*.mtu:
   type: integer
@@ -547,7 +550,7 @@ networking.interfaces.*.mtu:
 networking.interfaces.*.netmask:
   type: string
   description: The IPv4 netmask of the interface's first binding.
-  platforms: [linux, darwin, windows, freebsd, openbsd, netbsd, dragonfly, illumos]
+  platforms: [linux, darwin, windows, freebsd, openbsd, netbsd, dragonfly, illumos, plan9]
   conditional: true
 networking.interfaces.*.netmask6:
   type: string
@@ -557,7 +560,7 @@ networking.interfaces.*.netmask6:
 networking.interfaces.*.network:
   type: string
   description: The IPv4 network of the interface's first binding.
-  platforms: [linux, darwin, windows, freebsd, openbsd, netbsd, dragonfly, illumos]
+  platforms: [linux, darwin, windows, freebsd, openbsd, netbsd, dragonfly, illumos, plan9]
   conditional: true
 networking.interfaces.*.network6:
   type: string
@@ -586,7 +589,8 @@ networking.interfaces.*.speed:
 networking.ip:
   type: string
   description: The IPv4 address of the primary interface.
-  platforms: [linux, darwin, windows, freebsd, openbsd, netbsd, dragonfly, illumos]
+  platforms: [linux, darwin, windows, freebsd, openbsd, netbsd, dragonfly, illumos, plan9]
+  conditional: true
 networking.ip6:
   type: string
   description: The IPv6 address of the primary interface.
@@ -595,7 +599,8 @@ networking.ip6:
 networking.mac:
   type: string
   description: The MAC address of the primary interface.
-  platforms: [linux, darwin, windows, freebsd, openbsd, netbsd, dragonfly, illumos]
+  platforms: [linux, darwin, windows, freebsd, openbsd, netbsd, dragonfly, illumos, plan9]
+  conditional: true
 networking.mtu:
   type: integer
   description: The maximum transmission unit of the primary interface.
@@ -604,7 +609,8 @@ networking.mtu:
 networking.netmask:
   type: string
   description: The IPv4 netmask of the primary interface.
-  platforms: [linux, darwin, windows, freebsd, openbsd, netbsd, dragonfly, illumos]
+  platforms: [linux, darwin, windows, freebsd, openbsd, netbsd, dragonfly, illumos, plan9]
+  conditional: true
 networking.netmask6:
   type: string
   description: The IPv6 netmask of the primary interface.
@@ -613,7 +619,8 @@ networking.netmask6:
 networking.network:
   type: string
   description: The IPv4 network of the primary interface.
-  platforms: [linux, darwin, windows, freebsd, openbsd, netbsd, dragonfly, illumos]
+  platforms: [linux, darwin, windows, freebsd, openbsd, netbsd, dragonfly, illumos, plan9]
+  conditional: true
 networking.network6:
   type: string
   description: The IPv6 network of the primary interface.
@@ -622,7 +629,8 @@ networking.network6:
 networking.primary:
   type: string
   description: The name of the primary interface.
-  platforms: [linux, darwin, windows, freebsd, openbsd, netbsd, dragonfly, illumos]
+  platforms: [linux, darwin, windows, freebsd, openbsd, netbsd, dragonfly, illumos, plan9]
+  conditional: true
 networking.scope6:
   type: string
   description: The IPv6 scope of the primary interface, such as global or link.
@@ -632,7 +640,7 @@ networking.scope6:
 os.architecture:
   type: string
   description: The operating system's hardware architecture, such as x86_64 or arm64.
-  platforms: [linux, darwin, windows, freebsd, openbsd, netbsd, dragonfly, illumos]
+  platforms: [linux, darwin, windows, freebsd, openbsd, netbsd, dragonfly, illumos, plan9]
 os.distro.codename:
   type: string
   description: The codename of the distribution release, such as noble.
@@ -666,12 +674,12 @@ os.distro.specification:
   conditional: true
 os.family:
   type: string
-  description: The operating system family, such as Debian, RedHat, Darwin, or windows.
-  platforms: [linux, darwin, windows, freebsd, openbsd, netbsd, dragonfly, illumos]
+  description: The operating system family, such as Debian, RedHat, Darwin, windows, or Plan 9.
+  platforms: [linux, darwin, windows, freebsd, openbsd, netbsd, dragonfly, illumos, plan9]
 os.hardware:
   type: string
   description: The hardware model of the machine, such as x86_64.
-  platforms: [linux, darwin, windows, freebsd, openbsd, netbsd, dragonfly, illumos]
+  platforms: [linux, darwin, windows, freebsd, openbsd, netbsd, dragonfly, illumos, plan9]
 os.macosx.build:
   type: string
   description: The macOS build number, such as 24F74.
@@ -704,8 +712,8 @@ os.macosx.version.patch:
   conditional: true
 os.name:
   type: string
-  description: The operating system name, such as Ubuntu, Darwin, or windows.
-  platforms: [linux, darwin, windows, freebsd, openbsd, netbsd, dragonfly, illumos]
+  description: The operating system name, such as Ubuntu, Darwin, windows, or Plan 9.
+  platforms: [linux, darwin, windows, freebsd, openbsd, netbsd, dragonfly, illumos, plan9]
 os.release.branch:
   type: string
   description: The FreeBSD release branch, such as RELEASE-p5.
@@ -842,7 +850,7 @@ partitions.*.uuid:
 path:
   type: array
   description: The PATH environment entries of the Facts process, in lookup order.
-  platforms: [linux, darwin, windows, freebsd, openbsd, netbsd, dragonfly, illumos]
+  platforms: [linux, darwin, windows, freebsd, openbsd, netbsd, dragonfly, illumos, plan9]
 
 processors.cores:
   type: integer
@@ -851,19 +859,22 @@ processors.cores:
 processors.count:
   type: integer
   description: The number of logical processors.
-  platforms: [linux, darwin, windows, freebsd, openbsd, netbsd, dragonfly, illumos]
+  platforms: [linux, darwin, windows, freebsd, openbsd, netbsd, dragonfly, illumos, plan9]
+  conditional: true
 processors.extensions:
   type: array
   description: The instruction set architectures the processors support, including the base architecture and x86_64 microarchitecture levels.
   platforms: [linux, darwin, windows, freebsd, openbsd, netbsd, dragonfly, illumos]
 processors.isa:
   type: string
-  description: The processor instruction set architecture, as reported by uname -p.
-  platforms: [linux, darwin, windows, freebsd, openbsd, netbsd, dragonfly, illumos]
+  description: The processor instruction set architecture, as reported by the platform.
+  platforms: [linux, darwin, windows, freebsd, openbsd, netbsd, dragonfly, illumos, plan9]
+  conditional: true
 processors.models:
   type: array
   description: The processor model strings, one entry per logical processor.
-  platforms: [linux, darwin, windows, freebsd, openbsd, netbsd, dragonfly, illumos]
+  platforms: [linux, darwin, windows, freebsd, openbsd, netbsd, dragonfly, illumos, plan9]
+  conditional: true
 processors.physicalcount:
   type: integer
   description: The number of physical processor sockets.
@@ -912,24 +923,28 @@ system_profiler:
 system_uptime.days:
   type: integer
   description: The whole days the system has been up.
-  platforms: [linux, darwin, windows, freebsd, openbsd, netbsd, dragonfly, illumos]
+  platforms: [linux, darwin, windows, freebsd, openbsd, netbsd, dragonfly, illumos, plan9]
+  conditional: true
 system_uptime.hours:
   type: integer
   description: The whole hours the system has been up.
-  platforms: [linux, darwin, windows, freebsd, openbsd, netbsd, dragonfly, illumos]
+  platforms: [linux, darwin, windows, freebsd, openbsd, netbsd, dragonfly, illumos, plan9]
+  conditional: true
 system_uptime.seconds:
   type: integer
   description: The seconds the system has been up.
-  platforms: [linux, darwin, windows, freebsd, openbsd, netbsd, dragonfly, illumos]
+  platforms: [linux, darwin, windows, freebsd, openbsd, netbsd, dragonfly, illumos, plan9]
+  conditional: true
 system_uptime.uptime:
   type: string
   description: The display form of the system uptime, such as 3 days.
-  platforms: [linux, darwin, windows, freebsd, openbsd, netbsd, dragonfly, illumos]
+  platforms: [linux, darwin, windows, freebsd, openbsd, netbsd, dragonfly, illumos, plan9]
+  conditional: true
 
 timezone:
   type: string
   description: The abbreviated time zone name of the system, such as UTC.
-  platforms: [linux, darwin, windows, freebsd, openbsd, netbsd, dragonfly, illumos]
+  platforms: [linux, darwin, windows, freebsd, openbsd, netbsd, dragonfly, illumos, plan9]
 
 virtual:
   type: string

@@ -27,6 +27,9 @@ func currentProcessorISA(s *Session, goos, fallback string, run commandRunner) s
 		}
 		return ""
 	}
+	if goos == "plan9" {
+		return plan9ProcessorISA(s.readFile, fallback)
+	}
 	processor := strings.TrimSpace(run("uname", "-p"))
 	if processor == "" || processor == "unknown" {
 		return fallback
@@ -150,7 +153,7 @@ func probeProcessorModels(s *Session) []string {
 				return models
 			}
 		}
-	case "freebsd", "netbsd", "openbsd", "dragonfly", "illumos", "windows":
+	case "freebsd", "netbsd", "openbsd", "dragonfly", "illumos", "windows", "plan9":
 		models := s.cachedPlatformProcessorInfo().Models
 		if len(models) > 0 {
 			return append([]string(nil), models...)
@@ -188,6 +191,9 @@ func probeProcessorTopology(s *Session) (int, int) {
 }
 
 func probePlatformProcessorInfo(s *Session) processorInfo {
+	if runtime.GOOS == "plan9" {
+		return currentPlan9ProcessorInfo(s.readFile)
+	}
 	return currentProcessorInfo(runtime.GOOS, s.commandOutput, s.logr())
 }
 
@@ -600,6 +606,9 @@ func hertzToHumanReadable(hz any) string {
 // current host.
 func processorsCoreFacts(s *Session) []ResolvedFact {
 	architecture := s.cachedArchitectureName()
+	if runtime.GOOS == "plan9" {
+		return plan9ProcessorsCoreFacts(s.cachedPlatformProcessorInfo(), currentProcessorISA(s, runtime.GOOS, architecture, s.commandOutput))
+	}
 	platformProcessors := processorInfo{}
 	if runtime.GOOS == "darwin" || runtime.GOOS == "freebsd" || runtime.GOOS == "netbsd" || runtime.GOOS == "openbsd" || runtime.GOOS == "dragonfly" || runtime.GOOS == "illumos" || runtime.GOOS == "windows" {
 		platformProcessors = s.cachedPlatformProcessorInfo()

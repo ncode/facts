@@ -86,7 +86,7 @@ $ facts --json
 | `identity.uid` | `integer` | no | The user identifier of the user running Facts. |
 | `identity.user` | `string` | no | The name of the user running Facts. |
 | `is_virtual` | `boolean` | no | Whether the machine is a virtual machine or container. |
-| `kernel.name` | `string` | no | The kernel name, such as Linux, Darwin, windows, or FreeBSD. |
+| `kernel.name` | `string` | no | The kernel name, such as Linux, Darwin, windows, FreeBSD, or Plan 9. |
 | `kernel.release.full` | `string` | no | The full kernel release reported by the system. |
 | `kernel.release.major` | `string` | no | The major component of the kernel release. |
 | `kernel.release.minor` | `string` | no | The minor component of the kernel release. |
@@ -106,8 +106,8 @@ $ facts --json
 | `memory.system.available` | `string` | no | The display amount of free physical memory, such as 1.00 GiB. |
 | `memory.system.available_bytes` | `integer` | no | The free physical memory, in bytes. |
 | `memory.system.capacity` | `string` | no | The percentage of physical memory in use. |
-| `memory.system.total` | `string` | no | The display amount of total physical memory, such as 16.00 GiB. |
-| `memory.system.total_bytes` | `integer` | no | The total physical memory, in bytes. |
+| `memory.system.total` | `string` | yes | The display amount of total physical memory, such as 16.00 GiB. |
+| `memory.system.total_bytes` | `integer` | yes | The total physical memory, in bytes. |
 | `memory.system.used` | `string` | no | The display amount of physical memory in use, such as 1.00 GiB. |
 | `memory.system.used_bytes` | `integer` | no | The physical memory in use, in bytes. |
 | `mountpoints.*` | `map` | yes | A mounted filesystem, keyed by mount path. |
@@ -124,7 +124,7 @@ $ facts --json
 | `networking.dhcp` | `string` | no | The DHCP server of the primary interface, when known. |
 | `networking.domain` | `string` | yes | The DNS domain of the host, when one is configured. |
 | `networking.fqdn` | `string` | no | The fully qualified domain name of the host. |
-| `networking.hostname` | `string` | no | The short host name of the machine. |
+| `networking.hostname` | `string` | yes | The short host name of the machine. |
 | `networking.interfaces.*` | `map` | yes | A network interface, keyed by interface name. |
 | `networking.interfaces.*.bindings` | `array` | yes | The IPv4 bindings of the interface (address, netmask, network). |
 | `networking.interfaces.*.bindings6` | `array` | yes | The IPv6 bindings of the interface (address, netmask, network, scope6, flags). |
@@ -139,20 +139,20 @@ $ facts --json
 | `networking.interfaces.*.network6` | `string` | yes | The IPv6 network of the interface's first binding. |
 | `networking.interfaces.*.operational_state` | `string` | yes | The operational state of the interface, such as up or down. |
 | `networking.interfaces.*.scope6` | `string` | yes | The IPv6 scope of the interface's first binding, such as global or link. |
-| `networking.ip` | `string` | no | The IPv4 address of the primary interface. |
+| `networking.ip` | `string` | yes | The IPv4 address of the primary interface. |
 | `networking.ip6` | `string` | yes | The IPv6 address of the primary interface. |
-| `networking.mac` | `string` | no | The MAC address of the primary interface. |
+| `networking.mac` | `string` | yes | The MAC address of the primary interface. |
 | `networking.mtu` | `integer` | yes | The maximum transmission unit of the primary interface. |
-| `networking.netmask` | `string` | no | The IPv4 netmask of the primary interface. |
+| `networking.netmask` | `string` | yes | The IPv4 netmask of the primary interface. |
 | `networking.netmask6` | `string` | yes | The IPv6 netmask of the primary interface. |
-| `networking.network` | `string` | no | The IPv4 network of the primary interface. |
+| `networking.network` | `string` | yes | The IPv4 network of the primary interface. |
 | `networking.network6` | `string` | yes | The IPv6 network of the primary interface. |
-| `networking.primary` | `string` | no | The name of the primary interface. |
+| `networking.primary` | `string` | yes | The name of the primary interface. |
 | `networking.scope6` | `string` | yes | The IPv6 scope of the primary interface, such as global or link. |
 | `os.architecture` | `string` | no | The operating system's hardware architecture, such as x86_64 or arm64. |
-| `os.family` | `string` | no | The operating system family, such as Debian, RedHat, Darwin, or windows. |
+| `os.family` | `string` | no | The operating system family, such as Debian, RedHat, Darwin, windows, or Plan 9. |
 | `os.hardware` | `string` | no | The hardware model of the machine, such as x86_64. |
-| `os.name` | `string` | no | The operating system name, such as Ubuntu, Darwin, or windows. |
+| `os.name` | `string` | no | The operating system name, such as Ubuntu, Darwin, windows, or Plan 9. |
 | `os.release.full` | `string` | no | The full release number of the operating system. |
 | `os.release.major` | `string` | no | The major release number of the operating system. |
 | `os.release.minor` | `string` | yes | The minor release number of the operating system, when it has one. |
@@ -163,10 +163,10 @@ $ facts --json
 | `partitions.*.size_bytes` | `integer` | yes | The size of the partition, in bytes. |
 | `path` | `array` | no | The PATH environment entries of the Facts process, in lookup order. |
 | `processors.cores` | `integer` | no | The number of cores per processor socket. |
-| `processors.count` | `integer` | no | The number of logical processors. |
+| `processors.count` | `integer` | yes | The number of logical processors. |
 | `processors.extensions` | `array` | no | The instruction set architectures the processors support, including the base architecture and x86_64 microarchitecture levels. |
-| `processors.isa` | `string` | no | The processor instruction set architecture, as reported by uname -p. |
-| `processors.models` | `array` | no | The processor model strings, one entry per logical processor. |
+| `processors.isa` | `string` | yes | The processor instruction set architecture, as reported by the platform. |
+| `processors.models` | `array` | yes | The processor model strings, one entry per logical processor. |
 | `processors.physicalcount` | `integer` | no | The number of physical processor sockets. |
 | `processors.speed` | `string` | yes | The display speed of the processors, such as 2.40 GHz, where the platform reports one (absent on Apple Silicon). |
 | `processors.threads` | `integer` | no | The number of hardware threads per core. |
@@ -175,9 +175,9 @@ $ facts --json
 | `ssh.*.fingerprints.sha256` | `string` | yes | The SSHFP SHA-256 fingerprint of the SSH host key, keyed by key algorithm. |
 | `ssh.*.key` | `string` | yes | The public SSH host key, keyed by key algorithm. |
 | `ssh.*.type` | `string` | yes | The SSH host key type, such as ssh-ed25519, keyed by key algorithm. |
-| `system_uptime.days` | `integer` | no | The whole days the system has been up. |
-| `system_uptime.hours` | `integer` | no | The whole hours the system has been up. |
-| `system_uptime.seconds` | `integer` | no | The seconds the system has been up. |
-| `system_uptime.uptime` | `string` | no | The display form of the system uptime, such as 3 days. |
+| `system_uptime.days` | `integer` | yes | The whole days the system has been up. |
+| `system_uptime.hours` | `integer` | yes | The whole hours the system has been up. |
+| `system_uptime.seconds` | `integer` | yes | The seconds the system has been up. |
+| `system_uptime.uptime` | `string` | yes | The display form of the system uptime, such as 3 days. |
 | `timezone` | `string` | no | The abbreviated time zone name of the system, such as UTC. |
 | `virtual` | `string` | no | The hypervisor or container technology the machine runs under, or physical. |

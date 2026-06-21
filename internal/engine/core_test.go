@@ -34,6 +34,21 @@ func TestCoreFacts_includePathFromEnvironment(t *testing.T) {
 	}
 }
 
+func TestCurrentPathEntriesUsesPlan9PathEnvironment(t *testing.T) {
+	t.Parallel()
+
+	got := currentPathEntries("plan9", func(key string) string {
+		if key != "path" {
+			t.Fatalf("getenv key = %q, want path", key)
+		}
+		return "/bin\x00."
+	})
+	want := []string{"/bin", "."}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("currentPathEntries(plan9) = %#v, want %#v", got, want)
+	}
+}
+
 func TestPathEntries_splitsAndDropsEmpty(t *testing.T) {
 	t.Parallel()
 

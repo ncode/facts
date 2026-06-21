@@ -78,6 +78,8 @@ func probeTotalPhysicalMemoryBytes(s *Session) int {
 		return parseLinuxMeminfoBytes(s.cachedLinuxMeminfo(), "MemTotal")
 	case "windows":
 		return s.cachedWindowsMemory().TotalBytes
+	case "plan9":
+		return parsePlan9SwapMemoryTotal(readText("/dev/swap", s.readFile))
 	}
 	return 0
 }
@@ -586,6 +588,9 @@ func parseDarwinMemoryAmountBytes(input string) int {
 // current host.
 func memoryCoreFacts(s *Session) []ResolvedFact {
 	memoryTotalBytes := s.cachedTotalPhysicalMemoryBytes()
+	if runtime.GOOS == "plan9" {
+		return plan9MemoryCoreFacts(memoryTotalBytes)
+	}
 	memoryAvailableBytes := s.cachedAvailablePhysicalMemoryBytes()
 	memoryUsedBytes := max(0, memoryTotalBytes-memoryAvailableBytes)
 	swapTotalBytes := s.cachedTotalSwapMemoryBytes()

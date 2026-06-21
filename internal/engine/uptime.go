@@ -42,6 +42,9 @@ func currentUptimeInfo(s *Session, goos string, readFile fileReader, run command
 	if goos == "windows" {
 		return currentWindowsUptime(goos, run, s.logr())
 	}
+	if goos == "plan9" {
+		return currentPlan9Uptime(run)
+	}
 	if goos == "linux" {
 		virtual := detectLinuxVirtualization(currentLinuxVirtualizationInputWithCommands(s, run))
 		return currentLinuxUptimeInfo(readFile, run, now, virtual.Name == "docker")
@@ -188,6 +191,12 @@ func parseUptimeCommandSeconds(input string) int {
 		case "user", "users", "load", "loadavg":
 			return seconds
 		}
+		if strings.Count(field, ":") == 2 {
+			if clockSeconds := parseDockerElapsedTimeSeconds(field); clockSeconds > 0 {
+				seconds += clockSeconds
+				continue
+			}
+		}
 		if hours, minutes, ok := parseUptimeHoursMinutes(field); ok {
 			seconds += hours*3600 + minutes*60
 			continue
@@ -310,6 +319,8 @@ func currentLoadAverages(goos string, readFile fileReader, run commandRunner) ma
 			return emptyLoadAverages()
 		}
 		return parseLoadAverages(string(data))
+	case "plan9":
+		return nil
 	default:
 		return emptyLoadAverages()
 	}
@@ -347,6 +358,9 @@ func emptyLoadAverages() map[string]any {
 // uptimeCoreFacts assembles the uptime category facts (the system_uptime fields
 // and the load_averages fact) for the current host.
 func uptimeCoreFacts(s *Session) []ResolvedFact {
+	if runtime.GOOS == "plan9" {
+		return plan9UptimeCoreFacts(s.cachedUptime())
+	}
 	uptime := s.cachedUptime()
 	loadAverages := s.cachedLoadAverages()
 	return []ResolvedFact{
