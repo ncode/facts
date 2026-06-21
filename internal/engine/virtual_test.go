@@ -332,6 +332,26 @@ func TestDetectWindowsVirtualizationMatchesRubyResolver(t *testing.T) {
 			want:  virtualization{Name: "kvm", IsVirtual: true},
 		},
 		{
+			name:  "QEMU manufacturer",
+			input: windowsVirtualizationInput{WMIResult: true, Manufacturer: "QEMU", Model: "Standard PC (i440FX + PIIX, 1996)"},
+			want:  virtualization{Name: "kvm", IsVirtual: true},
+		},
+		{
+			name:  "SeaBIOS manufacturer",
+			input: windowsVirtualizationInput{WMIResult: true, BIOSManufacturer: "SeaBIOS"},
+			want:  virtualization{Name: "kvm", IsVirtual: true},
+		},
+		{
+			name:  "QEMU casing variant",
+			input: windowsVirtualizationInput{WMIResult: true, Manufacturer: "Qemu", Model: "standard pc (i440fx + piix, 1996)"},
+			want:  virtualization{Name: "kvm", IsVirtual: true},
+		},
+		{
+			name:  "SeaBIOS casing variant",
+			input: windowsVirtualizationInput{WMIResult: true, BIOSManufacturer: "seabios"},
+			want:  virtualization{Name: "kvm", IsVirtual: true},
+		},
+		{
 			name:  "Google NetKVM service",
 			input: windowsVirtualizationInput{BIOSManufacturer: "Google", NetKVM: true},
 			want:  virtualization{Name: "gce", IsVirtual: true},
@@ -527,8 +547,13 @@ func TestDetectOpenBSDVirtualization(t *testing.T) {
 			want:  virtualization{Name: "vmm", IsVirtual: true},
 		},
 		{
-			name:  "qemu product name is physical like Facter",
-			input: openBSDVirtualizationInput{ProductName: "QEMU Virtual Machine"},
+			name:  "qemu vendor",
+			input: openBSDVirtualizationInput{Vendor: "QEMU", ProductName: "Standard PC (i440FX + PIIX, 1996)"},
+			want:  virtualization{Name: "kvm", IsVirtual: true},
+		},
+		{
+			name:  "known none product stays physical",
+			input: openBSDVirtualizationInput{Vendor: "QEMU", ProductName: "none"},
 			want:  virtualization{Name: "physical"},
 		},
 	}
@@ -538,6 +563,84 @@ func TestDetectOpenBSDVirtualization(t *testing.T) {
 			got := detectOpenBSDVirtualization(tt.input)
 			if got != tt.want {
 				t.Fatalf("detectOpenBSDVirtualization() = %#v, want %#v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDetectDMIHostVirtualization(t *testing.T) {
+	tests := []struct {
+		name  string
+		input dmiVirtualizationInput
+		want  virtualization
+	}{
+		{
+			name:  "qemu manufacturer",
+			input: dmiVirtualizationInput{Manufacturer: "QEMU", ProductName: "Standard PC (i440FX + PIIX, 1996)"},
+			want:  virtualization{Name: "kvm", IsVirtual: true},
+		},
+		{
+			name:  "qemu product",
+			input: dmiVirtualizationInput{ProductName: "QEMU Virtual Machine"},
+			want:  virtualization{Name: "kvm", IsVirtual: true},
+		},
+		{
+			name:  "qemu manufacturer beats generic virtual machine product",
+			input: dmiVirtualizationInput{Manufacturer: "QEMU", ProductName: "Virtual Machine"},
+			want:  virtualization{Name: "kvm", IsVirtual: true},
+		},
+		{
+			name:  "seabios",
+			input: dmiVirtualizationInput{BIOSVendor: "SeaBIOS"},
+			want:  virtualization{Name: "kvm", IsVirtual: true},
+		},
+		{
+			name:  "seabios beats generic virtual machine product",
+			input: dmiVirtualizationInput{ProductName: "Virtual Machine", BIOSVendor: "SeaBIOS"},
+			want:  virtualization{Name: "kvm", IsVirtual: true},
+		},
+		{
+			name:  "qemu casing variant",
+			input: dmiVirtualizationInput{Manufacturer: "Qemu", ProductName: "standard pc (i440fx + piix, 1996)"},
+			want:  virtualization{Name: "kvm", IsVirtual: true},
+		},
+		{
+			name:  "seabios casing variant",
+			input: dmiVirtualizationInput{BIOSVendor: "seabios"},
+			want:  virtualization{Name: "kvm", IsVirtual: true},
+		},
+		{
+			name:  "virtualbox casing variant",
+			input: dmiVirtualizationInput{ProductName: "virtualbox"},
+			want:  virtualization{Name: "virtualbox", IsVirtual: true},
+		},
+		{
+			name:  "specific product beats seabios fallback",
+			input: dmiVirtualizationInput{ProductName: "Bochs Machine", BIOSVendor: "SeaBIOS"},
+			want:  virtualization{Name: "bochs", IsVirtual: true},
+		},
+		{
+			name:  "virtio pci",
+			input: dmiVirtualizationInput{PCIOutput: "00:03.0 Ethernet controller: Red Hat, Inc. Virtio network device\n"},
+			want:  virtualization{Name: "kvm", IsVirtual: true},
+		},
+		{
+			name:  "vmware pci",
+			input: dmiVirtualizationInput{PCIOutput: "00:0f.0 VGA compatible controller: VMware SVGA II Adapter\n"},
+			want:  virtualization{Name: "vmware", IsVirtual: true},
+		},
+		{
+			name:  "physical host",
+			input: dmiVirtualizationInput{Manufacturer: "Apple Inc.", ProductName: "Mac16,10"},
+			want:  virtualization{Name: "physical"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := detectDMIHostVirtualization(tt.input)
+			if got != tt.want {
+				t.Fatalf("detectDMIHostVirtualization() = %#v, want %#v", got, tt.want)
 			}
 		})
 	}

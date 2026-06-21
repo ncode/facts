@@ -29,6 +29,30 @@ func TestNetworkingDHCPFactUsesPrimaryInterfaceDHCPValue(t *testing.T) {
 	}
 }
 
+func TestOptionalNetworkingStringOmitsEmptyValues(t *testing.T) {
+	t.Parallel()
+
+	collection := Collection([]ResolvedFact{
+		{Name: "networking.ip", Value: optionalNetworkingString("192.0.2.10")},
+		{Name: "networking.ip6", Value: optionalNetworkingString("")},
+		{Name: "networking.netmask6", Value: optionalNetworkingString("")},
+		{Name: "networking.network6", Value: optionalNetworkingString("")},
+		{Name: "networking.scope6", Value: optionalNetworkingString("")},
+	})
+	networking, ok := collection["networking"].(map[string]any)
+	if !ok {
+		t.Fatalf("networking fact = %#v, want map", collection["networking"])
+	}
+	if got := networking["ip"]; got != "192.0.2.10" {
+		t.Fatalf("networking.ip = %#v, want 192.0.2.10", got)
+	}
+	for _, key := range []string{"ip6", "netmask6", "network6", "scope6"} {
+		if _, ok := networking[key]; ok {
+			t.Fatalf("networking.%s present in %#v, want omitted", key, networking)
+		}
+	}
+}
+
 func TestCurrentNetworkingDataExpandsWindowsInterfaceBindingsAndPrimary(t *testing.T) {
 	t.Parallel()
 
@@ -1373,8 +1397,8 @@ func TestCoreFacts_networkingIncludesIP6(t *testing.T) {
 		t.Fatalf("networking fact = %#v, want map", collection["networking"])
 	}
 
-	if _, ok := networking["ip6"]; !ok {
-		t.Fatalf("networking fact missing ip6 in %#v", networking)
+	if value, ok := networking["ip6"]; ok && value == "" {
+		t.Fatalf("networking.ip6 = empty string in %#v, want omitted or populated", networking)
 	}
 }
 
@@ -1399,12 +1423,14 @@ func TestCoreFacts_networkingIncludesPrimaryIPv6Binding(t *testing.T) {
 	if !ok {
 		t.Fatalf("networking fact = %#v, want map", collection["networking"])
 	}
-	if networking["ip6"] == "" {
+	ip6, _ := networking["ip6"].(string)
+	if ip6 == "" {
 		t.Skip("host has no primary IPv6 address")
 	}
 
 	for _, key := range []string{"netmask6", "network6", "scope6"} {
-		if networking[key] == "" {
+		value, _ := networking[key].(string)
+		if value == "" {
 			t.Fatalf("networking = %#v, want %s for primary IPv6", networking, key)
 		}
 	}

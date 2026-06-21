@@ -435,6 +435,7 @@ mountpoints.*:
   type: map
   description: A mounted filesystem, keyed by mount path.
   platforms: [linux, darwin, windows, freebsd, openbsd, netbsd, dragonfly, illumos]
+  conditional: true
 mountpoints.*.available:
   type: string
   description: The display amount of free space on the mount, such as 1.00 GiB.
@@ -590,6 +591,7 @@ networking.ip6:
   type: string
   description: The IPv6 address of the primary interface.
   platforms: [linux, darwin, windows, freebsd, openbsd, netbsd, dragonfly, illumos]
+  conditional: true
 networking.mac:
   type: string
   description: The MAC address of the primary interface.
@@ -607,6 +609,7 @@ networking.netmask6:
   type: string
   description: The IPv6 netmask of the primary interface.
   platforms: [linux, darwin, windows, freebsd, openbsd, netbsd, dragonfly, illumos]
+  conditional: true
 networking.network:
   type: string
   description: The IPv4 network of the primary interface.
@@ -615,6 +618,7 @@ networking.network6:
   type: string
   description: The IPv6 network of the primary interface.
   platforms: [linux, darwin, windows, freebsd, openbsd, netbsd, dragonfly, illumos]
+  conditional: true
 networking.primary:
   type: string
   description: The name of the primary interface.
@@ -623,6 +627,7 @@ networking.scope6:
   type: string
   description: The IPv6 scope of the primary interface, such as global or link.
   platforms: [linux, darwin, windows, freebsd, openbsd, netbsd, dragonfly, illumos]
+  conditional: true
 
 os.architecture:
   type: string

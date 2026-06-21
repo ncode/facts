@@ -914,6 +914,13 @@ func partitionsFacts(partitions map[string]any) []ResolvedFact {
 	return []ResolvedFact{{Name: "partitions", Value: partitions}}
 }
 
+func mountpointsFacts(mountpoints map[string]any) []ResolvedFact {
+	if len(mountpoints) == 0 {
+		return nil
+	}
+	return []ResolvedFact{{Name: "mountpoints", Value: mountpoints}}
+}
+
 func partitionsFactWithMountEntries(partitions map[string]any, mountEntries []mountEntry, mountpoints map[string]any) map[string]any {
 	if len(partitions) == 0 {
 		return nil
@@ -1491,6 +1498,9 @@ func mountpointsFactWithSkip(entries []mountEntry, stat func(string) (mountStat,
 		if len(entry.Options) > 0 {
 			mountpoint["options"] = append([]string(nil), entry.Options...)
 		}
+		if len(mountpoint) == 0 {
+			continue
+		}
 		mountpoints[entry.Path] = mountpoint
 	}
 	if len(mountpoints) == 0 {
@@ -1605,9 +1615,8 @@ func disksCoreFacts(s *Session) []ResolvedFact {
 		mountEntries = currentMountEntries(s)
 	}
 	mountpoints := rootMountpoint(s)
-	facts := []ResolvedFact{
-		{Name: "mountpoints", Value: mountpoints},
-	}
+	var facts []ResolvedFact
+	facts = append(facts, mountpointsFacts(mountpoints)...)
 	facts = append(facts, currentZFSFacts(runtime.GOOS, s.commandOutput)...)
 	facts = append(facts, disksFacts(disks)...)
 	facts = append(facts, partitionsFacts(partitionsFactWithMountEntries(currentPartitions(s), mountEntries, mountpoints))...)

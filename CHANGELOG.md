@@ -7,6 +7,17 @@
 - Release artifacts and cross-compile CI now include `arm` and `arm64` for
   FreeBSD, OpenBSD, and NetBSD.
 
+### Fixed
+
+- QEMU/KVM lab guests on OpenBSD, NetBSD, DragonFly BSD, illumos, and Windows
+  now report `virtual: "kvm"` and `is_virtual: true` when native DMI/SMBIOS,
+  PCI, or WMI indicators expose the VM.
+- Full fact output now omits empty optional top-level networking strings, such
+  as illumos `networking.ip6`, `networking.netmask6`, `networking.network6`,
+  and `networking.scope6` when no primary IPv6 address is available.
+- Mountpoint entries with no stat, device, filesystem, or option data are now
+  omitted instead of rendering empty maps such as `mountpoints."/": {}`.
+
 ## v0.0.3 - 2026-06-18
 
 ### Added
