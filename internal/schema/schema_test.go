@@ -114,6 +114,35 @@ func TestFlattenTree(t *testing.T) {
 	}
 }
 
+func TestFlattenTreeEscapesDottedKeys(t *testing.T) {
+	tree := map[string]any{
+		"networking": map[string]any{
+			"interfaces": map[string]any{
+				"eth0.100": map[string]any{
+					"mtu": 1500,
+				},
+			},
+		},
+	}
+
+	paths := FlattenTree(tree)
+	want := []string{`networking.interfaces.eth0\.100.mtu`}
+	if !reflect.DeepEqual(paths, want) {
+		t.Fatalf("FlattenTree() = %#v, want %#v", paths, want)
+	}
+
+	s := Schema{
+		"networking.interfaces.*.mtu": {
+			Type:        "integer",
+			Description: "interface MTU",
+			Platforms:   []string{"linux"},
+		},
+	}
+	if got := s.UndocumentedPaths(paths, "linux"); len(got) != 0 {
+		t.Fatalf("UndocumentedPaths() = %#v, want none", got)
+	}
+}
+
 func TestSchemaUndocumentedPathsAcceptsOpenSubtree(t *testing.T) {
 	s := Schema{
 		"system_profiler": {
@@ -127,6 +156,53 @@ func TestSchemaUndocumentedPathsAcceptsOpenSubtree(t *testing.T) {
 	got := s.UndocumentedPaths([]string{"system_profiler.hardware.model_name"}, "darwin")
 	if len(got) != 0 {
 		t.Fatalf("UndocumentedPaths() = %#v, want none", got)
+	}
+}
+
+func TestSchemaMissingEntriesSkipsAbsentWildcardCollection(t *testing.T) {
+	s := Schema{
+		"mountpoints.*.size": {
+			Type:        "string",
+			Description: "mount size",
+			Platforms:   []string{"linux"},
+		},
+	}
+
+	got := s.MissingEntries([]string{"kernel.name"}, "linux")
+	if len(got) != 0 {
+		t.Fatalf("MissingEntries() = %#v, want none", got)
+	}
+}
+
+func TestSchemaMissingEntriesRequiresWildcardCollectionRoot(t *testing.T) {
+	s := Schema{
+		"mountpoints.*": {
+			Type:        "map",
+			Description: "mountpoint",
+			Platforms:   []string{"linux"},
+		},
+	}
+
+	got := s.MissingEntries([]string{"kernel.name"}, "linux")
+	want := []string{"mountpoints.*"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("MissingEntries() = %#v, want %#v", got, want)
+	}
+}
+
+func TestSchemaMissingEntriesRequiresWildcardChildWhenCollectionExists(t *testing.T) {
+	s := Schema{
+		"mountpoints.*.size": {
+			Type:        "string",
+			Description: "mount size",
+			Platforms:   []string{"linux"},
+		},
+	}
+
+	got := s.MissingEntries([]string{"mountpoints.root.device"}, "linux")
+	want := []string{"mountpoints.*.size"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("MissingEntries() = %#v, want %#v", got, want)
 	}
 }
 
@@ -158,5 +234,24 @@ func TestValidateRejectsScalarOpenSubtree(t *testing.T) {
 	err := s.Validate()
 	if err == nil || !strings.Contains(err.Error(), "open_subtree requires type map or array") {
 		t.Fatalf("Validate() error = %v, want open_subtree type error", err)
+	}
+}
+
+func TestParseRejectsMultipleYAMLDocuments(t *testing.T) {
+	data := []byte(`
+kernel.name:
+  type: string
+  description: Kernel name.
+  platforms: [linux]
+---
+kernel.release:
+  type: string
+  description: Kernel release.
+  platforms: [linux]
+`)
+
+	_, err := Parse(data)
+	if err == nil || !strings.Contains(err.Error(), "multiple YAML documents") {
+		t.Fatalf("Parse() error = %v, want multiple YAML documents", err)
 	}
 }

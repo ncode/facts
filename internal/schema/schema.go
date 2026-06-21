@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"reflect"
 	"sort"
@@ -94,6 +95,13 @@ func Parse(data []byte) (Schema, error) {
 	decoder := yaml.NewDecoder(bytes.NewReader(data))
 	decoder.KnownFields(true)
 	if err := decoder.Decode(&schema); err != nil {
+		return nil, err
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return nil, errors.New("schema contains multiple YAML documents")
+		}
 		return nil, err
 	}
 	if err := schema.Validate(); err != nil {
@@ -193,6 +201,9 @@ func (s Schema) MissingEntries(paths []string, platform string) []string {
 		if entry.Conditional || !PlatformsInclude(entry.Platforms, platform) {
 			continue
 		}
+		if wildcardPrefixAbsent(pattern, paths) {
+			continue
+		}
 		present := false
 		for _, path := range paths {
 			if MatchesPath(pattern, entry, path) {
@@ -235,7 +246,7 @@ func FlattenTree(tree map[string]any) []string {
 		}
 	}
 	for key, value := range tree {
-		walk(key, value)
+		walk(escapeSegment(key), value)
 	}
 	sort.Strings(leaves)
 	return leaves
@@ -245,8 +256,8 @@ func FlattenTree(tree map[string]any) []string {
 // `*` matches exactly one path segment. Map entries are not open subtrees
 // unless OpenSubtree is set; array entries cover their flattened path.* item.
 func MatchesPath(pattern string, entry Entry, path string) bool {
-	patternSegments := strings.Split(pattern, ".")
-	pathSegments := strings.Split(path, ".")
+	patternSegments := splitPath(pattern)
+	pathSegments := splitPath(path)
 	if matchSegments(patternSegments, pathSegments) {
 		return true
 	}
@@ -271,6 +282,31 @@ func PlatformsInclude(platforms []string, platform string) bool {
 	return false
 }
 
+func wildcardPrefixAbsent(pattern string, paths []string) bool {
+	patternSegments := splitPath(pattern)
+	wildcard := -1
+	for i, segment := range patternSegments {
+		if segment == "*" {
+			wildcard = i
+			break
+		}
+	}
+	if wildcard == -1 {
+		return false
+	}
+	if wildcard == len(patternSegments)-1 {
+		return false
+	}
+
+	for _, path := range paths {
+		pathSegments := splitPath(path)
+		if len(pathSegments) > wildcard && matchSegments(patternSegments[:wildcard], pathSegments[:wildcard]) {
+			return false
+		}
+	}
+	return true
+}
+
 func matchSegments(pattern []string, segments []string) bool {
 	if len(pattern) != len(segments) {
 		return false
@@ -284,8 +320,38 @@ func matchSegments(pattern []string, segments []string) bool {
 }
 
 func joinPath(prefix, key string) string {
+	key = escapeSegment(key)
 	if prefix == "" {
 		return key
 	}
 	return prefix + "." + key
+}
+
+func escapeSegment(segment string) string {
+	segment = strings.ReplaceAll(segment, `\`, `\\`)
+	return strings.ReplaceAll(segment, `.`, `\.`)
+}
+
+func splitPath(path string) []string {
+	var segments []string
+	var segment strings.Builder
+	escaped := false
+	for _, r := range path {
+		switch {
+		case escaped:
+			segment.WriteRune(r)
+			escaped = false
+		case r == '\\':
+			escaped = true
+		case r == '.':
+			segments = append(segments, segment.String())
+			segment.Reset()
+		default:
+			segment.WriteRune(r)
+		}
+	}
+	if escaped {
+		segment.WriteByte('\\')
+	}
+	return append(segments, segment.String())
 }
