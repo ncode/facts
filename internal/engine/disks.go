@@ -2,9 +2,7 @@ package engine
 
 import (
 	"encoding/xml"
-	"os"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 
@@ -40,12 +38,11 @@ type freeBSDGeomConfig struct {
 	Type         string `xml:"type"`
 }
 
-func disksFact(root string, hosts ...hostOS) map[string]any {
-	var host hostOS = osHost{}
-	if len(hosts) > 0 {
-		host = hosts[0]
+func disksFact(root string, host hostOS) map[string]any {
+	if host == nil {
+		return nil
 	}
-	entries, err := os.ReadDir(root)
+	entries, err := host.readDir(root)
 	if err != nil {
 		return nil
 	}
@@ -98,11 +95,7 @@ func disksFacts(disks map[string]any) []ResolvedFact {
 	return []ResolvedFact{{Name: "disks", Value: disks}}
 }
 
-func currentDisks(goos string, run commandRunner, hosts ...hostOS) map[string]any {
-	var host hostOS = osHost{}
-	if len(hosts) > 0 {
-		host = hosts[0]
-	}
+func currentDisks(goos string, run commandRunner, host hostOS) map[string]any {
 	switch goos {
 	case "freebsd":
 		return parseFreeBSDGeomDisks(run("sysctl", "-n", "kern.geom.confxml"))
@@ -117,11 +110,7 @@ func currentDisks(goos string, run commandRunner, hosts ...hostOS) map[string]an
 	}
 }
 
-func currentLinuxDisks(root string, run commandRunner, hosts ...hostOS) map[string]any {
-	var host hostOS = osHost{}
-	if len(hosts) > 0 {
-		host = hosts[0]
-	}
+func currentLinuxDisks(root string, run commandRunner, host hostOS) map[string]any {
 	disks := disksFact(root, host)
 	if len(disks) == 0 || run == nil {
 		return disks
@@ -179,7 +168,7 @@ func parseFreeBSDGeomDisks(input string) map[string]any {
 }
 
 func currentPartitions(s *Session) map[string]any {
-	switch runtime.GOOS {
+	switch s.goos() {
 	case "freebsd":
 		return parseFreeBSDGeomPartitions(s.commandOutput("sysctl", "-n", "kern.geom.confxml"))
 	case "dragonfly":
@@ -189,7 +178,7 @@ func currentPartitions(s *Session) map[string]any {
 	case "netbsd":
 		return currentNetBSDPartitions(s.commandOutput)
 	case "illumos":
-		return currentIllumosPartitions(s.commandOutput, filepath.Glob)
+		return currentIllumosPartitions(s.commandOutput, s.glob)
 	case "linux":
 		return currentLinuxPartitions("/sys/class/block", s.commandOutput, s.host)
 	default:
@@ -197,11 +186,7 @@ func currentPartitions(s *Session) map[string]any {
 	}
 }
 
-func currentLinuxPartitions(root string, run commandRunner, hosts ...hostOS) map[string]any {
-	host := hostOS(osHost{})
-	if len(hosts) > 0 && hosts[0] != nil {
-		host = hosts[0]
-	}
+func currentLinuxPartitions(root string, run commandRunner, host hostOS) map[string]any {
 	partitions := discoverPartitions(root, host)
 	if len(partitions) == 0 || run == nil {
 		return partitions
@@ -227,12 +212,11 @@ func currentLinuxPartitions(root string, run commandRunner, hosts ...hostOS) map
 	return partitions
 }
 
-func discoverPartitions(root string, hosts ...hostOS) map[string]any {
-	host := hostOS(osHost{})
-	if len(hosts) > 0 && hosts[0] != nil {
-		host = hosts[0]
+func discoverPartitions(root string, host hostOS) map[string]any {
+	if host == nil {
+		return nil
 	}
-	entries, err := os.ReadDir(root)
+	entries, err := host.readDir(root)
 	if err != nil {
 		return nil
 	}
@@ -273,11 +257,7 @@ func discoverPartitions(root string, hosts ...hostOS) map[string]any {
 	return partitions
 }
 
-func addLinuxPartitionSize(partition map[string]any, root, name string, readFiles ...fileReader) {
-	readFile := osHost{}.readFile
-	if len(readFiles) > 0 && readFiles[0] != nil {
-		readFile = readFiles[0]
-	}
+func addLinuxPartitionSize(partition map[string]any, root, name string, readFile fileReader) {
 	sectors, err := strconv.Atoi(readSysfsString(root, name, "size", readFile))
 	if err != nil || sectors < 0 {
 		sectors = 0
@@ -1014,16 +994,17 @@ type mountStat struct {
 }
 
 func rootMountpoint(s *Session) map[string]any {
-	if runtime.GOOS == "openbsd" {
+	goos := s.goos()
+	if goos == "openbsd" {
 		return currentOpenBSDMountpoints(s)
 	}
-	if runtime.GOOS == "netbsd" {
+	if goos == "netbsd" {
 		return currentNetBSDMountpoints(s)
 	}
-	if runtime.GOOS == "dragonfly" {
+	if goos == "dragonfly" {
 		return currentDragonFlyMountpoints(s)
 	}
-	if runtime.GOOS == "illumos" {
+	if goos == "illumos" {
 		return currentIllumosMountpoints(s)
 	}
 
@@ -1031,16 +1012,16 @@ func rootMountpoint(s *Session) map[string]any {
 	if len(entries) == 0 {
 		entries = []mountEntry{{Path: "/"}}
 	}
-	if runtime.GOOS == "darwin" {
-		return darwinMountpointsFact(entries, statMountpoint)
+	if goos == "darwin" {
+		return darwinMountpointsFact(entries, s.statMountpoint)
 	}
-	return mountpointsFact(entries, statMountpoint)
+	return mountpointsFact(entries, s.statMountpoint)
 }
 
 func currentOpenBSDMountpoints(s *Session) map[string]any {
 	mountOutput := s.commandOutput("mount")
 	if mountOutput == "" {
-		return mountpointsFact([]mountEntry{{Path: "/"}}, statMountpoint)
+		return mountpointsFact([]mountEntry{{Path: "/"}}, s.statMountpoint)
 	}
 	dfOutput := s.commandOutput("df", "-P")
 	return openBSDMountpointsFact(mountOutput, dfOutput)
@@ -1049,7 +1030,7 @@ func currentOpenBSDMountpoints(s *Session) map[string]any {
 func currentNetBSDMountpoints(s *Session) map[string]any {
 	mountOutput := s.commandOutput("mount")
 	if mountOutput == "" {
-		return mountpointsFact([]mountEntry{{Path: "/"}}, statMountpoint)
+		return mountpointsFact([]mountEntry{{Path: "/"}}, s.statMountpoint)
 	}
 	dfOutput := s.commandOutput("df", "-P")
 	return netBSDMountpointsFact(mountOutput, dfOutput)
@@ -1058,7 +1039,7 @@ func currentNetBSDMountpoints(s *Session) map[string]any {
 func currentDragonFlyMountpoints(s *Session) map[string]any {
 	mountOutput := s.commandOutput("mount")
 	if mountOutput == "" {
-		return mountpointsFact([]mountEntry{{Path: "/"}}, statMountpoint)
+		return mountpointsFact([]mountEntry{{Path: "/"}}, s.statMountpoint)
 	}
 	return dragonFlyMountpointsFact(mountOutput, s.commandOutput("df", "-P"))
 }
@@ -1066,13 +1047,13 @@ func currentDragonFlyMountpoints(s *Session) map[string]any {
 func currentIllumosMountpoints(s *Session) map[string]any {
 	mountOutput := s.commandOutput("mount", "-v")
 	if mountOutput == "" {
-		return mountpointsFact([]mountEntry{{Path: "/"}}, statMountpoint)
+		return mountpointsFact([]mountEntry{{Path: "/"}}, s.statMountpoint)
 	}
 	return illumosMountpointsFact(mountOutput, s.commandOutput("df", "-P"))
 }
 
 func currentMountEntries(s *Session) []mountEntry {
-	switch runtime.GOOS {
+	switch s.goos() {
 	case "darwin":
 		out := s.commandOutput("mount")
 		if out == "" {
@@ -1615,15 +1596,16 @@ func isDecimalString(value string) bool {
 // disksCoreFacts assembles the disks category facts (block devices, partitions,
 // and mountpoints) for the current host.
 func disksCoreFacts(s *Session) []ResolvedFact {
-	disks := currentDisks(runtime.GOOS, s.commandOutput, s.host)
+	goos := s.goos()
+	disks := currentDisks(goos, s.commandOutput, s.host)
 	var mountEntries []mountEntry
-	if runtime.GOOS == "linux" {
+	if goos == "linux" {
 		mountEntries = currentMountEntries(s)
 	}
 	mountpoints := rootMountpoint(s)
 	var facts []ResolvedFact
 	facts = append(facts, mountpointsFacts(mountpoints)...)
-	facts = append(facts, currentZFSFacts(runtime.GOOS, s.commandOutput)...)
+	facts = append(facts, currentZFSFacts(goos, s.commandOutput)...)
 	facts = append(facts, disksFacts(disks)...)
 	facts = append(facts, partitionsFacts(partitionsFactWithMountEntries(currentPartitions(s), mountEntries, mountpoints))...)
 	return facts

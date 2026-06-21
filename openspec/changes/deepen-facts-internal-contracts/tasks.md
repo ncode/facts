@@ -25,11 +25,11 @@
 
 ## 4. Session Host Probe Seam
 
-- [ ] 4.1 Extend the Session host seam only for direct host/runtime calls needed by disk, partition, and mountpoint resolution.
-- [ ] 4.2 Route disk, partition, and mountpoint resolution through injectable host seam operations for platform identity, directory reads, globbing, command output, file reads, and stat data.
-- [ ] 4.3 Preserve existing command timeout, context cancellation, logging, and sanitized environment behavior.
-- [ ] 4.4 Add fake-host tests proving disk, partition, and mountpoint facts do not read the developer host directly.
-- [ ] 4.5 Add regression tests proving canonical disk, partition, and mountpoint output is unchanged.
+- [x] 4.1 Extend the Session host seam only for direct host/runtime calls needed by disk, partition, and mountpoint resolution.
+- [x] 4.2 Route disk, partition, and mountpoint resolution through injectable host seam operations for platform identity, directory reads, globbing, command output, file reads, and stat data.
+- [x] 4.3 Preserve existing command timeout, context cancellation, logging, and sanitized environment behavior.
+- [x] 4.4 Add fake-host tests proving disk, partition, and mountpoint facts do not read the developer host directly.
+- [x] 4.5 Add regression tests proving canonical disk, partition, and mountpoint output is unchanged.
 
 ## 5. Verification
 

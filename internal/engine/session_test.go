@@ -18,11 +18,19 @@ import (
 var testSession = NewSession()
 
 type fakeHostOS struct {
-	runCalls  []fakeHostRunCall
-	runOutput string
-	files     map[string][]byte
-	stats     map[string]os.FileInfo
-	lstats    map[string]os.FileInfo
+	platform            string
+	runCalls            []fakeHostRunCall
+	runOutput           string
+	runOutputs          map[string]string
+	files               map[string][]byte
+	dirs                map[string][]os.DirEntry
+	stats               map[string]os.FileInfo
+	lstats              map[string]os.FileInfo
+	globs               map[string][]string
+	mountStats          map[string]mountStat
+	readDirCalls        []string
+	globCalls           []string
+	statMountpointCalls []string
 }
 
 type fakeHostRunCall struct {
@@ -32,10 +40,26 @@ type fakeHostRunCall struct {
 
 func (h *fakeHostOS) run(_ context.Context, name string, args ...string) string {
 	h.runCalls = append(h.runCalls, fakeHostRunCall{name: name, args: append([]string(nil), args...)})
+	if h.runOutputs != nil {
+		if output, ok := h.runOutputs[fakeRunKey(name, args...)]; ok {
+			return output
+		}
+	}
 	if h.runOutput != "" {
 		return h.runOutput
 	}
 	return "host-output\n"
+}
+
+func fakeRunKey(name string, args ...string) string {
+	return strings.Join(append([]string{name}, args...), "\x00")
+}
+
+func (h *fakeHostOS) goos() string {
+	if h.platform != "" {
+		return h.platform
+	}
+	return runtime.GOOS
 }
 
 func (h *fakeHostOS) readFile(path string) ([]byte, error) {
@@ -44,6 +68,15 @@ func (h *fakeHostOS) readFile(path string) ([]byte, error) {
 		return nil, os.ErrNotExist
 	}
 	return data, nil
+}
+
+func (h *fakeHostOS) readDir(path string) ([]os.DirEntry, error) {
+	h.readDirCalls = append(h.readDirCalls, path)
+	entries, ok := h.dirs[path]
+	if !ok {
+		return nil, os.ErrNotExist
+	}
+	return entries, nil
 }
 
 func (h *fakeHostOS) stat(path string) (os.FileInfo, error) {
@@ -62,6 +95,21 @@ func (h *fakeHostOS) lstat(path string) (os.FileInfo, error) {
 	return info, nil
 }
 
+func (h *fakeHostOS) glob(pattern string) ([]string, error) {
+	h.globCalls = append(h.globCalls, pattern)
+	matches, ok := h.globs[pattern]
+	if !ok {
+		return nil, nil
+	}
+	return append([]string(nil), matches...), nil
+}
+
+func (h *fakeHostOS) statMountpoint(path string) (mountStat, bool) {
+	h.statMountpointCalls = append(h.statMountpointCalls, path)
+	stat, ok := h.mountStats[path]
+	return stat, ok
+}
+
 type fakeFileInfo struct {
 	name  string
 	mode  os.FileMode
@@ -74,6 +122,27 @@ func (fi fakeFileInfo) Mode() os.FileMode  { return fi.mode }
 func (fi fakeFileInfo) ModTime() time.Time { return time.Time{} }
 func (fi fakeFileInfo) IsDir() bool        { return fi.isDir }
 func (fi fakeFileInfo) Sys() any           { return nil }
+
+type fakeDirEntry struct {
+	name  string
+	mode  os.FileMode
+	isDir bool
+}
+
+func (de fakeDirEntry) Name() string      { return de.name }
+func (de fakeDirEntry) IsDir() bool       { return de.isDir }
+func (de fakeDirEntry) Type() os.FileMode { return de.mode.Type() }
+func (de fakeDirEntry) Info() (os.FileInfo, error) {
+	return fakeFileInfo{name: de.name, mode: de.mode, isDir: de.isDir}, nil
+}
+
+func fakeDirEntries(names ...string) []os.DirEntry {
+	entries := make([]os.DirEntry, 0, len(names))
+	for _, name := range names {
+		entries = append(entries, fakeDirEntry{name: name, mode: os.ModeDir, isDir: true})
+	}
+	return entries
+}
 
 func TestSessionRoutesHostIOThroughHost(t *testing.T) {
 	host := &fakeHostOS{

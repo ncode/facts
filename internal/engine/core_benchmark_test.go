@@ -152,6 +152,6 @@ func BenchmarkDisksFact(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
-		_ = disksFact(dir)
+		_ = disksFact(dir, osHost{})
 	}
 }
