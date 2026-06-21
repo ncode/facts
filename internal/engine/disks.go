@@ -7,6 +7,8 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+
+	targets "github.com/ncode/facts/internal/platform"
 )
 
 type freeBSDGeomMesh struct {
@@ -1514,7 +1516,11 @@ func skipMountEntry(entry mountEntry) bool {
 }
 
 func currentZFSFacts(goos string, run commandRunner) []ResolvedFact {
-	if run == nil || goos != "freebsd" && goos != "netbsd" && goos != "illumos" {
+	if run == nil {
+		return nil
+	}
+	profile, ok := targets.Lookup(goos)
+	if !ok || !profile.Capabilities.ZFS {
 		return nil
 	}
 	facts := zfsFactsFromUpgradeOutput(run("zfs", "upgrade", "-v"))

@@ -5,8 +5,7 @@
 #
 #   type:        string | integer | double | boolean | map | array
 #   description: what the fact means, one line
-#   platforms:   the platforms that can emit it (linux, darwin, windows,
-#                freebsd, openbsd, netbsd, dragonfly, illumos, plan9)
+#   platforms:   schema-visible platform target IDs from internal/platform
 #   conditional: true when presence depends on host state (cloud instances,
 #                swap, DMI visibility, installed tools); such entries may be
 #                absent from a discovery without it being a bug

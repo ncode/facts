@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 
+	targets "github.com/ncode/facts/internal/platform"
 	"gopkg.in/yaml.v3"
 )
 
@@ -49,30 +50,13 @@ var schemaTypes = map[string]bool{
 	"array":   true,
 }
 
-var platforms = []Platform{
-	{ID: "linux", Label: "Linux"},
-	{ID: "darwin", Label: "macOS / Darwin"},
-	{ID: "windows", Label: "Windows"},
-	{ID: "freebsd", Label: "FreeBSD"},
-	{ID: "openbsd", Label: "OpenBSD"},
-	{ID: "netbsd", Label: "NetBSD"},
-	{ID: "dragonfly", Label: "DragonFly BSD"},
-	{ID: "illumos", Label: "illumos"},
-	{ID: "plan9", Label: "Plan 9"},
-}
-
-var platformIDs = func() map[string]bool {
-	ids := make(map[string]bool, len(platforms))
-	for _, platform := range platforms {
-		ids[platform.ID] = true
-	}
-	return ids
-}()
-
 // Platforms returns the schema-visible platform vocabulary.
 func Platforms() []Platform {
-	out := make([]Platform, len(platforms))
-	copy(out, platforms)
+	profiles := targets.SchemaVisibleProfiles()
+	out := make([]Platform, 0, len(profiles))
+	for _, profile := range profiles {
+		out = append(out, Platform{ID: profile.ID, Label: profile.Label})
+	}
 	return out
 }
 
@@ -117,6 +101,7 @@ func (s Schema) Validate() error {
 	}
 
 	var errs []error
+	platformIDs := schemaPlatformIDs()
 	for _, pattern := range s.Patterns() {
 		entry := s[pattern]
 		if strings.TrimSpace(pattern) == "" {
@@ -146,6 +131,14 @@ func (s Schema) Validate() error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+func schemaPlatformIDs() map[string]bool {
+	ids := make(map[string]bool)
+	for _, platform := range Platforms() {
+		ids[platform.ID] = true
+	}
+	return ids
 }
 
 // Patterns returns the schema paths in stable order.

@@ -4,6 +4,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	targets "github.com/ncode/facts/internal/platform"
 )
 
 func TestMatchesPath(t *testing.T) {
@@ -284,5 +286,21 @@ kernel.release:
 	_, err := Parse(data)
 	if err == nil || !strings.Contains(err.Error(), "multiple YAML documents") {
 		t.Fatalf("Parse() error = %v, want multiple YAML documents", err)
+	}
+}
+
+func TestPlatformsUseTargetProfileVocabulary(t *testing.T) {
+	got := make([]string, 0, len(Platforms()))
+	for _, platform := range Platforms() {
+		got = append(got, platform.ID)
+	}
+
+	want := make([]string, 0, len(targets.SchemaVisibleProfiles()))
+	for _, profile := range targets.SchemaVisibleProfiles() {
+		want = append(want, profile.ID)
+	}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Platforms() IDs = %#v, want target profile schema IDs %#v", got, want)
 	}
 }

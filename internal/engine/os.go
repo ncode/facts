@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	targets "github.com/ncode/facts/internal/platform"
 )
 
 type freeBSDVersions struct {
@@ -209,6 +211,9 @@ func probeWindowsOSVersionInput(s *Session) string {
 }
 
 func currentOSRelease(s *Session, goos string, readFile fileReader, run commandRunner) any {
+	if profile, ok := targets.Lookup(goos); ok && !profile.Capabilities.OSRelease {
+		return nil
+	}
 	switch goos {
 	case "linux":
 		data, err := readFile("/etc/os-release")
@@ -1667,6 +1672,9 @@ func filesystemsFacts(value []string) []ResolvedFact {
 }
 
 func currentFilesystems(goos string, readFile fileReader, run commandRunner) []string {
+	if profile, ok := targets.Lookup(goos); ok && !profile.Capabilities.Filesystems {
+		return nil
+	}
 	switch goos {
 	case "darwin":
 		if run == nil {
@@ -1726,40 +1734,20 @@ func parseDarwinFilesystems(input string) []string {
 }
 
 func osFamily(goos string, distro linuxDistro) string {
-	switch goos {
-	case "darwin":
-		return "Darwin"
-	case "windows":
-		return "windows"
-	case "linux":
+	if goos == "linux" {
 		if distro.ID != "" {
 			return discoverFamily(distro.ID)
 		}
 		return "Linux"
-	case "freebsd":
-		return "FreeBSD"
-	case "netbsd":
-		return "NetBSD"
-	case "openbsd":
-		return "OpenBSD"
-	case "dragonfly":
-		return "DragonFly"
-	case "illumos":
-		return "illumos"
-	case "plan9":
-		return "Plan 9"
-	default:
-		return goos
 	}
+	if profile, ok := targets.Lookup(goos); ok && profile.Identity.OSFamily != "" {
+		return profile.Identity.OSFamily
+	}
+	return goos
 }
 
 func osName(goos string, distro linuxDistro) string {
-	switch goos {
-	case "darwin":
-		return "Darwin"
-	case "windows":
-		return "windows"
-	case "linux":
+	if goos == "linux" {
 		if distro.Name != "" {
 			return distro.Name
 		}
@@ -1770,49 +1758,23 @@ func osName(goos string, distro linuxDistro) string {
 			return distro.ID
 		}
 		return "Linux"
-	case "freebsd":
-		return "FreeBSD"
-	case "netbsd":
-		return "NetBSD"
-	case "openbsd":
-		return "OpenBSD"
-	case "dragonfly":
-		return "DragonFly"
-	case "illumos":
+	}
+	if goos == "illumos" {
 		if distro.Name != "" {
 			return distro.Name
 		}
-		return "illumos"
-	case "plan9":
-		return "Plan 9"
-	default:
-		return goos
 	}
+	if profile, ok := targets.Lookup(goos); ok && profile.Identity.OSName != "" {
+		return profile.Identity.OSName
+	}
+	return goos
 }
 
 func kernelName(goos string) string {
-	switch goos {
-	case "darwin":
-		return "Darwin"
-	case "windows":
-		return "windows"
-	case "linux":
-		return "Linux"
-	case "freebsd":
-		return "FreeBSD"
-	case "netbsd":
-		return "NetBSD"
-	case "openbsd":
-		return "OpenBSD"
-	case "dragonfly":
-		return "DragonFly"
-	case "illumos":
-		return "SunOS"
-	case "plan9":
-		return "Plan 9"
-	default:
-		return goos
+	if profile, ok := targets.Lookup(goos); ok && profile.Identity.KernelName != "" {
+		return profile.Identity.KernelName
 	}
+	return goos
 }
 
 // kernelFacts assembles the structured kernel subtree from the kernel name,

@@ -17,11 +17,11 @@
 
 ## 3. Platform Target Profile
 
-- [ ] 3.1 Add an internal platform target profile table keyed by GOOS with ID, label, support tier, schema visibility, compile targets, distribution targets, gate metadata, and coarse capability policy.
-- [ ] 3.2 Replace duplicated schema/docs platform vocabulary with the target profile source.
-- [ ] 3.3 Replace low-risk OS identity helpers with target profile data while preserving current `os`, `kernel`, and release facts.
-- [ ] 3.4 Wire low-risk capability gates for filesystems, ZFS, and Plan 9 intentionally absent release facts.
-- [ ] 3.5 Add tests for target IDs, target set separation, excluded `solaris`/`aix`, OS identity, and schema/docs vocabulary alignment.
+- [x] 3.1 Add an internal platform target profile table keyed by GOOS with ID, label, support tier, schema visibility, compile targets, distribution targets, gate metadata, and coarse capability policy.
+- [x] 3.2 Replace duplicated schema/docs platform vocabulary with the target profile source.
+- [x] 3.3 Replace low-risk OS identity helpers with target profile data while preserving current `os`, `kernel`, and release facts.
+- [x] 3.4 Wire low-risk capability gates for filesystems, ZFS, and Plan 9 intentionally absent release facts.
+- [x] 3.5 Add tests for target IDs, target set separation, excluded `solaris`/`aix`, OS identity, and schema/docs vocabulary alignment.
 
 ## 4. Session Host Probe Seam
 

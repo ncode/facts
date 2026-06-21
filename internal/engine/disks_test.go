@@ -932,6 +932,40 @@ func TestCurrentLinuxFilesystemsUnreadableProcMatchesRubyResolver(t *testing.T) 
 	}
 }
 
+func TestCurrentFilesystemsHonorsTargetCapabilityPolicy(t *testing.T) {
+	called := false
+	readFile := func(path string) ([]byte, error) {
+		called = true
+		return []byte("ext4\n"), nil
+	}
+	run := func(name string, args ...string) string {
+		called = true
+		return "/dev/disk on / (apfs, local)\n"
+	}
+
+	if got := currentFilesystems("freebsd", readFile, run); got != nil {
+		t.Fatalf("currentFilesystems(freebsd) = %#v, want nil", got)
+	}
+	if called {
+		t.Fatal("currentFilesystems(freebsd) touched probes despite target policy")
+	}
+}
+
+func TestCurrentZFSFactsHonorsTargetCapabilityPolicy(t *testing.T) {
+	called := false
+	run := func(name string, args ...string) string {
+		called = true
+		return " 1 initial version\n"
+	}
+
+	if got := currentZFSFacts("openbsd", run); got != nil {
+		t.Fatalf("currentZFSFacts(openbsd) = %#v, want nil", got)
+	}
+	if called {
+		t.Fatal("currentZFSFacts(openbsd) touched probes despite target policy")
+	}
+}
+
 func TestParseDarwinFilesystems_sortsUniqueFilesystemTypes(t *testing.T) {
 	input := "/dev/disk3s1 on / (apfs, local, read-only)\nmap auto_home on /System/Volumes/Data/home (autofs, automounted)\n/dev/disk3s2 on /System/Volumes/Preboot (apfs, local)\n"
 
