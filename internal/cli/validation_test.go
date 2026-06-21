@@ -96,6 +96,16 @@ func TestValidateOptions_rejectsUnknownConcatenatedShortOption(t *testing.T) {
 	}
 }
 
+func TestValidateOptions_rejectsInlineValueForNoValueOption(t *testing.T) {
+	err := ValidateOptions([]string{"--json=false", "os.name"})
+	if err == nil {
+		t.Fatal("ValidateOptions() err = nil, want unknown option error")
+	}
+	if got, want := err.Error(), "unrecognised option '--json=false'"; got != want {
+		t.Fatalf("ValidateOptions() err = %q, want %q", got, want)
+	}
+}
+
 func TestValidateOptions_validatesLogLevelCombinations(t *testing.T) {
 	tests := []struct {
 		name    string

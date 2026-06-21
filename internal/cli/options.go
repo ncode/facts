@@ -280,8 +280,12 @@ func DocumentedOptions() []Option {
 
 // LookupOption returns metadata for arg, accepting aliases and inline values.
 func LookupOption(arg string) (Option, bool) {
-	option, ok := optionByName[rawOptionName(arg)]
-	if !ok {
+	name, _, hasInlineValue := strings.Cut(arg, "=")
+	if !hasInlineValue {
+		name = arg
+	}
+	option, ok := optionByName[name]
+	if !ok || (hasInlineValue && option.Arity == NoValue) {
 		return Option{}, false
 	}
 	return copyOption(option), true
@@ -291,7 +295,7 @@ func LookupOption(arg string) (Option, bool) {
 func CanonicalOption(arg string) string {
 	option, ok := LookupOption(arg)
 	if !ok {
-		return rawOptionName(arg)
+		return arg
 	}
 	return option.Canonical
 }

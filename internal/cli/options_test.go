@@ -118,6 +118,12 @@ func TestOptionValueHelpersUseSharedMetadata(t *testing.T) {
 	}
 }
 
+func TestLookupOptionRejectsInlineValueForNoValueOption(t *testing.T) {
+	if _, ok := LookupOption("--json=false"); ok {
+		t.Fatal("LookupOption(\"--json=false\") ok = true, want false")
+	}
+}
+
 func hasOption(options []string, want string) bool {
 	for _, option := range options {
 		if option == want {

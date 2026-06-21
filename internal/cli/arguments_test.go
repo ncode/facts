@@ -30,6 +30,14 @@ func TestPrepareArguments_reordersShortVersionFlag(t *testing.T) {
 	}
 }
 
+func TestPrepareArguments_doesNotPromoteTaskFlagWithInlineValue(t *testing.T) {
+	got := PrepareArguments([]string{"--help=topic"})
+	want := []string{"query", "--help=topic"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("PrepareArguments() = %v, want %v", got, want)
+	}
+}
+
 func TestPrepareArguments_preservesShortOptionsWithEquals(t *testing.T) {
 	got := PrepareArguments([]string{"-l=debug", "os.name"})
 	want := []string{"query", "-l=debug", "os.name"}
