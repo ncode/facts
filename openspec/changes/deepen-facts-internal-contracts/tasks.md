@@ -1,11 +1,11 @@
 ## 1. Schema Contract
 
-- [ ] 1.1 Add an internal schema contract package for loading `docs/schema/facts.yaml`, validating entries, flattening fact trees, and matching schema paths.
-- [ ] 1.2 Move schema platform vocabulary and conditional/open-subtree validation into the shared schema contract.
-- [ ] 1.3 Update `schema_test.go` to use the shared schema contract instead of local schema parsing and matching logic.
-- [ ] 1.4 Update `tools/supportedfacts` to use the same parsed schema entries and platform vocabulary.
-- [ ] 1.5 Add tests for exact paths, one-segment `*` matches, documented dynamic children, unknown dynamic children, and explicit open subtrees.
-- [ ] 1.6 Regenerate supported-facts docs and verify generated docs are current.
+- [x] 1.1 Add an internal schema contract package for loading `docs/schema/facts.yaml`, validating entries, flattening fact trees, and matching schema paths.
+- [x] 1.2 Move schema platform vocabulary and conditional/open-subtree validation into the shared schema contract.
+- [x] 1.3 Update `schema_test.go` to use the shared schema contract instead of local schema parsing and matching logic.
+- [x] 1.4 Update `tools/supportedfacts` to use the same parsed schema entries and platform vocabulary.
+- [x] 1.5 Add tests for exact paths, one-segment `*` matches, documented dynamic children, unknown dynamic children, and explicit open subtrees.
+- [x] 1.6 Regenerate supported-facts docs and verify generated docs are current.
 
 ## 2. CLI Option Contract
 

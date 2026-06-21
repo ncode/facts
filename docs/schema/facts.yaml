@@ -10,10 +10,12 @@
 #   conditional: true when presence depends on host state (cloud instances,
 #                swap, DMI visibility, installed tools); such entries may be
 #                absent from a discovery without it being a bug
+#   open_subtree: true when provider-shaped descendants are intentionally
+#                accepted without documenting every leaf
 #
-# A `map`- or `array`-typed entry covers every deeper leaf under it, so
-# provider-shaped subtrees (ec2_metadata, gce, az_metadata, system_profiler)
-# are documented at the subtree root.
+# A `*` path segment matches exactly one segment. A `map`-typed entry only
+# covers the entry path itself unless `open_subtree: true` is set. Array
+# entries cover the synthetic `path.*` leaf used by the conformance test.
 #
 # TestFactsSchemaConformance (schema_test.go) enforces this file on every
 # platform CI gate: an undocumented fact fails the gate, and a non-conditional
@@ -32,6 +34,7 @@ augeas.version:
 
 az_metadata:
   type: map
+  open_subtree: true
   description: The Azure Instance Metadata Service tree, on Azure virtual machines.
   platforms: [linux, windows]
   conditional: true
@@ -156,6 +159,7 @@ dmi.product.version:
 
 ec2_metadata:
   type: map
+  open_subtree: true
   description: The EC2 instance metadata tree, on AWS instances.
   platforms: [linux, windows, freebsd]
   conditional: true
@@ -182,6 +186,7 @@ fips_enabled:
 
 gce:
   type: map
+  open_subtree: true
   description: The Google Compute Engine metadata tree, on GCE instances.
   platforms: [linux, windows]
   conditional: true
@@ -917,6 +922,7 @@ ssh.*.type:
 
 system_profiler:
   type: map
+  open_subtree: true
   description: macOS system_profiler hardware, software, and Ethernet details (provider-shaped keys, such as model_name and serial_number).
   platforms: [darwin]
 
