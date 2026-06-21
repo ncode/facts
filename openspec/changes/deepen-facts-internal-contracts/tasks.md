@@ -33,8 +33,8 @@
 
 ## 5. Verification
 
-- [ ] 5.1 Run `gofmt -w` on edited Go files.
-- [ ] 5.2 Run `go test ./...`.
-- [ ] 5.3 Run `go vet ./...`.
-- [ ] 5.4 Run native facts-lab gates only for slices that change platform probe behavior or target policy.
-- [ ] 5.5 Confirm the OpenSpec status reports this change apply-ready.
+- [x] 5.1 Run `gofmt -w` on edited Go files.
+- [x] 5.2 Run `go test ./...`.
+- [x] 5.3 Run `go vet ./...`.
+- [x] 5.4 Run native facts-lab gates only for slices that change platform probe behavior or target policy.
+- [x] 5.5 Confirm the OpenSpec status reports this change apply-ready.
