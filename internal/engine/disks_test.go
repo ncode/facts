@@ -127,7 +127,7 @@ func TestDiscoverPartitionsReadsSysfsPartitionEntries(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got := discoverPartitions(root)
+	got := discoverPartitions(root, osHost{})
 	want := map[string]any{
 		"/dev/sda1": map[string]any{"size": "2.00 MiB", "size_bytes": 2097152},
 	}
@@ -160,7 +160,7 @@ func TestCurrentLinuxPartitionsAddsLSBLKParttypeLikeRubyResolver(t *testing.T) {
 		}
 	}
 
-	got := currentLinuxPartitions(root, run)
+	got := currentLinuxPartitions(root, run, osHost{})
 	want := map[string]any{
 		"/dev/sda1": map[string]any{
 			"filesystem": "ext3",
@@ -192,7 +192,7 @@ func TestDiscoverPartitionsHandlesDMAndLoopDevicesLikeRubyResolver(t *testing.T)
 	writeFile(t, filepath.Join(loopDir, "loop", "backing_file"), "some_path\n")
 	writeFile(t, filepath.Join(loopDir, "size"), "234\n")
 
-	got := discoverPartitions(root)
+	got := discoverPartitions(root, osHost{})
 	want := map[string]any{
 		"/dev/mapper/VolGroup00-LogVol00": map[string]any{"size": "98.25 MiB", "size_bytes": 103021056},
 		"/dev/loop0":                      map[string]any{"backing_file": "some_path", "size": "117.00 KiB", "size_bytes": 119808},
@@ -528,7 +528,7 @@ func TestCurrentDisksUsesBSDDisklabel(t *testing.T) {
 					t.Fatalf("unexpected command %q %#v", name, args)
 					return ""
 				}
-			})
+			}, osHost{})
 			want := map[string]any{
 				tt.wantDiskKey: map[string]any{"size": "10.00 GiB", "size_bytes": 10_737_418_240},
 			}
@@ -552,7 +552,7 @@ func TestCurrentDisksUsesDragonFlyDiskinfo(t *testing.T) {
 			t.Fatalf("unexpected command %q %#v", name, args)
 			return ""
 		}
-	})
+	}, osHost{})
 	want := map[string]any{
 		"da0": map[string]any{"size": "128.00 GiB", "size_bytes": 137_438_953_472},
 	}
@@ -830,7 +830,7 @@ func TestDisksFact_readsLinuxSysfsBlockDevices(t *testing.T) {
 		}
 	}
 
-	got := disksFact(dir)
+	got := disksFact(dir, osHost{})
 	want := map[string]any{
 		"sda": map[string]any{
 			"model":      "FastDisk",
@@ -887,7 +887,7 @@ func TestCurrentLinuxDisksAddsSerialNumberAndWWN(t *testing.T) {
 		}
 	}
 
-	got := currentLinuxDisks(dir, run)
+	got := currentLinuxDisks(dir, run, osHost{})
 	want := map[string]any{
 		"sda": map[string]any{
 			"model":         "model2",
@@ -911,6 +911,133 @@ func TestCurrentLinuxDisksAddsSerialNumberAndWWN(t *testing.T) {
 	}
 }
 
+func TestDisksCoreFactsUsesSessionHostForLinuxDiskPartitionAndMountpointFacts(t *testing.T) {
+	host := &fakeHostOS{
+		platform: "linux",
+		dirs: map[string][]os.DirEntry{
+			"/sys/block":       fakeDirEntries("sdz"),
+			"/sys/class/block": fakeDirEntries("sdz1"),
+		},
+		files: map[string][]byte{
+			"/sys/block/sdz/device/model":     []byte("FastDisk\n"),
+			"/sys/block/sdz/device/vendor":    []byte("Acme\n"),
+			"/sys/block/sdz/queue/rotational": []byte("0\n"),
+			"/sys/block/sdz/size":             []byte("2048\n"),
+			"/sys/class/block/sdz1/size":      []byte("4096\n"),
+			"/proc/self/mounts":               []byte("/dev/sdz1 / ext4 rw,noatime 0 0\n"),
+			"/proc/cmdline":                   []byte("root=/dev/sdz1\n"),
+		},
+		stats: map[string]os.FileInfo{
+			"/sys/block/sdz/device":           fakeFileInfo{name: "device", mode: os.ModeDir, isDir: true},
+			"/sys/class/block/sdz1/partition": fakeFileInfo{name: "partition"},
+		},
+		mountStats: map[string]mountStat{
+			"/": {SizeBytes: 4096, AvailableBytes: 1024, UsedBytes: 3072},
+		},
+		runOutputs: map[string]string{
+			fakeRunKey("lsblk", "-dn", "-o", "serial", "/dev/sdz"):                                      "SERIAL42\n",
+			fakeRunKey("lsblk", "-dn", "-o", "wwn", "/dev/sdz"):                                         "wwn-42\n",
+			fakeRunKey("lsblk", "--version"):                                                            "lsblk from util-linux 2.25\n",
+			fakeRunKey("lsblk", "-p", "-P", "-o", "NAME,FSTYPE,UUID,LABEL,PARTUUID,PARTLABEL,PARTTYPE"): `NAME="/dev/sdz1" FSTYPE="ext4" UUID="uuid-root" LABEL="rootfs" PARTUUID="partuuid-root" PARTLABEL="root" PARTTYPE="linux"` + "\n",
+			fakeRunKey("zfs", "upgrade", "-v"):                                                          "",
+			fakeRunKey("zpool", "upgrade", "-v"):                                                        "",
+		},
+	}
+	s := NewSessionContext(t.Context())
+	s.host = host
+
+	got := factsByName(disksCoreFacts(s))
+	wantDisks := map[string]any{
+		"sdz": map[string]any{
+			"model":         "FastDisk",
+			"serial_number": "SERIAL42",
+			"size":          "1.00 MiB",
+			"size_bytes":    1_048_576,
+			"type":          "ssd",
+			"vendor":        "Acme",
+			"wwn":           "wwn-42",
+		},
+	}
+	if !reflect.DeepEqual(got["disks"], wantDisks) {
+		t.Fatalf("disks = %#v, want %#v", got["disks"], wantDisks)
+	}
+	wantMountpoints := map[string]any{
+		"/": map[string]any{
+			"available":       "1.00 KiB",
+			"available_bytes": 1024,
+			"capacity":        "75.00%",
+			"device":          "/dev/sdz1",
+			"filesystem":      "ext4",
+			"options":         []string{"rw", "noatime"},
+			"size":            "4.00 KiB",
+			"size_bytes":      4096,
+			"used":            "3.00 KiB",
+			"used_bytes":      3072,
+		},
+	}
+	if !reflect.DeepEqual(got["mountpoints"], wantMountpoints) {
+		t.Fatalf("mountpoints = %#v, want %#v", got["mountpoints"], wantMountpoints)
+	}
+	wantPartitions := map[string]any{
+		"/dev/sdz1": map[string]any{
+			"filesystem": "ext4",
+			"label":      "rootfs",
+			"mount":      "/",
+			"partlabel":  "root",
+			"parttype":   "linux",
+			"partuuid":   "partuuid-root",
+			"size":       "2.00 MiB",
+			"size_bytes": 2_097_152,
+			"uuid":       "uuid-root",
+		},
+	}
+	if !reflect.DeepEqual(got["partitions"], wantPartitions) {
+		t.Fatalf("partitions = %#v, want %#v", got["partitions"], wantPartitions)
+	}
+	if want := []string{"/sys/block", "/sys/class/block"}; !reflect.DeepEqual(host.readDirCalls, want) {
+		t.Fatalf("readDir calls = %#v, want %#v", host.readDirCalls, want)
+	}
+	if want := []string{"/"}; !reflect.DeepEqual(host.statMountpointCalls, want) {
+		t.Fatalf("statMountpoint calls = %#v, want %#v", host.statMountpointCalls, want)
+	}
+}
+
+func TestCurrentPartitionsUsesSessionHostGlobForIllumos(t *testing.T) {
+	const vtoc = `* Dimensions:
+*         512 bytes/sector
+*
+       0     12    00          256        2048        2303
+       2      5    01            0        8192        8191
+`
+	host := &fakeHostOS{
+		platform: "illumos",
+		globs: map[string][]string{
+			"/dev/rdsk/*s2": {"/dev/rdsk/c0t0d0s2"},
+		},
+		runOutputs: map[string]string{
+			fakeRunKey("prtvtoc", "/dev/rdsk/c0t0d0s2"): vtoc,
+			fakeRunKey("fstyp", "/dev/rdsk/c0t0d0s0"):   "ufs\n",
+		},
+	}
+	s := NewSessionContext(t.Context())
+	s.host = host
+
+	got := currentPartitions(s)
+	want := map[string]any{
+		"/dev/dsk/c0t0d0s0": map[string]any{
+			"filesystem": "ufs",
+			"size":       "1.00 MiB",
+			"size_bytes": 1_048_576,
+		},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("currentPartitions() = %#v, want %#v", got, want)
+	}
+	if want := []string{"/dev/rdsk/*s2"}; !reflect.DeepEqual(host.globCalls, want) {
+		t.Fatalf("glob calls = %#v, want %#v", host.globCalls, want)
+	}
+}
+
 func TestParseLinuxFilesystems_sortsAndSkipsPseudoEntries(t *testing.T) {
 	input := "nodev\tsysfs\nnodev\tproc\next4\nfuseblk\nxfs\n"
 
@@ -929,6 +1056,40 @@ func TestCurrentLinuxFilesystemsUnreadableProcMatchesRubyResolver(t *testing.T) 
 
 	if got := currentFilesystems("linux", readFile, nil); got != nil {
 		t.Fatalf("currentFilesystems(linux) = %#v, want nil", got)
+	}
+}
+
+func TestCurrentFilesystemsHonorsTargetCapabilityPolicy(t *testing.T) {
+	called := false
+	readFile := func(path string) ([]byte, error) {
+		called = true
+		return []byte("ext4\n"), nil
+	}
+	run := func(name string, args ...string) string {
+		called = true
+		return "/dev/disk on / (apfs, local)\n"
+	}
+
+	if got := currentFilesystems("freebsd", readFile, run); got != nil {
+		t.Fatalf("currentFilesystems(freebsd) = %#v, want nil", got)
+	}
+	if called {
+		t.Fatal("currentFilesystems(freebsd) touched probes despite target policy")
+	}
+}
+
+func TestCurrentZFSFactsHonorsTargetCapabilityPolicy(t *testing.T) {
+	called := false
+	run := func(name string, args ...string) string {
+		called = true
+		return " 1 initial version\n"
+	}
+
+	if got := currentZFSFacts("openbsd", run); got != nil {
+		t.Fatalf("currentZFSFacts(openbsd) = %#v, want nil", got)
+	}
+	if called {
+		t.Fatal("currentZFSFacts(openbsd) touched probes despite target policy")
 	}
 }
 

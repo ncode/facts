@@ -64,7 +64,7 @@ $ facts --json
 
 ## Fact Contract
 
-130 schema entries include `freebsd`.
+131 schema entries include `freebsd`.
 
 | Fact | Type | Conditional | Description |
 | --- | --- | --- | --- |
@@ -146,6 +146,7 @@ $ facts --json
 | `networking.interfaces.*.network6` | `string` | yes | The IPv6 network of the interface's first binding. |
 | `networking.interfaces.*.operational_state` | `string` | yes | The operational state of the interface, such as up or down. |
 | `networking.interfaces.*.scope6` | `string` | yes | The IPv6 scope of the interface's first binding, such as global or link. |
+| `networking.interfaces.*.speed` | `integer` | yes | The negotiated speed of the interface, in Mbit/s. |
 | `networking.ip` | `string` | yes | The IPv4 address of the primary interface. |
 | `networking.ip6` | `string` | yes | The IPv6 address of the primary interface. |
 | `networking.mac` | `string` | yes | The MAC address of the primary interface. |

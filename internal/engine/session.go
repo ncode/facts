@@ -20,13 +20,21 @@ import (
 var coreCommandTimeout = 30 * time.Second
 
 type hostOS interface {
+	goos() string
 	run(context.Context, string, ...string) string
 	readFile(string) ([]byte, error)
+	readDir(string) ([]os.DirEntry, error)
 	stat(string) (os.FileInfo, error)
 	lstat(string) (os.FileInfo, error)
+	glob(string) ([]string, error)
+	statMountpoint(string) (mountStat, bool)
 }
 
 type osHost struct{}
+
+func (osHost) goos() string {
+	return runtime.GOOS
+}
 
 func (osHost) run(ctx context.Context, name string, args ...string) string {
 	cmdName, ok := coreCommandExecutable(name, runtime.GOOS)
@@ -143,12 +151,24 @@ func (osHost) readFile(path string) ([]byte, error) {
 	return os.ReadFile(path)
 }
 
+func (osHost) readDir(path string) ([]os.DirEntry, error) {
+	return os.ReadDir(path)
+}
+
 func (osHost) stat(path string) (os.FileInfo, error) {
 	return os.Stat(path)
 }
 
 func (osHost) lstat(path string) (os.FileInfo, error) {
 	return os.Lstat(path)
+}
+
+func (osHost) glob(pattern string) ([]string, error) {
+	return filepath.Glob(pattern)
+}
+
+func (osHost) statMountpoint(path string) (mountStat, bool) {
+	return statMountpoint(path)
 }
 
 // Session carries the state of one resolution run: memoized host probes and
@@ -221,8 +241,16 @@ func (s *Session) Context() context.Context {
 	return s.ctx
 }
 
+func (s *Session) goos() string {
+	return s.host.goos()
+}
+
 func (s *Session) readFile(path string) ([]byte, error) {
 	return s.host.readFile(path)
+}
+
+func (s *Session) readDir(path string) ([]os.DirEntry, error) {
+	return s.host.readDir(path)
 }
 
 func (s *Session) stat(path string) (os.FileInfo, error) {
@@ -231,6 +259,14 @@ func (s *Session) stat(path string) (os.FileInfo, error) {
 
 func (s *Session) lstat(path string) (os.FileInfo, error) {
 	return s.host.lstat(path)
+}
+
+func (s *Session) glob(pattern string) ([]string, error) {
+	return s.host.glob(pattern)
+}
+
+func (s *Session) statMountpoint(path string) (mountStat, bool) {
+	return s.host.statMountpoint(path)
 }
 
 // logr returns the session logger, defaulting to a discard logger so a Session

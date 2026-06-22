@@ -8,6 +8,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	targets "github.com/ncode/facts/internal/platform"
 )
 
 func TestNetworkingInterfacesWindowsKeepsAddresslessInterfaceLikeRubyResolver(t *testing.T) {
@@ -1159,6 +1161,29 @@ func TestKernelName_mapsBSDLikeRubyFact(t *testing.T) {
 
 			if got := kernelName(tt.goos); got != tt.want {
 				t.Fatalf("kernelName(%q) = %q, want %q", tt.goos, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestOSIdentityHelpersUseTargetProfileDefaults(t *testing.T) {
+	t.Parallel()
+
+	for _, profile := range targets.Profiles() {
+		if profile.ID == "linux" {
+			continue
+		}
+		t.Run(profile.ID, func(t *testing.T) {
+			t.Parallel()
+
+			if got := osFamily(profile.ID, linuxDistro{}); got != profile.Identity.OSFamily {
+				t.Fatalf("osFamily(%q) = %q, want profile OS family %q", profile.ID, got, profile.Identity.OSFamily)
+			}
+			if got := osName(profile.ID, linuxDistro{}); got != profile.Identity.OSName {
+				t.Fatalf("osName(%q) = %q, want profile OS name %q", profile.ID, got, profile.Identity.OSName)
+			}
+			if got := kernelName(profile.ID); got != profile.Identity.KernelName {
+				t.Fatalf("kernelName(%q) = %q, want profile kernel name %q", profile.ID, got, profile.Identity.KernelName)
 			}
 		})
 	}
