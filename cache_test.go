@@ -3,6 +3,7 @@ package facts
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -108,6 +109,34 @@ func TestWithCache_servesFreshCachedValueOverResolver(t *testing.T) {
 	}
 	if got != "from-cache" {
 		t.Fatalf("demo = %#v, want %q — a fresh cache entry must win over the resolver", got, "from-cache")
+	}
+}
+
+func TestWithCache_selectsQueriedFactsThroughEngineCachePath(t *testing.T) {
+	dir := redirectCacheDir(t)
+	conf := writeTTLConfig(t, "demo")
+	seedCacheFile(t, filepath.Join(dir, "demo"), map[string]any{"demo": map[string]any{"child": "from-cache"}})
+
+	eng, err := New(
+		WithCache(),
+		WithConfigFile(conf),
+		WithFact("demo", func(context.Context) (any, error) {
+			return map[string]any{"child": "fresh"}, nil
+		}),
+		WithFact("other", cachingResolver("fresh")),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap, err := eng.Discover(context.Background(), "demo.child")
+	if err != nil {
+		t.Fatalf("Discover() err = %v", err)
+	}
+	if got, err := snap.Value("demo.child"); err != nil || got != "from-cache" {
+		t.Fatalf("Value(demo.child) = %#v, %v, want queried cached value", got, err)
+	}
+	if _, err := snap.Value("other"); !errors.Is(err, ErrFactNotFound) {
+		t.Fatalf("Value(other) err = %v, want unqueried fact omitted from cached Snapshot", err)
 	}
 }
 
