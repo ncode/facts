@@ -119,6 +119,68 @@ func TestWithConfigFile_loadsConfiguredDirs(t *testing.T) {
 	}
 }
 
+func TestWithConfigFile_recomputesDiscoveryPolicyEachDiscover(t *testing.T) {
+	cacheDir := redirectCacheDir(t)
+	firstDir := t.TempDir()
+	writeTestFile(t, firstDir, "site.txt", "site_location=first\n")
+	writeTestFile(t, firstDir, "blocked.txt", "blocked_probe=blocked\n")
+	secondDir := t.TempDir()
+	writeTestFile(t, secondDir, "site.txt", "site_location=second\nblocked_probe=visible\n")
+	configDir := t.TempDir()
+	configPath := filepath.Join(configDir, "facter.conf")
+	writeTestFile(t, configDir, "facter.conf", `global : {
+  external-dir : [ "`+firstDir+`" ],
+}
+facts : {
+  blocklist : [ "blocked.txt" ],
+}
+`)
+
+	eng, err := New(
+		WithCache(),
+		WithConfigFile(configPath),
+		WithFact("cache_probe", func(context.Context) (any, error) { return "cached", nil }),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := eng.Discover(context.Background())
+	if err != nil {
+		t.Fatalf("first Discover() err = %v", err)
+	}
+	if got, err := first.Value("site_location"); err != nil || got != "first" {
+		t.Fatalf("first Value(site_location) = %#v, %v, want first", got, err)
+	}
+	if _, err := first.Value("blocked_probe"); !errors.Is(err, ErrFactNotFound) {
+		t.Fatalf("first Value(blocked_probe) err = %v, want ErrFactNotFound", err)
+	}
+	if _, err := os.Stat(filepath.Join(cacheDir, "cache_probe")); !os.IsNotExist(err) {
+		t.Fatalf("cache file after first Discover stat err = %v, want not exist", err)
+	}
+
+	writeTestFile(t, configDir, "facter.conf", `global : {
+  external-dir : [ "`+secondDir+`" ],
+}
+facts : {
+  ttls : [ { "cache_probe" : "30 days" } ],
+}
+`)
+	second, err := eng.Discover(context.Background())
+	if err != nil {
+		t.Fatalf("second Discover() err = %v", err)
+	}
+	if got, err := second.Value("site_location"); err != nil || got != "second" {
+		t.Fatalf("second Value(site_location) = %#v, %v, want second", got, err)
+	}
+	if got, err := second.Value("blocked_probe"); err != nil || got != "visible" {
+		t.Fatalf("second Value(blocked_probe) = %#v, %v, want visible", got, err)
+	}
+	data := readCacheFile(t, filepath.Join(cacheDir, "cache_probe"))
+	if data["cache_probe"] != "cached" {
+		t.Fatalf("cached cache_probe = %#v, want cached", data["cache_probe"])
+	}
+}
+
 func TestWithConfigFile_blocklistSuppressesFacts(t *testing.T) {
 	configPath := writeTestFile(t, t.TempDir(), "facter.conf", "facts : {\n  blocklist : [ \"ssh\" ],\n}\n")
 

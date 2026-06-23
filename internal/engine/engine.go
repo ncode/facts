@@ -57,6 +57,18 @@ type EngineConfig struct {
 	NoExternalFacts bool
 	// BlockedFacts overrides the config-derived blocklist when non-nil.
 	BlockedFacts map[string]bool
+	// ConfigLoaded carries an already parsed config from internal/app. Library
+	// engines leave it false so ConfigFile/SystemDefaults are parsed fresh on
+	// every Discover.
+	ConfigLoaded bool
+	Config       Config
+	// DefaultExternalDirs overrides process default external dirs for
+	// internal/app tests and CLI adapter wiring. Nil is a valid override when
+	// DefaultExternalDirsSet is true.
+	DefaultExternalDirsSet bool
+	DefaultExternalDirs    []string
+	// IncludeTypedDotted enables CLI/config force-dot query projection.
+	IncludeTypedDotted bool
 }
 
 // Engine is an immutable unit of fact-discovery configuration. All
@@ -75,6 +87,9 @@ type Engine struct {
 // NewEngine validates and freezes cfg into an Engine.
 func NewEngine(cfg EngineConfig) (*Engine, error) {
 	cfg.ExternalDirs = slices.Clone(cfg.ExternalDirs)
+	cfg.BlockedFacts = cloneBoolMap(cfg.BlockedFacts)
+	cfg.DefaultExternalDirs = slices.Clone(cfg.DefaultExternalDirs)
+	cfg.Config = cloneConfig(cfg.Config)
 	cfg.Facts = slices.Clone(cfg.Facts)
 	for i, fact := range cfg.Facts {
 		if fact.Name == "" {
@@ -122,34 +137,8 @@ func (e *Engine) Discover(ctx context.Context, queries ...string) (*Snapshot, er
 	var failures []error
 	var facts []ResolvedFact
 
-	externalDirs := slices.Clone(e.cfg.ExternalDirs)
-	blocked := e.cfg.BlockedFacts
-	if blocked == nil {
-		blocked = map[string]bool{}
-	}
-	var ttls []FactTTL
-	var cacheGroups []FactGroup
-	noExternalFacts := e.cfg.NoExternalFacts
-
-	if e.cfg.ConfigFile != "" || e.cfg.SystemDefaults {
-		configFile := e.cfg.ConfigFile
-		config, err := ParseConfig(configFile, s.logger)
-		if err != nil {
-			failures = append(failures, err)
-		} else {
-			if len(externalDirs) == 0 {
-				externalDirs = config.ExternalDirs
-			}
-			noExternalFacts = noExternalFacts || config.NoExternalFacts
-			cacheGroups = config.FactGroups
-			if e.cfg.BlockedFacts == nil {
-				blocked = BlocklistedFactsForFiltering(config.Blocklist, config.FactGroups)
-			}
-			if e.cfg.UseCache {
-				ttls = config.TTLs
-			}
-		}
-	}
+	plan, planFailures := e.planDiscovery(s, queries)
+	failures = append(failures, planFailures...)
 
 	finish := func() (*Snapshot, error) {
 		if err := ctx.Err(); err != nil {
@@ -159,30 +148,26 @@ func (e *Engine) Discover(ctx context.Context, queries ...string) (*Snapshot, er
 	}
 
 	var externalFacts []ResolvedFact
-	if !noExternalFacts {
-		dirs := externalDirs
-		if e.cfg.SystemDefaults && !e.cfg.CLICompat && len(dirs) == 0 {
-			dirs = CurrentDefaultExternalFactDirs()
-		}
-		if len(dirs) > 0 && ExternalFactResolutionRunning() {
+	if !plan.noExternalFacts {
+		if len(plan.externalDirs) > 0 && ExternalFactResolutionRunning() {
 			e.warnOnce("Recursion detected while resolving external facts; executable external facts will be skipped")
 		}
 		loader := externalFactLoader{
 			s:       s,
-			dirs:    dirs,
-			blocked: blocked,
+			dirs:    plan.externalDirs,
+			blocked: plan.blockedFacts,
 		}
-		if e.cfg.CLICompat {
-			loader.mode = externalFactLoaderCLI
-			loader.includeEnv = true
+		if plan.loaderMode == externalFactLoaderCLI {
+			loader.mode = plan.loaderMode
+			loader.includeEnv = plan.includeEnv
 			loaded, err := loader.load()
 			if err != nil {
 				return newSnapshot(nil, s.logger), err
 			}
 			externalFacts = loaded
 		} else {
-			loader.mode = externalFactLoaderLibrary
-			loader.includeEnv = e.cfg.SystemDefaults
+			loader.mode = plan.loaderMode
+			loader.includeEnv = plan.includeEnv
 			loaded, err := loader.load()
 			if err != nil {
 				failures = append(failures, err)
@@ -223,15 +208,22 @@ func (e *Engine) Discover(ctx context.Context, queries ...string) (*Snapshot, er
 	facts = CoreFacts(s)
 	facts = append(facts, registeredFacts...)
 	facts = append(facts, externalFacts...)
-	facts = FilterBlockedFacts(facts, blocked)
+	facts = FilterBlockedFacts(facts, plan.blockedFacts)
 
-	if e.cfg.UseCache && ctx.Err() == nil {
-		cache := NewFactCache(DefaultCachePath(), ttls, cacheGroups, s.logger)
+	if len(plan.queries) > 0 {
+		facts = NewProjection(facts, plan.includeTypedDotted).Select(plan.queries)
+	}
+
+	if plan.useCache && ctx.Err() == nil {
+		cache := NewFactCache(DefaultCachePath(), plan.cacheTTLs, plan.cacheGroups, s.logger)
 		remaining, cached := cache.ResolveFacts(facts)
 		if err := cache.CacheFacts(remaining); err != nil {
 			failures = append(failures, err)
 		}
 		facts = append(remaining, cached...)
+		if len(plan.queries) > 0 {
+			facts = NewProjection(facts, plan.includeTypedDotted).Select(plan.queries)
+		}
 	}
 
 	return finish()

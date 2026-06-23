@@ -264,8 +264,10 @@ func runQuery(stdout, stderr io.Writer, args []string) error {
 	if configErr != nil {
 		return configErr
 	}
-	if len(externalDirs) == 0 {
-		externalDirs = configOptions.ExternalDirs
+	cliExternalDirs := externalDirs
+	discoveryExternalDirs := externalDirs
+	if len(discoveryExternalDirs) == 0 {
+		discoveryExternalDirs = configOptions.ExternalDirs
 	}
 	if configOptions.NoExternalFacts {
 		*noExternalFacts = true
@@ -276,16 +278,21 @@ func runQuery(stdout, stderr io.Writer, args []string) error {
 	if configOptions.Verbose {
 		*verbose = true
 	}
-	if *noExternalFacts && hasNonEmpty(externalDirs) {
+	if *noExternalFacts && hasNonEmpty(discoveryExternalDirs) {
 		return optionError(stdout, errors.New("--no-external-facts and --external-dir options conflict: please specify only one"))
 	}
 	if !*noExternalFacts {
-		externalDirs = effectiveExternalDirs(externalDirs)
+		discoveryExternalDirs = effectiveExternalDirs(discoveryExternalDirs)
 	}
-	blockedFacts := map[string]bool{}
+	blockedFactsForFastPath := map[string]bool{}
+	var blockedFacts map[string]bool
+	if *noBlock {
+		blockedFacts = map[string]bool{}
+	}
 	if !*noBlock {
-		blockedFacts = engine.BlocklistedFactsForFiltering(configOptions.Blocklist, configOptions.FactGroups)
+		blockedFactsForFastPath = engine.BlocklistedFactsForFiltering(configOptions.Blocklist, configOptions.FactGroups)
 	}
+	mergeDottedFacts := configOptions.ForceDotResolution || *forceDotResolution
 	logLevel := firstNonEmpty(flags.Lookup("log-level").Value.String(), flags.Lookup("l").Value.String(), configOptions.LogLevel)
 	if logLevel != "" && !cli.SupportedLogLevel(logLevel) {
 		return optionError(stdout, fmt.Errorf("unsupported log level %s", logLevel))
@@ -304,17 +311,25 @@ func runQuery(stdout, stderr io.Writer, args []string) error {
 		writeInfo(stderr, "executed with command line: "+strings.Join(args, " "), colorDiagnostics)
 		writeInfo(stderr, "resolving facts", colorDiagnostics)
 	}
-	if canUseVersionQueryFastPath(flags.Args(), externalDirs, blockedFacts, *noExternalFacts, *timing || *timingShort) {
+	if canUseVersionQueryFastPath(flags.Args(), discoveryExternalDirs, blockedFactsForFastPath, *noExternalFacts, *timing || *timingShort) {
 		return writeVersionQuery(stdout, *jsonOutput || *jsonOutputShort, *yamlOutput || *yamlOutputShort, *hoconOutput)
 	}
 	resolutionStart := time.Now()
 
 	eng, err := engine.NewEngine(engine.EngineConfig{
-		CLICompat:       true,
-		ExternalDirs:    externalDirs,
-		NoExternalFacts: *noExternalFacts,
-		BlockedFacts:    blockedFacts,
-		Logger:          logger,
+		CLICompat:              true,
+		SystemDefaults:         true,
+		ConfigFile:             configFile,
+		ConfigLoaded:           true,
+		Config:                 configOptions,
+		ExternalDirs:           cliExternalDirs,
+		UseCache:               !*noCache,
+		NoExternalFacts:        *noExternalFacts,
+		BlockedFacts:           blockedFacts,
+		DefaultExternalDirsSet: true,
+		DefaultExternalDirs:    defaultExternalFactDirs(),
+		IncludeTypedDotted:     mergeDottedFacts,
+		Logger:                 logger,
 	})
 	if err != nil {
 		return err
@@ -324,17 +339,6 @@ func runQuery(stdout, stderr io.Writer, args []string) error {
 		return err
 	}
 	facts := snapshot.Facts()
-	mergeDottedFacts := configOptions.ForceDotResolution || *forceDotResolution
-	projection := engine.NewProjection(facts, mergeDottedFacts)
-	facts = projection.Select(flags.Args())
-	if !*noCache {
-		cache := engine.NewFactCache(engine.DefaultCachePath(), configOptions.TTLs, configOptions.FactGroups, logger)
-		remaining, cached := cache.ResolveFacts(facts)
-		if err := cache.CacheFacts(remaining); err != nil {
-			return err
-		}
-		facts = append(remaining, cached...)
-	}
 	resolutionDuration := time.Since(resolutionStart).Seconds()
 	out, err := engine.BuildFormatter(engine.FormatOptions{
 		JSON:               *jsonOutput || *jsonOutputShort,

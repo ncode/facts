@@ -130,6 +130,26 @@ func TestSnapshotTree_excludesLegacyAliasFacts(t *testing.T) {
 	}
 }
 
+func TestDiscoverQueriesSelectReturnedSnapshotFacts(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, dir, "site.txt", "site_one=one\nsite_two=two\n")
+
+	eng, err := New(WithExternalDirs(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap, err := eng.Discover(context.Background(), "site_one")
+	if err != nil {
+		t.Fatalf("Discover() err = %v", err)
+	}
+	if got, err := snap.Value("site_one"); err != nil || got != "one" {
+		t.Fatalf("Value(site_one) = %#v, %v, want selected fact", got, err)
+	}
+	if _, err := snap.Value("site_two"); !errors.Is(err, ErrFactNotFound) {
+		t.Fatalf("Value(site_two) err = %v, want unqueried fact omitted from selected Snapshot", err)
+	}
+}
+
 // Pins the surviving halves of TestAdd_resolvesProgrammaticCustomFactLazily,
 // TestValue_reusesResolvedProgrammaticCustomFact, and
 // TestValue_missingFactDoesNotResolveUnrelatedProgrammaticCustomFacts: each
@@ -155,8 +175,8 @@ func TestWithFact_resolverRunsExactlyOncePerDiscover(t *testing.T) {
 		t.Fatalf("resolver ran %d times after one Discover with an unrelated query, want eager resolution exactly once", calls)
 	}
 	for range 2 {
-		if got, err := first.Value("counted_fact"); err != nil || got != 1 {
-			t.Fatalf("Value(counted_fact) = %#v, %v, want first-run value 1", got, err)
+		if _, err := first.Value("counted_fact"); !errors.Is(err, ErrFactNotFound) {
+			t.Fatalf("Value(counted_fact) err = %v, want unrelated fact omitted from queried Snapshot", err)
 		}
 	}
 	if calls != 1 {
@@ -173,8 +193,8 @@ func TestWithFact_resolverRunsExactlyOncePerDiscover(t *testing.T) {
 	if got, _ := second.Value("counted_fact"); got != 2 {
 		t.Fatalf("second Value(counted_fact) = %#v, want fresh value 2", got)
 	}
-	if got, _ := first.Value("counted_fact"); got != 1 {
-		t.Fatalf("first Value(counted_fact) = %#v after rediscovery, want immutable 1", got)
+	if _, err := first.Value("counted_fact"); !errors.Is(err, ErrFactNotFound) {
+		t.Fatalf("first Value(counted_fact) err = %v after rediscovery, want queried Snapshot unchanged", err)
 	}
 }
 

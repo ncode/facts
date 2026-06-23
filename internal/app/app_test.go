@@ -18,6 +18,18 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
+func seedAppCacheFile(t *testing.T, path string, data map[string]any) {
+	t.Helper()
+	data["cache_format_version"] = 1
+	raw, err := json.Marshal(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRun_version(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
@@ -532,6 +544,35 @@ func TestRun_configTTLsUseFreshCachedFact(t *testing.T) {
 	}
 	if stderr.Len() != 0 {
 		t.Fatalf("second stderr = %q, want empty", stderr.String())
+	}
+}
+
+func TestRun_noCacheIgnoresFreshCachedFact(t *testing.T) {
+	dir := t.TempDir()
+	factPath := filepath.Join(dir, "site.txt")
+	if err := os.WriteFile(factPath, []byte("site_role=fresh\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(t.TempDir(), "facter.conf")
+	conf := "facts : {\n  ttls : [ { \"site_role\" : \"1 hour\" } ],\n}\n"
+	if err := os.WriteFile(configPath, []byte(conf), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cacheDir := t.TempDir()
+	oldDefaultCachePath := engine.DefaultCachePath
+	engine.DefaultCachePath = func() string { return cacheDir }
+	t.Cleanup(func() { engine.DefaultCachePath = oldDefaultCachePath })
+	seedAppCacheFile(t, filepath.Join(cacheDir, "site_role"), map[string]any{"site_role": "from-cache"})
+	var stdout, stderr bytes.Buffer
+
+	if err := Run(&stdout, &stderr, []string{"--no-cache", "--config", configPath, "--external-dir", dir, "site_role"}); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := stdout.String(), "fresh\n"; got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
 	}
 }
 
