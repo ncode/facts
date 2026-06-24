@@ -22,6 +22,11 @@
   and `networking.scope6` when no primary IPv6 address is available.
 - Mountpoint entries with no stat, device, filesystem, or option data are now
   omitted instead of rendering empty maps such as `mountpoints."/": {}`.
+- Linux `os.release` is now omitted when `/etc/os-release` has no
+  `VERSION_ID`, including Arch Linux; `BUILD_ID=rolling` is not treated as an
+  operating system release.
+- NixOS, Rocky Linux, and AlmaLinux `os.release` now split dotted
+  `VERSION_ID` values into `major` and `minor`, matching `os.distro.release`.
 
 ## v0.0.3 - 2026-06-18
 
