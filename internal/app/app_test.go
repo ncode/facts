@@ -708,6 +708,17 @@ func TestRun_queryYAML(t *testing.T) {
 	}
 }
 
+func TestRun_queryFacterversionYAMLHasSingleTrailingNewline(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+
+	if err := Run(&stdout, &stderr, []string{"--yaml", "facterversion"}); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := stdout.String(), "facterversion: "+engine.Version+"\n"; got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+}
+
 func TestRun_queryHOCON(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 

@@ -56,6 +56,40 @@ fact-groups : {
 	}
 }
 
+func TestParseConfig_ignoresSectionNamesInsideStringsAndComments(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "facter.conf")
+	content := `global : {
+  note : "facts : { ttls : [ { \"wrong\" : \"1 day\" } ] }",
+  facts : { ttls : [ { "nested" : "1 day" } ] },
+}
+# cli : { debug : true }
+facts : {
+  ttls : [
+    { "right" : "2 days" },
+  ],
+}
+cli : {
+  verbose : true,
+}`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := ParseConfig(path, discardLog())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got.TTLs, []FactTTL{{Fact: "right", TTL: "2 days"}}) {
+		t.Fatalf("TTLs = %#v, want real facts section only", got.TTLs)
+	}
+	if got.Debug {
+		t.Fatal("Debug = true, want commented cli section ignored")
+	}
+	if !got.Verbose {
+		t.Fatal("Verbose = false, want real cli section parsed")
+	}
+}
+
 func TestParseConfig_collectsRepeatedDirectoryEntries(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "facter.conf")
 	content := `global : {
@@ -595,6 +629,33 @@ func TestParseConfig_returnsConfiguredFactTTLs(t *testing.T) {
 	}
 }
 
+func TestParseConfig_TTLsUseExactFactsSection(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "facter.conf")
+	content := `facts-extra : {
+  ttls : [
+    { "bad" : "1 hour" }
+  ],
+}
+facts : {
+  ttls : [
+    { "timezone" : "30 days" }
+  ],
+}`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	config, err := ParseConfig(path, discardLog())
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := config.TTLs
+	want := []FactTTL{{Fact: "timezone", TTL: "30 days"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Config.TTLs = %#v, want %#v", got, want)
+	}
+}
+
 func TestParseConfig_acceptsBareFactNamesAndValues(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "facter.conf")
 	content := `facts : {
@@ -754,6 +815,39 @@ func TestFilterBlockedFacts_blocksExactNameAndRoot(t *testing.T) {
 	want = []ResolvedFact{{Name: "os.name", Value: "Darwin", Type: "core"}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("FilterBlockedFacts(networking) = %#v, want %#v", got, want)
+	}
+}
+
+func TestFilterBlockedFacts_prunesBlockedDescendantsFromStructuredParents(t *testing.T) {
+	facts := []ResolvedFact{
+		{
+			Name: "os",
+			Value: map[string]any{
+				"name": "Ubuntu",
+				"release": map[string]any{
+					"full":  "24.04",
+					"major": "24",
+				},
+			},
+			Type: "core",
+		},
+	}
+
+	got := FilterBlockedFacts(facts, map[string]bool{"os.release.major": true})
+	want := []ResolvedFact{
+		{
+			Name: "os",
+			Value: map[string]any{
+				"name": "Ubuntu",
+				"release": map[string]any{
+					"full": "24.04",
+				},
+			},
+			Type: "core",
+		},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("FilterBlockedFacts(os.release.major) = %#v, want %#v", got, want)
 	}
 }
 

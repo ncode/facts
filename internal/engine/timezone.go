@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"golang.org/x/text/encoding"
 	"golang.org/x/text/encoding/charmap"
@@ -27,6 +28,9 @@ func currentTimezone(s *Session, goos string) string {
 func currentWindowsTimezone(goos, zone, apiCodepage string, registryCodepage func() string) string {
 	if goos != "windows" || zone == "" {
 		return ""
+	}
+	if utf8.ValidString(zone) {
+		return zone
 	}
 	codepage := apiCodepage
 	if codepage == "" {

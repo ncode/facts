@@ -24,6 +24,16 @@ func DetectOSIdentifier(hostOS, linuxDistroID string) (string, error) {
 			return linuxDistroID, nil
 		}
 		return "linux", nil
+	case strings.Contains(hostOS, "freebsd"):
+		return "freebsd", nil
+	case strings.Contains(hostOS, "openbsd"):
+		return "openbsd", nil
+	case strings.Contains(hostOS, "netbsd"):
+		return "netbsd", nil
+	case strings.Contains(hostOS, "dragonfly"):
+		return "dragonfly", nil
+	case strings.Contains(hostOS, "illumos") || strings.Contains(hostOS, "sunos") || strings.Contains(hostOS, "solaris"):
+		return "illumos", nil
 	default:
 		return "", fmt.Errorf("%w: %q", ErrUnknownOS, hostOS)
 	}
@@ -97,6 +107,9 @@ func capitalizeOSName(name string) string {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return ""
+	}
+	if name[1:] != strings.ToLower(name[1:]) {
+		return strings.ToUpper(name[:1]) + name[1:]
 	}
 	return strings.ToUpper(name[:1]) + strings.ToLower(name[1:])
 }

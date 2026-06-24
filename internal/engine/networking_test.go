@@ -397,7 +397,7 @@ func TestLinuxProcGetenvForPIDMatchesRubyProcHelper(t *testing.T) {
 		if path != "/proc/1/environ" {
 			t.Fatalf("path = %q, want /proc/1/environ", path)
 		}
-		return []string{"container=podman", "bubbles=", "HOME=/root"}, true
+		return []string{"container=podman\x00bubbles=\x00HOME=/root\x00"}, true
 	}
 
 	tests := []struct {

@@ -70,8 +70,7 @@ func disksFact(root string, host hostOS) map[string]any {
 				disk["type"] = "hdd"
 			}
 		}
-		if sectors, err := strconv.Atoi(readSysfsString(root, name, "size", host.readFile)); err == nil && sectors > 0 {
-			sizeBytes := sectors * 512
+		if sizeBytes, ok := linuxSectorSizeBytes(readSysfsString(root, name, "size", host.readFile)); ok {
 			disk["size_bytes"] = sizeBytes
 			disk["size"] = bytesToHumanReadable(sizeBytes)
 		}
@@ -258,13 +257,24 @@ func discoverPartitions(root string, host hostOS) map[string]any {
 }
 
 func addLinuxPartitionSize(partition map[string]any, root, name string, readFile fileReader) {
-	sectors, err := strconv.Atoi(readSysfsString(root, name, "size", readFile))
-	if err != nil || sectors < 0 {
-		sectors = 0
+	sizeBytes, ok := linuxSectorSizeBytes(readSysfsString(root, name, "size", readFile))
+	if !ok {
+		sizeBytes = 0
 	}
-	sizeBytes := sectors * 512
 	partition["size_bytes"] = sizeBytes
 	partition["size"] = bytesToHumanReadable(sizeBytes)
+}
+
+func linuxSectorSizeBytes(value string) (any, bool) {
+	sectors, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
+	if err != nil || sectors <= 0 || sectors > int64(1<<63-1)/512 {
+		return nil, false
+	}
+	sizeBytes := sectors * 512
+	if sizeBytes <= int64(^uint(0)>>1) {
+		return int(sizeBytes), true
+	}
+	return sizeBytes, true
 }
 
 func linuxLSBLKVersion(output string) (int, int, bool) {
@@ -1147,17 +1157,23 @@ func rootFromLinuxCmdline(input string) string {
 }
 
 func linuxDeviceForPartitionID(partitionID, blkidOutput string) string {
-	_, id, ok := strings.Cut(partitionID, "=")
+	idKey, id, ok := strings.Cut(partitionID, "=")
 	if !ok || id == "" {
 		return ""
 	}
 	for line := range strings.SplitSeq(blkidOutput, "\n") {
-		if !strings.Contains(line, id) {
+		device, _, ok := strings.Cut(line, ":")
+		if !ok {
 			continue
 		}
-		device, _, ok := strings.Cut(line, ":")
-		if ok {
-			return strings.TrimSpace(device)
+		for field := range strings.FieldsSeq(line) {
+			key, rawValue, ok := strings.Cut(field, "=")
+			if !ok || !strings.EqualFold(key, idKey) {
+				continue
+			}
+			if strings.Trim(rawValue, `"`) == id {
+				return strings.TrimSpace(device)
+			}
 		}
 	}
 	return ""

@@ -40,9 +40,10 @@ for key in os.release os.architecture os.hardware kernel.release.full kernel.ver
     kernel.release.major virtual is_virtual networking memory memory.system.total \
     processors processors.count dmi system_uptime load_averages \
     mountpoints disks partitions; do
-    printf '%s\n' "$out" | grep -Eq "\"$key\"[[:space:]]*:" \
+    key_re=$(printf '%s\n' "$key" | sed 's/\./\\./g')
+    printf '%s\n' "$out" | grep -Eq "\"$key_re\"[[:space:]]*:" \
         || fail "missing fact $key"
-    printf '%s\n' "$out" | grep -Eq "\"$key\"[[:space:]]*:[[:space:]]*null" \
+    printf '%s\n' "$out" | grep -Eq "\"$key_re\"[[:space:]]*:[[:space:]]*null" \
         && fail "fact $key is null"
 done
 

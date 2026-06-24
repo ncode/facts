@@ -91,7 +91,12 @@ func linuxAWSCloudProvider(name string, ec2Metadata map[string]any, euid int, ex
 	if strings.EqualFold(name, "aws") || euid != 0 || !executable("/opt/puppetlabs/puppet/bin/virt-what") {
 		return true
 	}
-	return strings.TrimSpace(run("/opt/puppetlabs/puppet/bin/virt-what")) == "aws"
+	for field := range strings.FieldsSeq(run("/opt/puppetlabs/puppet/bin/virt-what")) {
+		if strings.EqualFold(field, "aws") {
+			return true
+		}
+	}
+	return false
 }
 
 func fileExecutable(path string) bool {
@@ -117,7 +122,7 @@ func (ec *ec2Client) metadata(ctx context.Context) map[string]any {
 }
 
 func (ec *ec2Client) userdata(ctx context.Context) string {
-	body, ok := ec.get(ctx, "user-data/")
+	body, ok := ec.getRaw(ctx, "user-data/")
 	if !ok {
 		return ""
 	}
@@ -164,6 +169,14 @@ func metadataChildren(body string) []string {
 }
 
 func (ec *ec2Client) get(ctx context.Context, path string) (string, bool) {
+	body, ok := ec.getRaw(ctx, path)
+	if !ok {
+		return "", false
+	}
+	return strings.TrimSpace(body), true
+}
+
+func (ec *ec2Client) getRaw(ctx context.Context, path string) (string, bool) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ec.baseURL+"/"+path, nil)
 	if err != nil {
 		return "", false
@@ -183,7 +196,7 @@ func (ec *ec2Client) get(ctx context.Context, path string) (string, bool) {
 	if err != nil {
 		return "", false
 	}
-	return strings.TrimSpace(string(data)), true
+	return string(data), true
 }
 
 func (ec *ec2Client) v2Token(ctx context.Context) string {

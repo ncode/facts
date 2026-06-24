@@ -69,7 +69,7 @@ func (p *Projection) Select(queries []string) []ResolvedFact {
 // missing-vs-nil contract.
 func (p *Projection) LookupValue(query string) (value any, found bool) {
 	fact := p.Select([]string{query})[0]
-	if v := ValueForQuery(fact); v != nil {
+	if v, found := valueForQuery(fact); found {
 		return v, true
 	}
 	if (fact.Type == "custom" || fact.Type == "external") && fact.Value == nil && fact.UserQuery == fact.Name {
@@ -152,7 +152,7 @@ func findFactIn(facts []ResolvedFact, collection map[string]any, query string) R
 			return fact
 		}
 	}
-	if value := dig(collection, strings.Split(query, ".")); value != nil {
+	if value, found := digValue(collection, strings.Split(query, ".")); found {
 		return ResolvedFact{Name: query, UserQuery: query, Value: value}
 	}
 	return ResolvedFact{Name: query, UserQuery: query, Type: "nil"}

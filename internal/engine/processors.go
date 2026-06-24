@@ -25,7 +25,7 @@ func currentProcessorISA(s *Session, goos, fallback string, run commandRunner) s
 		if isa := s.cachedPlatformProcessorInfo().ISA; isa != "" {
 			return isa
 		}
-		return ""
+		return fallback
 	}
 	if goos == "plan9" {
 		return plan9ProcessorISA(s.readFile, fallback)
@@ -435,12 +435,16 @@ func parseLinuxProcessorTopology(input string) (int, int) {
 	return 0, 0
 }
 
-func currentLinuxProcessorPhysicalCount(cpuinfoPath, sysCPUPath string, readFile fileReader) int {
-	data, err := readFile(cpuinfoPath)
-	if err != nil || len(data) == 0 {
-		return 0
+func currentLinuxProcessorPhysicalCount(cpuinfoPath, sysCPUPath string, host hostOS) int {
+	if host == nil {
+		host = osHost{}
 	}
-	return linuxProcessorPhysicalCount(string(data), sysCPUPath, readFile)
+	data, err := host.readFile(cpuinfoPath)
+	cpuinfo := ""
+	if err == nil {
+		cpuinfo = string(data)
+	}
+	return linuxProcessorPhysicalCountWithReaders(cpuinfo, sysCPUPath, host.readFile, host.readDir)
 }
 
 func linuxProcessorPhysicalCount(cpuinfo, sysCPUPath string, readFiles ...fileReader) int {
@@ -448,6 +452,10 @@ func linuxProcessorPhysicalCount(cpuinfo, sysCPUPath string, readFiles ...fileRe
 	if len(readFiles) > 0 && readFiles[0] != nil {
 		readFile = readFiles[0]
 	}
+	return linuxProcessorPhysicalCountWithReaders(cpuinfo, sysCPUPath, readFile, os.ReadDir)
+}
+
+func linuxProcessorPhysicalCountWithReaders(cpuinfo, sysCPUPath string, readFile fileReader, readDir func(string) ([]os.DirEntry, error)) int {
 	physicalIDs := make(map[string]struct{})
 	for line := range strings.SplitSeq(cpuinfo, "\n") {
 		key, value, ok := strings.Cut(line, ":")
@@ -463,7 +471,7 @@ func linuxProcessorPhysicalCount(cpuinfo, sysCPUPath string, readFiles ...fileRe
 		return len(physicalIDs)
 	}
 
-	entries, err := os.ReadDir(sysCPUPath)
+	entries, err := readDir(sysCPUPath)
 	if err != nil {
 		return 0
 	}
@@ -614,7 +622,7 @@ func processorsCoreFacts(s *Session) []ResolvedFact {
 		platformProcessors = s.cachedPlatformProcessorInfo()
 	}
 	if runtime.GOOS == "linux" {
-		platformProcessors.PhysicalCount = currentLinuxProcessorPhysicalCount("/proc/cpuinfo", "/sys/devices/system/cpu", s.readFile)
+		platformProcessors.PhysicalCount = currentLinuxProcessorPhysicalCount("/proc/cpuinfo", "/sys/devices/system/cpu", s.host)
 	}
 	processorCount := runtime.NumCPU()
 	if platformProcessors.LogicalCount > 0 {

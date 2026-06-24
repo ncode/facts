@@ -17,7 +17,7 @@ fi
 FACT_SET="os.name os.family os.release os.architecture os.hardware kernel.name \
 kernel.release.full kernel.version.full kernel.release.major virtual is_virtual networking \
 memory memory.system.total processors processors.count dmi system_uptime \
-load_averages mountpoints"
+load_averages mountpoints disks partitions path"
 
 # shellcheck disable=SC2086
 out="$("$FACTS_BIN" --json $FACT_SET)"
@@ -38,10 +38,11 @@ printf '%s\n' "$out" | grep -Eq '"os.family"[[:space:]]*:[[:space:]]*"FreeBSD"' 
 for key in os.release os.architecture os.hardware kernel.release.full kernel.version.full \
     kernel.release.major virtual is_virtual networking memory memory.system.total \
     processors processors.count dmi system_uptime load_averages \
-    mountpoints; do
-    printf '%s\n' "$out" | grep -Eq "\"$key\"[[:space:]]*:" \
+    mountpoints disks partitions path; do
+    key_re=$(printf '%s\n' "$key" | sed 's/\./\\./g')
+    printf '%s\n' "$out" | grep -Eq "\"$key_re\"[[:space:]]*:" \
         || fail "missing fact $key"
-    printf '%s\n' "$out" | grep -Eq "\"$key\"[[:space:]]*:[[:space:]]*null" \
+    printf '%s\n' "$out" | grep -Eq "\"$key_re\"[[:space:]]*:[[:space:]]*null" \
         && fail "fact $key is null"
 done
 

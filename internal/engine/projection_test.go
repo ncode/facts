@@ -224,6 +224,46 @@ func TestSnapshotValueReusesSnapshotTree(t *testing.T) {
 	}
 }
 
+func TestSnapshotValueDistinguishesNestedNilFromMissing(t *testing.T) {
+	sn := newSnapshot([]ResolvedFact{
+		{Name: "external", Value: map[string]any{"blank": nil}, Type: "external"},
+	}, nil)
+
+	value, err := sn.Value("external.blank")
+	if err != nil {
+		t.Fatalf("Value() error = %v, want nil", err)
+	}
+	if value != nil {
+		t.Fatalf("Value() = %#v, want nil", value)
+	}
+}
+
+func TestSnapshotReturnedMutableValuesDoNotAffectSnapshot(t *testing.T) {
+	sn := newSnapshot([]ResolvedFact{
+		{Name: "site", Value: map[string]any{"roles": []string{"web"}}, Type: "external"},
+	}, nil)
+
+	tree := sn.Tree()
+	tree["site"].(map[string]any)["roles"].([]string)[0] = "db"
+	value, err := sn.Value("site.roles.0")
+	if err != nil {
+		t.Fatalf("Value() error = %v", err)
+	}
+	if value != "web" {
+		t.Fatalf("Value() after Tree mutation = %#v, want web", value)
+	}
+
+	facts := sn.Facts()
+	facts[0].Value.(map[string]any)["roles"].([]string)[0] = "db"
+	value, err = sn.Value("site.roles.0")
+	if err != nil {
+		t.Fatalf("Value() error = %v", err)
+	}
+	if value != "web" {
+		t.Fatalf("Value() after Facts mutation = %#v, want web", value)
+	}
+}
+
 // sameMap reports whether a and b are the same underlying map instance.
 func sameMap(a, b map[string]any) bool {
 	return reflect.ValueOf(a).Pointer() == reflect.ValueOf(b).Pointer()

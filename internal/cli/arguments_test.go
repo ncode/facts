@@ -30,6 +30,14 @@ func TestPrepareArguments_reordersShortVersionFlag(t *testing.T) {
 	}
 }
 
+func TestPrepareArguments_preservesFlagsAfterDelimiterAsQueries(t *testing.T) {
+	got := PrepareArguments([]string{"--", "-v"})
+	want := []string{"query", "--", "-v"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("PrepareArguments() = %v, want %v", got, want)
+	}
+}
+
 func TestPrepareArguments_doesNotPromoteTaskFlagWithInlineValue(t *testing.T) {
 	got := PrepareArguments([]string{"--help=topic"})
 	want := []string{"query", "--help=topic"}
@@ -98,12 +106,33 @@ func TestValidateOptions_allowsRepeatedExternalDir(t *testing.T) {
 }
 
 func TestValidateOptions_rejectsMissingRequiredOptionValue(t *testing.T) {
-	err := ValidateOptions([]string{"query", "--external-dir", "--no-external-facts", "site"})
+	err := ValidateOptions([]string{"query", "--external-dir"})
 	if err == nil {
 		t.Fatal("ValidateOptions() err = nil, want missing option value error")
 	}
 	if !strings.Contains(err.Error(), "--external-dir requires a value") {
 		t.Fatalf("ValidateOptions() err = %q, want missing --external-dir value error", err)
+	}
+}
+
+func TestValidateOptions_allowsDashPrefixedOptionValues(t *testing.T) {
+	err := ValidateOptions([]string{"query", "--external-dir", "-facts", "site"})
+	if err != nil {
+		t.Fatalf("ValidateOptions() err = %v, want nil", err)
+	}
+}
+
+func TestValidateOptions_stopsAtDelimiter(t *testing.T) {
+	err := ValidateOptions([]string{"query", "--", "-v"})
+	if err != nil {
+		t.Fatalf("ValidateOptions() err = %v, want nil", err)
+	}
+}
+
+func TestValidateOptions_stopsAtFirstQuery(t *testing.T) {
+	err := ValidateOptions([]string{"query", "os.name", "--missing-fact-name"})
+	if err != nil {
+		t.Fatalf("ValidateOptions() err = %v, want nil", err)
 	}
 }
 

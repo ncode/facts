@@ -28,6 +28,7 @@ func newSnapshot(facts []ResolvedFact, log *slog.Logger) *Snapshot {
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
+	facts = cloneFacts(facts)
 	tree, collisions := collectFacts(facts, false)
 	for _, fact := range collisions {
 		reportCollectionCollision(log, fact)
@@ -80,7 +81,15 @@ func (sn *Snapshot) All() iter.Seq2[string, any] {
 // Facts returns the resolved facts backing the Snapshot, for the CLI's
 // formatter pipeline.
 func (sn *Snapshot) Facts() []ResolvedFact {
-	return slices.Clone(sn.facts)
+	return cloneFacts(sn.facts)
+}
+
+func cloneFacts(facts []ResolvedFact) []ResolvedFact {
+	out := slices.Clone(facts)
+	for i := range out {
+		out[i].Value = deepCopyValue(out[i].Value)
+	}
+	return out
 }
 
 func deepCopyValue(value any) any {
@@ -89,6 +98,18 @@ func deepCopyValue(value any) any {
 		out := make(map[string]any, len(v))
 		for key, item := range v {
 			out[key] = deepCopyValue(item)
+		}
+		return out
+	case map[string]string:
+		out := make(map[string]string, len(v))
+		for key, item := range v {
+			out[key] = item
+		}
+		return out
+	case map[string][]string:
+		out := make(map[string][]string, len(v))
+		for key, item := range v {
+			out[key] = slices.Clone(item)
 		}
 		return out
 	case map[any]any:
@@ -103,8 +124,73 @@ func deepCopyValue(value any) any {
 			out[i] = deepCopyValue(item)
 		}
 		return out
+	case []string:
+		return slices.Clone(v)
+	case []int:
+		return slices.Clone(v)
+	default:
+		return deepCopyReflect(value)
+	}
+}
+
+func deepCopyReflect(value any) any {
+	rv := reflect.ValueOf(value)
+	if !rv.IsValid() {
+		return value
+	}
+	switch rv.Kind() {
+	case reflect.Slice:
+		if rv.IsNil() {
+			return value
+		}
+		out := reflect.MakeSlice(rv.Type(), rv.Len(), rv.Len())
+		for i := range rv.Len() {
+			setReflectValue(out.Index(i), deepCopyValue(rv.Index(i).Interface()))
+		}
+		return out.Interface()
+	case reflect.Array:
+		out := reflect.New(rv.Type()).Elem()
+		for i := range rv.Len() {
+			setReflectValue(out.Index(i), deepCopyValue(rv.Index(i).Interface()))
+		}
+		return out.Interface()
+	case reflect.Map:
+		if rv.IsNil() {
+			return value
+		}
+		out := reflect.MakeMapWithSize(rv.Type(), rv.Len())
+		for _, key := range rv.MapKeys() {
+			item := deepCopyValue(rv.MapIndex(key).Interface())
+			itemValue := reflect.ValueOf(item)
+			if item == nil {
+				itemValue = reflect.Zero(rv.Type().Elem())
+			}
+			if itemValue.IsValid() && itemValue.Type().AssignableTo(rv.Type().Elem()) {
+				out.SetMapIndex(key, itemValue)
+			} else if itemValue.IsValid() && itemValue.Type().ConvertibleTo(rv.Type().Elem()) {
+				out.SetMapIndex(key, itemValue.Convert(rv.Type().Elem()))
+			} else {
+				out.SetMapIndex(key, rv.MapIndex(key))
+			}
+		}
+		return out.Interface()
 	default:
 		return value
+	}
+}
+
+func setReflectValue(dst reflect.Value, value any) {
+	if value == nil {
+		dst.SetZero()
+		return
+	}
+	rv := reflect.ValueOf(value)
+	if rv.Type().AssignableTo(dst.Type()) {
+		dst.Set(rv)
+		return
+	}
+	if rv.Type().ConvertibleTo(dst.Type()) {
+		dst.Set(rv.Convert(dst.Type()))
 	}
 }
 
@@ -167,6 +253,39 @@ func customValueContainsNullByte(value any) bool {
 	case map[string]any:
 		for key, item := range v {
 			if strings.ContainsRune(key, '\x00') || customValueContainsNullByte(item) {
+				return true
+			}
+		}
+		return false
+	default:
+		return customValueReflectContainsNullByte(value)
+	}
+}
+
+func customValueReflectContainsNullByte(value any) bool {
+	rv := reflect.ValueOf(value)
+	if !rv.IsValid() {
+		return false
+	}
+	switch rv.Kind() {
+	case reflect.Interface, reflect.Pointer:
+		if rv.IsNil() {
+			return false
+		}
+		return customValueContainsNullByte(rv.Elem().Interface())
+	case reflect.Slice, reflect.Array:
+		for i := range rv.Len() {
+			if customValueContainsNullByte(rv.Index(i).Interface()) {
+				return true
+			}
+		}
+		return false
+	case reflect.Map:
+		for _, key := range rv.MapKeys() {
+			if key.Kind() == reflect.String && strings.ContainsRune(key.String(), '\x00') {
+				return true
+			}
+			if customValueContainsNullByte(rv.MapIndex(key).Interface()) {
 				return true
 			}
 		}

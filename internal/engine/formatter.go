@@ -183,8 +183,7 @@ func yamlSequenceLines(values []any, depth int) []string {
 	lines := make([]string, 0, len(values))
 	for _, value := range values {
 		if childMap, ok := value.(map[string]any); ok {
-			lines = append(lines, indent+"-")
-			lines = append(lines, yamlLines(childMap, depth+1)...)
+			lines = append(lines, indent+"- "+yamlInlineMap(childMap))
 			continue
 		}
 		lines = append(lines, indent+"- "+yamlScalar(value))
@@ -272,14 +271,14 @@ func hoconScalar(value any) string {
 	case nil:
 		return ""
 	case string:
-		if strings.Contains(v, "_") {
+		if !isPlainHOCONString(v) {
 			return strconv.Quote(v)
 		}
 		return v
 	case int:
 		return strconv.Itoa(v)
 	case float64:
-		return strconv.FormatFloat(v, 'f', 1, 64)
+		return strconv.FormatFloat(v, 'f', -1, 64)
 	case bool:
 		return strconv.FormatBool(v)
 	case map[string]any:
@@ -341,9 +340,17 @@ func yamlScalar(value any) string {
 	case int:
 		return strconv.Itoa(v)
 	case float64:
-		return strconv.FormatFloat(v, 'f', 1, 64)
+		return strconv.FormatFloat(v, 'f', -1, 64)
 	case bool:
 		return strconv.FormatBool(v)
+	case map[string]any:
+		return yamlInlineMap(v)
+	case []any:
+		parts := make([]string, 0, len(v))
+		for _, item := range v {
+			parts = append(parts, yamlScalar(item))
+		}
+		return "[" + strings.Join(parts, ", ") + "]"
 	case []string:
 		parts := make([]string, 0, len(v))
 		for _, item := range v {
@@ -359,6 +366,27 @@ func yamlScalar(value any) string {
 	default:
 		return fmt.Sprint(v)
 	}
+}
+
+func isPlainHOCONString(value string) bool {
+	if value == "" || strings.Contains(value, "_") {
+		return false
+	}
+	for _, r := range value {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '.' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func yamlInlineMap(value map[string]any) string {
+	parts := make([]string, 0, len(value))
+	for _, key := range sortedKeys(value) {
+		parts = append(parts, yamlKey(key)+": "+yamlScalar(value[key]))
+	}
+	return strings.Join(parts, ", ")
 }
 
 func isPlainYAMLString(value string) bool {

@@ -75,6 +75,8 @@ func TestCustomValueContainsNullByte(t *testing.T) {
 		{"map value with NUL", map[string]any{"k": "v\x00"}, true},
 		{"map key with NUL", map[string]any{"k\x00": "v"}, true},
 		{"nested NUL deep in slice-of-map", []any{map[string]any{"k": []any{"x\x00"}}}, true},
+		{"typed slice with NUL element", []string{"a", "b\x00"}, true},
+		{"typed map with slice NUL element", map[string][]string{"k": {"v\x00"}}, true},
 		{"non-string scalar is never a NUL", 42, false},
 	}
 
@@ -130,5 +132,19 @@ func TestDeepCopyValueHandlesAnyKeyedMap(t *testing.T) {
 
 	if got := original[1].(map[any]any)["inner"]; got != "orig" {
 		t.Errorf("original map[any]any mutated through copy: inner = %q, want %q", got, "orig")
+	}
+}
+
+func TestDeepCopyValueHandlesTypedSlicesInMaps(t *testing.T) {
+	original := map[string][]int{"numbers": {1, 2}}
+
+	copied, ok := deepCopyValue(original).(map[string][]int)
+	if !ok {
+		t.Fatalf("deepCopyValue returned %T, want map[string][]int", deepCopyValue(original))
+	}
+	copied["numbers"][0] = 99
+
+	if got := original["numbers"][0]; got != 1 {
+		t.Errorf("original typed slice mutated through copy: numbers[0] = %d, want 1", got)
 	}
 }

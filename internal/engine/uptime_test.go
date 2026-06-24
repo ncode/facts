@@ -59,6 +59,52 @@ func TestUptimeStringReturnsUnknownWhenSecondsAreUnknown(t *testing.T) {
 	}
 }
 
+func TestUptimeFactsOmitNumericFieldsWhenUptimeUnknown(t *testing.T) {
+	got := Collection(uptimeFacts(uptimeInfo{}, emptyLoadAverages()))
+	systemUptime, ok := got["system_uptime"].(map[string]any)
+	if !ok {
+		t.Fatalf("system_uptime = %#v, want map", got["system_uptime"])
+	}
+	if got := systemUptime["uptime"]; got != "unknown" {
+		t.Fatalf("system_uptime.uptime = %#v, want unknown", got)
+	}
+	for _, key := range []string{"days", "hours", "seconds"} {
+		if _, ok := systemUptime[key]; ok {
+			t.Fatalf("system_uptime.%s present for unknown uptime: %#v", key, systemUptime)
+		}
+	}
+}
+
+func TestUptimeFactsUseInt64DurationFields(t *testing.T) {
+	got := Collection(uptimeFacts(uptimeInfo{Duration: time.Duration(1<<33) * time.Second, Known: true}, emptyLoadAverages()))
+	systemUptime := got["system_uptime"].(map[string]any)
+	if seconds, ok := systemUptime["seconds"].(int64); !ok || seconds != int64(1<<33) {
+		t.Fatalf("system_uptime.seconds = %#v, want int64 %d", systemUptime["seconds"], int64(1<<33))
+	}
+}
+
+func TestCurrentUptimeInfoUsesPID1ElapsedTimeForKubernetes(t *testing.T) {
+	s := NewSession()
+	s.host = &fakeHostOS{
+		platform: "linux",
+		files: map[string][]byte{
+			"/proc/1/cgroup": []byte("0::/kubepods.slice/pod123\n"),
+		},
+	}
+	run := func(name string, args ...string) string {
+		if name == "ps" && reflect.DeepEqual(args, []string{"-o", "etime=", "-p", "1"}) {
+			return "01:02"
+		}
+		return ""
+	}
+
+	got := currentUptimeInfo(s, "linux", s.readFile, run, time.Now)
+	want := uptimeInfo{Duration: 62 * time.Second, Known: true}
+	if got != want {
+		t.Fatalf("currentUptimeInfo(kubernetes) = %#v, want %#v", got, want)
+	}
+}
+
 func TestParseUptimeCommandSeconds_matchesRubyFacterUptimeParser(t *testing.T) {
 	t.Parallel()
 

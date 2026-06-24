@@ -23,7 +23,11 @@ func identityFact(s *Session) map[string]any {
 	}
 
 	privileged := os.Geteuid() == 0
-	info := identityInfo{Privileged: &privileged}
+	info := identityInfo{
+		UID:        strconv.Itoa(os.Getuid()),
+		GID:        strconv.Itoa(os.Getgid()),
+		Privileged: &privileged,
+	}
 	current, err := osuser.Current()
 	if err != nil {
 		return identityFactFromInfo(runtime.GOOS, info)

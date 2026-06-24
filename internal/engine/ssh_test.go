@@ -51,20 +51,9 @@ func TestParseSSHHostPublicKeyBuildsStructuredFacts(t *testing.T) {
 	}
 }
 
-func TestParseSSHHostPublicKeyIgnoresNonBase64CharactersForFingerprints(t *testing.T) {
-	entry, ok := parseSSHHostPublicKey("ssh-rsa -_YWJj root@example")
-	if !ok {
-		t.Fatal("parseSSHHostPublicKey() ok = false, want true")
-	}
-
-	if got, want := entry.Key, "-_YWJj"; got != want {
-		t.Fatalf("entry.Key = %q, want original key %q", got, want)
-	}
-	if got, want := entry.SHA1, "SSHFP 1 1 a9993e364706816aba3e25717850c26c9cd0d89d"; got != want {
-		t.Fatalf("entry.SHA1 = %q, want %q", got, want)
-	}
-	if got, want := entry.SHA256, "SSHFP 1 2 ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"; got != want {
-		t.Fatalf("entry.SHA256 = %q, want %q", got, want)
+func TestParseSSHHostPublicKeyRejectsInvalidBase64Key(t *testing.T) {
+	if entry, ok := parseSSHHostPublicKey("ssh-rsa -_YWJj root@example"); ok {
+		t.Fatalf("parseSSHHostPublicKey() = %#v, true; want rejected malformed key", entry)
 	}
 }
 
@@ -135,9 +124,9 @@ func assertDiscoverSSHHostKeysPOSIXSearchesRubyPathsAndOrder(t *testing.T, goos 
 func TestDiscoverSSHHostKeysWindowsReadsProgramDataSSH(t *testing.T) {
 	readFile := func(path string) ([]byte, error) {
 		switch path {
-		case filepath.Join(`C:\ProgramData`, "ssh", "ssh_host_rsa_key.pub"):
+		case `C:\ProgramData\ssh\ssh_host_rsa_key.pub`:
 			return []byte("ssh-rsa YWJj root@example"), nil
-		case filepath.Join(`C:\ProgramData`, "ssh", "ssh_host_ecdsa_key.pub"):
+		case `C:\ProgramData\ssh\ssh_host_ecdsa_key.pub`:
 			return []byte("ecdsa-sha2-nistp256 ZGVm root@example"), nil
 		default:
 			return nil, os.ErrNotExist
@@ -151,6 +140,19 @@ func TestDiscoverSSHHostKeysWindowsReadsProgramDataSSH(t *testing.T) {
 	}
 	if keys[0].Name != "rsa" || keys[1].Name != "ecdsa" {
 		t.Fatalf("key order = %#v, want rsa then ecdsa", keys)
+	}
+}
+
+func TestSSHFactsPreserveFirstDuplicateKeyType(t *testing.T) {
+	collection := Collection(sshFacts([]sshHostKey{
+		{Name: "rsa", Type: "ssh-rsa", Key: "first", SHA1: "first-sha1", SHA256: "first-sha256"},
+		{Name: "rsa", Type: "ssh-rsa", Key: "second", SHA1: "second-sha1", SHA256: "second-sha256"},
+	}))
+
+	ssh := collection["ssh"].(map[string]any)
+	rsa := ssh["rsa"].(map[string]any)
+	if got := rsa["key"]; got != "first" {
+		t.Fatalf("ssh.rsa.key = %#v, want first discovered key", got)
 	}
 }
 

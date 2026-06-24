@@ -51,7 +51,11 @@ func As[T any](s *Snapshot, query string) (T, error) {
 	if err != nil {
 		return zero, err
 	}
-	encoded, err := json.Marshal(jsonValue(value))
+	jsonReady, err := jsonValue(value)
+	if err != nil {
+		return zero, fmt.Errorf("fact %q: encode canonical value: %w", query, err)
+	}
+	encoded, err := json.Marshal(jsonReady)
 	if err != nil {
 		return zero, fmt.Errorf("fact %q: encode canonical value: %w", query, err)
 	}
@@ -65,27 +69,43 @@ func As[T any](s *Snapshot, query string) (T, error) {
 
 // jsonValue rewrites map[any]any nodes (YAML decoding artifacts) into
 // map[string]any so the value round-trips through encoding/json.
-func jsonValue(value any) any {
+func jsonValue(value any) (any, error) {
 	switch v := value.(type) {
 	case map[string]any:
 		out := make(map[string]any, len(v))
 		for key, item := range v {
-			out[key] = jsonValue(item)
+			value, err := jsonValue(item)
+			if err != nil {
+				return nil, err
+			}
+			out[key] = value
 		}
-		return out
+		return out, nil
 	case map[any]any:
 		out := make(map[string]any, len(v))
 		for key, item := range v {
-			out[fmt.Sprint(key)] = jsonValue(item)
+			name := fmt.Sprint(key)
+			if _, exists := out[name]; exists {
+				return nil, fmt.Errorf("duplicate map key after string normalization: %q", name)
+			}
+			value, err := jsonValue(item)
+			if err != nil {
+				return nil, err
+			}
+			out[name] = value
 		}
-		return out
+		return out, nil
 	case []any:
 		out := make([]any, len(v))
 		for i, item := range v {
-			out[i] = jsonValue(item)
+			value, err := jsonValue(item)
+			if err != nil {
+				return nil, err
+			}
+			out[i] = value
 		}
-		return out
+		return out, nil
 	default:
-		return value
+		return value, nil
 	}
 }

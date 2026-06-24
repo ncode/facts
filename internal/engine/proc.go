@@ -11,9 +11,11 @@ func linuxProcGetenvForPID(pid int, field string, readLines procEnvironReader) (
 	prefix := field + "="
 	lines, _ := readLines(fmt.Sprintf("/proc/%d/environ", pid), nil)
 	for _, line := range lines {
-		value, ok := strings.CutPrefix(line, prefix)
-		if ok {
-			return value, true
+		for part := range strings.SplitSeq(line, "\x00") {
+			value, ok := strings.CutPrefix(part, prefix)
+			if ok {
+				return value, true
+			}
 		}
 	}
 	return "", false

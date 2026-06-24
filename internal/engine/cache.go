@@ -19,7 +19,7 @@ const cacheFormatVersion = 1
 
 var (
 	cacheRemove    = os.Remove
-	cacheWriteFile = os.WriteFile
+	cacheWriteFile = writeCacheFile
 )
 
 // DefaultCachePath returns the platform default directory for cached fact groups.
@@ -191,7 +191,7 @@ func (fc *FactCache) CacheFacts(facts []ResolvedFact) error {
 	}
 	grouped := make(map[string]map[string]any)
 	for _, fact := range facts {
-		group, _, ok := fc.cacheGroupForFact(fact.Name)
+		group, _, ok := fc.cacheGroupForResolvedFact(fact)
 		if !ok {
 			continue
 		}
@@ -239,6 +239,38 @@ func warnCacheWriteFailure(err error, log *slog.Logger) bool {
 	}
 	log.Warn(fmt.Sprintf("Could not write cache: %v", err))
 	return true
+}
+
+func writeCacheFile(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Chmod(perm); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return err
+	}
+	cleanup = false
+	return nil
 }
 
 func (fc *FactCache) cacheGroupForFact(name string) (string, time.Duration, bool) {
@@ -404,7 +436,7 @@ func parseTTLDuration(value string) (time.Duration, bool) {
 		return 0, false
 	}
 	amount, err := strconv.Atoi(fields[0])
-	if err != nil {
+	if err != nil || amount < 0 {
 		return 0, false
 	}
 	unit := ""
@@ -416,6 +448,9 @@ func parseTTLDuration(value string) (time.Duration, bool) {
 	}
 	multiplier, ok := ttlUnitMultiplier(unit)
 	if !ok {
+		return 0, false
+	}
+	if multiplier > 0 && time.Duration(amount) > time.Duration(1<<63-1)/multiplier {
 		return 0, false
 	}
 	duration := time.Duration(amount) * multiplier

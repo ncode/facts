@@ -100,6 +100,15 @@ func TestDetectOSHierarchyUsesFirstKnownFamilyLikeRubyDetector(t *testing.T) {
 	}
 }
 
+func TestDetectOSHierarchyPreservesMixedCaseFamilyNames(t *testing.T) {
+	hierarchy := []any{"RedHat"}
+	got := DetectOSHierarchy(hierarchy, "my_linux_distro", "RedHat", discardLog())
+	want := []string{"RedHat"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("DetectOSHierarchy() = %#v, want %#v", got, want)
+	}
+}
+
 func TestDetectOSIdentifier_matchesRubyHostOSMapping(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -113,6 +122,12 @@ func TestDetectOSIdentifier_matchesRubyHostOSMapping(t *testing.T) {
 		{name: "windows mswin", hostOS: "mswin", want: "windows"},
 		{name: "linux distro", hostOS: "linux", distro: "redhat", want: "redhat"},
 		{name: "linux fallback", hostOS: "linux", want: "linux"},
+		{name: "freebsd", hostOS: "freebsd13", want: "freebsd"},
+		{name: "openbsd", hostOS: "openbsd7.5", want: "openbsd"},
+		{name: "netbsd", hostOS: "netbsd10", want: "netbsd"},
+		{name: "dragonfly", hostOS: "dragonfly6.4", want: "dragonfly"},
+		{name: "illumos", hostOS: "illumos", want: "illumos"},
+		{name: "sunos illumos family", hostOS: "sunos5.11", want: "illumos"},
 		{name: "unknown", hostOS: "my_custom_os", wantErr: ErrUnknownOS},
 	}
 

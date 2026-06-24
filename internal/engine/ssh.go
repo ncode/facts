@@ -30,13 +30,13 @@ func discoverSSHHostKeysForPlatform(goos, programData string, readFile fileReade
 		if programData == "" {
 			return nil
 		}
-		paths = []string{filepath.Join(programData, "ssh")}
+		paths = []string{sshJoin(goos, programData, "ssh")}
 	}
 	files := []string{"ssh_host_rsa_key.pub", "ssh_host_dsa_key.pub", "ssh_host_ecdsa_key.pub", "ssh_host_ed25519_key.pub"}
 	keys := make([]sshHostKey, 0, len(files))
 	for _, dir := range paths {
 		for _, file := range files {
-			data, err := readFile(filepath.Join(dir, file))
+			data, err := readFile(sshJoin(goos, dir, file))
 			if err != nil {
 				continue
 			}
@@ -53,6 +53,13 @@ func discoverSSHHostKeysForPlatform(goos, programData string, readFile fileReade
 	return keys
 }
 
+func sshJoin(goos, dir, name string) string {
+	if goos == "windows" {
+		return strings.TrimRight(dir, `\/`) + `\` + name
+	}
+	return filepath.Join(dir, name)
+}
+
 func parseSSHHostPublicKey(line string) (sshHostKey, bool) {
 	fields := strings.Fields(line)
 	if len(fields) < 2 {
@@ -62,11 +69,10 @@ func parseSSHHostPublicKey(line string) (sshHostKey, bool) {
 	if !ok {
 		return sshHostKey{}, false
 	}
-	encodedKey := sshBase64Key(fields[1])
-	if encodedKey == "" {
+	if fields[1] == "" {
 		return sshHostKey{}, false
 	}
-	decoded, err := base64.StdEncoding.DecodeString(encodedKey)
+	decoded, err := base64.StdEncoding.DecodeString(fields[1])
 	if err != nil {
 		return sshHostKey{}, false
 	}
@@ -79,17 +85,6 @@ func parseSSHHostPublicKey(line string) (sshHostKey, bool) {
 		SHA1:   fmt.Sprintf("SSHFP %d 1 %x", fingerprintAlgorithm, sha1Sum),
 		SHA256: fmt.Sprintf("SSHFP %d 2 %x", fingerprintAlgorithm, sha256Sum),
 	}, true
-}
-
-func sshBase64Key(key string) string {
-	var b strings.Builder
-	b.Grow(len(key))
-	for _, r := range key {
-		if (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '+' || r == '/' || r == '=' {
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
 }
 
 func sshKeyName(keyType string) (string, int, bool) {
@@ -120,6 +115,9 @@ func sshFactsForPlatform(goos string, keys []sshHostKey) []ResolvedFact {
 	}
 	structured := make(map[string]any, len(keys))
 	for _, key := range keys {
+		if _, exists := structured[key.Name]; exists {
+			continue
+		}
 		structured[key.Name] = map[string]any{
 			"fingerprints": map[string]any{
 				"sha1":   key.SHA1,

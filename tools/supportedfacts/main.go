@@ -40,7 +40,11 @@ func renderDocs(schemaFile string) (map[string]string, error) {
 		"docs/supported-facts/README.md": renderIndex(schema),
 	}
 	for _, p := range factschema.Platforms() {
-		docs["docs/supported-facts/"+p.ID+".md"] = renderPlatform(schema, p)
+		doc, err := renderPlatform(schema, p)
+		if err != nil {
+			return nil, err
+		}
+		docs["docs/supported-facts/"+p.ID+".md"] = doc
 	}
 	return docs, nil
 }
@@ -57,12 +61,16 @@ func renderIndex(schema factschema.Schema) string {
 	return b.String()
 }
 
-func renderPlatform(schema factschema.Schema, p factschema.Platform) string {
+func renderPlatform(schema factschema.Schema, p factschema.Platform) (string, error) {
 	entries := schema.EntriesForPlatform(p.ID)
+	example, err := exampleOutput(p.ID)
+	if err != nil {
+		return "", err
+	}
 	var b strings.Builder
 	writeHeader(&b, p.Label+" Supported Facts")
 	fmt.Fprintf(&b, "Generated from [`docs/schema/facts.yaml`](../schema/facts.yaml). `%s` entries may be absent on a host when their preconditions do not hold.\n\n", "conditional")
-	fmt.Fprintf(&b, "## Example Output\n\n```console\n$ facts --json\n%s\n```\n\n", exampleOutput(p.ID))
+	fmt.Fprintf(&b, "## Example Output\n\n```console\n$ facts --json\n%s\n```\n\n", example)
 	fmt.Fprintf(&b, "## Fact Contract\n\n%d schema entries include `%s`.\n\n", len(entries), p.ID)
 	b.WriteString("| Fact | Type | Conditional | Description |\n| --- | --- | --- | --- |\n")
 	for _, item := range entries {
@@ -77,7 +85,7 @@ func renderPlatform(schema factschema.Schema, p factschema.Platform) string {
 			escapeMarkdown(item.Entry.Description),
 		)
 	}
-	return b.String()
+	return b.String(), nil
 }
 
 func writeHeader(b *strings.Builder, title string) {
@@ -89,12 +97,16 @@ func escapeMarkdown(s string) string {
 	return strings.ReplaceAll(s, "|", `\|`)
 }
 
-func exampleOutput(platform string) string {
-	var out bytes.Buffer
-	if err := json.Indent(&out, []byte(exampleJSON[platform]), "", "  "); err != nil {
-		panic(err)
+func exampleOutput(platform string) (string, error) {
+	raw, ok := exampleJSON[platform]
+	if !ok {
+		return "", fmt.Errorf("missing example JSON for platform %q", platform)
 	}
-	return out.String()
+	var out bytes.Buffer
+	if err := json.Indent(&out, []byte(raw), "", "  "); err != nil {
+		return "", fmt.Errorf("indent example JSON for platform %q: %w", platform, err)
+	}
+	return out.String(), nil
 }
 
 var exampleJSON = map[string]string{

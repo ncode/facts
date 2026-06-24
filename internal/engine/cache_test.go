@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -215,6 +216,55 @@ func TestFactCache_cacheFactsWritesConfiguredGroups(t *testing.T) {
 	}
 }
 
+func TestFactCache_cacheFactsWritesExternalFileBasenameGroup(t *testing.T) {
+	dir := t.TempDir()
+	cache := NewFactCache(dir, []FactTTL{{Fact: "ext_file.txt", TTL: "1 hour"}}, nil, discardLog())
+
+	if err := cache.CacheFacts([]ResolvedFact{
+		{Name: "my_external_fact", Value: "ext_fact", Type: "file", File: "/tmp/ext_file.txt"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	data := readJSONFile(t, filepath.Join(dir, "ext_file.txt"))
+	if data["cache_format_version"] != float64(1) {
+		t.Fatalf("cache_format_version = %#v, want 1", data["cache_format_version"])
+	}
+	if data["my_external_fact"] != "ext_fact" {
+		t.Fatalf("my_external_fact = %#v, want ext_fact", data["my_external_fact"])
+	}
+}
+
+func TestWriteCacheFileWritesFinalFileAndRemovesTemp(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "facts.cache")
+
+	if err := writeCacheFile(path, []byte("cached"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "cached" {
+		t.Fatalf("cache file content = %q, want cached", data)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("cache file mode = %v, want 0600", got)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "facts.cache" {
+		t.Fatalf("cache dir entries = %#v, want only final cache file", entries)
+	}
+}
+
 func TestFactCache_ignoresUnsafeCacheGroupNames(t *testing.T) {
 	dir := t.TempDir()
 	outside := filepath.Join(dir, "..", "outside-cache")
@@ -386,6 +436,17 @@ func TestParseTTLDuration_matchesRubyUnits(t *testing.T) {
 			}
 			if got != tt.want {
 				t.Fatalf("parseTTLDuration(%q) = %v, want %v", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseTTLDuration_rejectsNegativeAndOverflowingValues(t *testing.T) {
+	tooManyHours := strconv.FormatInt(int64((time.Duration(1<<63-1)/time.Hour)+1), 10) + " h"
+	for _, input := range []string{"-1 seconds", tooManyHours} {
+		t.Run(input, func(t *testing.T) {
+			if got, ok := parseTTLDuration(input); ok {
+				t.Fatalf("parseTTLDuration(%q) = %v, true; want false", input, got)
 			}
 		})
 	}

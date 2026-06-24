@@ -19,18 +19,25 @@ func selinuxFactsForPlatform(goos, mountsPath, configPath string, readFile fileR
 func selinuxFacts(mountsPath, configPath string, readFile fileReader) []ResolvedFact {
 	mountpoint := selinuxMountpoint(mountsPath, readFile)
 	configMode, configPolicy, hasConfig := readSELinuxConfig(configPath, readFile)
-	enabled := mountpoint != "" && hasConfig
+	enabled := mountpoint != ""
 	values := map[string]any{"enabled": enabled}
 	if enabled {
-		values["config_mode"] = configMode
-		values["config_policy"] = configPolicy
+		if hasConfig {
+			if configMode != "" {
+				values["config_mode"] = configMode
+			}
+			if configPolicy != "" {
+				values["config_policy"] = configPolicy
+			}
+		}
 		values["policy_version"] = readOptionalText(filepath.Join(mountpoint, "policyvers"), readFile)
-		enforced := strings.TrimSpace(readText(filepath.Join(mountpoint, "enforce"), readFile)) == "1"
-		values["enforced"] = enforced
-		if enforced {
-			values["current_mode"] = "enforcing"
-		} else {
-			values["current_mode"] = "permissive"
+		if enforced, ok := readSELinuxEnforce(filepath.Join(mountpoint, "enforce"), readFile); ok {
+			values["enforced"] = enforced
+			if enforced {
+				values["current_mode"] = "enforcing"
+			} else {
+				values["current_mode"] = "permissive"
+			}
 		}
 	}
 
@@ -78,6 +85,21 @@ func readSELinuxConfig(path string, readFile fileReader) (mode, policy string, o
 		}
 	}
 	return mode, policy, true
+}
+
+func readSELinuxEnforce(path string, readFile fileReader) (bool, bool) {
+	data, err := readFile(path)
+	if err != nil {
+		return false, false
+	}
+	switch strings.TrimSpace(string(data)) {
+	case "1":
+		return true, true
+	case "0":
+		return false, true
+	default:
+		return false, false
+	}
 }
 
 // selinuxCoreFacts assembles the selinux category facts (os.selinux), emitted

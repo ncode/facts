@@ -18,7 +18,8 @@ func SelectWithDottedFacts(facts []ResolvedFact, queries []string, includeTypedD
 
 func factMatchesQuery(factName, query string) bool {
 	if strings.Contains(factName, ".*") && !strings.Contains(query, ".") {
-		matched, err := regexp.MatchString("^"+factName+"$", query)
+		pattern := strings.ReplaceAll(regexp.QuoteMeta(factName), `\.\*`, `.*`)
+		matched, err := regexp.MatchString("^"+pattern+"$", query)
 		return err == nil && matched
 	}
 	return query == factName || strings.HasPrefix(query, factName+".")

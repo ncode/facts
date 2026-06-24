@@ -1002,6 +1002,30 @@ func TestDisksCoreFactsUsesSessionHostForLinuxDiskPartitionAndMountpointFacts(t 
 	}
 }
 
+func TestDisksFactOmitsOverflowingLinuxSectorSize(t *testing.T) {
+	host := &fakeHostOS{
+		dirs: map[string][]os.DirEntry{
+			"/sys/block": fakeDirEntries("sdz"),
+		},
+		files: map[string][]byte{
+			"/sys/block/sdz/device/model": []byte("OverflowDisk\n"),
+			"/sys/block/sdz/size":         []byte("18014398509481984\n"),
+		},
+		stats: map[string]os.FileInfo{
+			"/sys/block/sdz/device": fakeFileInfo{name: "device", mode: os.ModeDir, isDir: true},
+		},
+	}
+
+	got := disksFact("/sys/block", host)
+	disk := got["sdz"].(map[string]any)
+	if _, ok := disk["size_bytes"]; ok {
+		t.Fatalf("size_bytes = %#v, want omitted for overflowing sector count", disk["size_bytes"])
+	}
+	if _, ok := disk["size"]; ok {
+		t.Fatalf("size = %#v, want omitted for overflowing sector count", disk["size"])
+	}
+}
+
 func TestCurrentPartitionsUsesSessionHostGlobForIllumos(t *testing.T) {
 	const vtoc = `* Dimensions:
 *         512 bytes/sector
@@ -1261,6 +1285,15 @@ func TestResolveLinuxRootMountDeviceMatchesRubyResolver(t *testing.T) {
 			cmdline: "console=tty0 root=PARTUUID=a2f52878-01 rw",
 			blkid:   `/dev/xvda1: UUID="f3d" PARTUUID="a2f52878-01"`,
 			want:    "/dev/xvda1",
+		},
+		{
+			name:    "partuuid matches exact blkid field",
+			cmdline: "console=tty0 root=PARTUUID=a2f52878-01 rw",
+			blkid: strings.Join([]string{
+				`/dev/xvda1: UUID="not-a2f52878-01" PARTUUID="other"`,
+				`/dev/xvdb1: UUID="uuid-root" PARTUUID="a2f52878-01"`,
+			}, "\n"),
+			want: "/dev/xvdb1",
 		},
 		{
 			name:    "partuuid remains when blkid cannot map",
