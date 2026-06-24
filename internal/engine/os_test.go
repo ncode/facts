@@ -590,6 +590,34 @@ func TestParseLinuxOSRelease_padsDebianVersionIDLikeRubyResolver(t *testing.T) {
 	}
 }
 
+func TestParseLinuxOSRelease_splitsNixOSVersionID(t *testing.T) {
+	got := parseLinuxOSRelease("ID=nixos\nVERSION_ID=26.05\n")
+
+	want := map[string]any{"full": "26.05", "major": "26", "minor": "05"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("parseLinuxOSRelease() = %#v, want %#v", got, want)
+	}
+}
+
+func TestParseLinuxOSRelease_splitsRockyAndAlmaVersionID(t *testing.T) {
+	tests := []struct {
+		id string
+	}{
+		{id: "rocky"},
+		{id: "almalinux"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.id, func(t *testing.T) {
+			got := parseLinuxOSRelease("ID=" + tt.id + "\nVERSION_ID=9.8\n")
+
+			want := map[string]any{"full": "9.8", "major": "9", "minor": "8"}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("parseLinuxOSRelease() = %#v, want %#v", got, want)
+			}
+		})
+	}
+}
+
 func TestParseLinuxDistroOSRelease_trimsDebianMinorLeadingZero(t *testing.T) {
 	got := parseLinuxDistroOSRelease("ID=debian\nVERSION_ID=10.02\n")
 
@@ -1251,12 +1279,31 @@ func TestParseLinuxDistroOSRelease_normalizesSLESNameAndSAPID(t *testing.T) {
 func TestParseLinuxDistroOSRelease_normalizesArchLinuxName(t *testing.T) {
 	t.Parallel()
 
-	got := parseLinuxDistroOSRelease("NAME=\"Arch Linux\"\nID=arch\nPRETTY_NAME=\"Arch Linux\"\n")
+	got := parseLinuxDistroOSRelease("NAME=\"Arch Linux\"\nID=arch\nBUILD_ID=rolling\nPRETTY_NAME=\"Arch Linux\"\n")
 	if got.Name != "Archlinux" {
 		t.Fatalf("parseLinuxDistroOSRelease().Name = %q, want Archlinux", got.Name)
 	}
+	if len(got.Release) != 0 || got.ReleaseKnown {
+		t.Fatalf("parseLinuxDistroOSRelease().Release = %#v, ReleaseKnown = %v, want no release from BUILD_ID", got.Release, got.ReleaseKnown)
+	}
 	if name := osName("linux", got); name != "Archlinux" {
 		t.Fatalf("osName(linux, arch) = %q, want Archlinux", name)
+	}
+}
+
+func TestCurrentOSRelease_omitsArchRollingBuildID(t *testing.T) {
+	t.Parallel()
+
+	readFile := func(path string) ([]byte, error) {
+		if path != "/etc/os-release" {
+			return nil, os.ErrNotExist
+		}
+		return []byte("NAME=\"Arch Linux\"\nPRETTY_NAME=\"Arch Linux\"\nID=arch\nBUILD_ID=rolling\n"), nil
+	}
+
+	got := currentOSRelease(testSession, "linux", readFile, func(string, ...string) string { return "" })
+	if got != nil {
+		t.Fatalf("currentOSRelease(testSession, arch) = %#v, want nil because BUILD_ID is not a release", got)
 	}
 }
 

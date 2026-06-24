@@ -248,7 +248,7 @@ lima-docker-distro-facts: lima-docker-build-amd64
 			*) echo "missing expected os.distro.id for $$image" >&2; exit 2 ;; \
 		esac; \
 		echo "==> distro fact smoke $$image"; \
-		$(LIMACTL) shell '$(LIMA_DOCKER_INSTANCE)' -- sh -lc "set -eu; cd '$(CURDIR)'; out=\$$(docker run --rm --platform linux/amd64 -e CI=true -v \"\$$PWD/dist/facts-linux-amd64:/usr/local/bin/facts:ro\" $$image /usr/local/bin/facts --json os.name os.family os.distro.id os.distro.description os.release.major os.distro.release.major kernel.name virtual); printf '%s\n' \"\$$out\"; printf '%s\n' \"\$$out\" | grep -Eq '\"kernel.name\"[[:space:]]*:[[:space:]]*\"Linux\"'; printf '%s\n' \"\$$out\" | grep -Eq '\"os.distro.id\"[[:space:]]*:[[:space:]]*\"$$expected_id\"'" || exit $$?; \
+		$(LIMACTL) shell '$(LIMA_DOCKER_INSTANCE)' -- sh -lc "set -eu; cd '$(CURDIR)'; out=\$$(docker run --rm --platform linux/amd64 -e CI=true -v \"\$$PWD/dist/facts-linux-amd64:/usr/local/bin/facts:ro\" $$image /usr/local/bin/facts --json os.name os.family os.distro.id os.distro.description kernel.name virtual); printf '%s\n' \"\$$out\"; printf '%s\n' \"\$$out\" | grep -Eq '\"kernel.name\"[[:space:]]*:[[:space:]]*\"Linux\"'; printf '%s\n' \"\$$out\" | grep -Eq '\"os.distro.id\"[[:space:]]*:[[:space:]]*\"$$expected_id\"'" || exit $$?; \
 	done
 
 lima-docker-workloads: lima-docker-go-containers lima-docker-distro-facts

@@ -198,7 +198,10 @@ func currentMacOSModel(goos string, run commandRunner) string {
 
 func probeOSRelease(s *Session) any {
 	if runtime.GOOS == "windows" {
-		return currentWindowsOSRelease(s.cachedWindowsOSVersionInput())
+		if release := currentWindowsOSRelease(s.cachedWindowsOSVersionInput()); len(release) > 0 {
+			return release
+		}
+		return nil
 	}
 	return currentOSRelease(s, runtime.GOOS, s.readFile, s.commandOutput)
 }
@@ -225,7 +228,10 @@ func currentOSRelease(s *Session, goos string, readFile fileReader, run commandR
 		if release := specificLinuxOSRelease(id, readFile, run); len(release) > 0 {
 			return release
 		}
-		return parseLinuxOSRelease(string(data))
+		if release := parseLinuxOSRelease(string(data)); len(release) > 0 {
+			return release
+		}
+		return nil
 	case "freebsd":
 		versions := parseFreeBSDVersions(run("/bin/freebsd-version", "-k"), run("/bin/freebsd-version", "-ru"))
 		if versions.InstalledUserland != "" {
@@ -246,7 +252,10 @@ func currentOSRelease(s *Session, goos string, readFile fileReader, run commandR
 	case "darwin":
 		return parseDarwinOSRelease(run("uname", "-r"))
 	case "windows":
-		return currentWindowsOSRelease(windowsWMIOutput(run, "os", "OtherTypeDescription,ProductType,Version"))
+		if release := currentWindowsOSRelease(windowsWMIOutput(run, "os", "OtherTypeDescription,ProductType,Version")); len(release) > 0 {
+			return release
+		}
+		return nil
 	}
 	return s.cachedKernelRelease()
 }
@@ -711,7 +720,7 @@ func linuxOSReleaseMap(id, full string) map[string]any {
 		return debianReleaseMap(full)
 	}
 	switch strings.ToLower(id) {
-	case "mariner", "azurelinux", "linuxmint", "gentoo", "mageia":
+	case "mariner", "azurelinux", "linuxmint", "gentoo", "mageia", "nixos", "rocky", "almalinux":
 		return releaseHashFromString(full, false)
 	}
 	return map[string]any{"full": full, "major": full}
