@@ -1212,6 +1212,20 @@ func TestMountpointsFactIncludesDeviceFilesystemAndOptions(t *testing.T) {
 	}
 }
 
+func TestMountpointsFactIncludesEmptyOptionsForParsedMountEntries(t *testing.T) {
+	got := mountpointsFact([]mountEntry{{Device: "devfs", Path: "/dev", Filesystem: "devfs"}}, func(string) (mountStat, bool) {
+		return mountStat{}, false
+	})
+	mountpoint := got["/dev"].(map[string]any)
+	options, ok := mountpoint["options"].([]string)
+	if !ok {
+		t.Fatalf("options = %#v, want empty []string", mountpoint["options"])
+	}
+	if len(options) != 0 {
+		t.Fatalf("options = %#v, want empty", options)
+	}
+}
+
 func TestMountpointsFactOmitsEmptyEntries(t *testing.T) {
 	t.Parallel()
 
@@ -1393,6 +1407,7 @@ tmpfs on /tmp/example path (tmpfs, local, nosuid)
 		"/dev": map[string]any{
 			"device":     "devfs",
 			"filesystem": "devfs",
+			"options":    []string{},
 		},
 		"/tmp/example path": map[string]any{
 			"device":     "tmpfs",

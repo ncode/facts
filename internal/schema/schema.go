@@ -264,7 +264,7 @@ func concreteWildcardPatterns(patternSegments []string, paths []string) []string
 		if !matches {
 			continue
 		}
-		pattern := strings.Join(concrete, ".")
+		pattern := joinEscapedSegments(concrete)
 		if !seen[pattern] {
 			seen[pattern] = true
 			out = append(out, pattern)
@@ -272,6 +272,14 @@ func concreteWildcardPatterns(patternSegments []string, paths []string) []string
 	}
 	sort.Strings(out)
 	return out
+}
+
+func joinEscapedSegments(segments []string) string {
+	escaped := make([]string, len(segments))
+	for i, segment := range segments {
+		escaped[i] = escapeSegment(segment)
+	}
+	return strings.Join(escaped, ".")
 }
 
 func lastSegmentIndex(segments []string, target string) int {

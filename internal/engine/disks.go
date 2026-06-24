@@ -1496,6 +1496,8 @@ func mountpointsFactWithSkip(entries []mountEntry, stat func(string) (mountStat,
 		}
 		if len(entry.Options) > 0 {
 			mountpoint["options"] = append([]string(nil), entry.Options...)
+		} else if entry.Device != "" || entry.Filesystem != "" {
+			mountpoint["options"] = []string{}
 		}
 		if len(mountpoint) == 0 {
 			continue

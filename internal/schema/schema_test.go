@@ -208,6 +208,21 @@ func TestSchemaMissingEntriesRequiresWildcardChildWhenCollectionExists(t *testin
 	}
 }
 
+func TestSchemaMissingEntriesAcceptsEscapedWildcardCollectionMember(t *testing.T) {
+	s := Schema{
+		"mountpoints.*.size": {
+			Type:        "string",
+			Description: "mount size",
+			Platforms:   []string{"linux"},
+		},
+	}
+
+	got := s.MissingEntries([]string{`mountpoints./etc/resolv\.conf.size`}, "linux")
+	if len(got) != 0 {
+		t.Fatalf("MissingEntries() = %#v, want none", got)
+	}
+}
+
 func TestSchemaMissingEntriesRequiresWildcardChildForEachCollectionMember(t *testing.T) {
 	s := Schema{
 		"mountpoints.*.size": {
