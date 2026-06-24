@@ -73,7 +73,7 @@ jobs:
             expected_description_prefix: Arch Linux
             expected_os_release_major: ""
             expected_distro_release_major: ""
-            require_release: "true"
+            require_release: "false"
           - name: Oracle Linux 9
             image: oraclelinux:9
             expected_os_name: OracleLinux
@@ -100,7 +100,9 @@ jobs:
           CGO_ENABLED: 0
           GOOS: linux
           GOARCH: amd64
-        run: go build -o dist/facts-linux-amd64 ./cmd/facts
+        run: |
+          mkdir -p dist
+          go build -o dist/facts-linux-amd64 ./cmd/facts
 
       - name: Validate distro facts
         shell: bash

@@ -197,18 +197,98 @@ func (s Schema) MissingEntries(paths []string, platform string) []string {
 		if wildcardPrefixAbsent(pattern, paths) {
 			continue
 		}
-		present := false
+		if !schemaEntryPresent(pattern, entry, paths) {
+			missing = append(missing, pattern)
+		}
+	}
+	return missing
+}
+
+func schemaEntryPresent(pattern string, entry Entry, paths []string) bool {
+	patternSegments := splitPath(pattern)
+	lastWildcard := lastSegmentIndex(patternSegments, "*")
+	if lastWildcard == -1 || lastWildcard == len(patternSegments)-1 {
 		for _, path := range paths {
 			if MatchesPath(pattern, entry, path) {
+				return true
+			}
+		}
+		return false
+	}
+
+	concretePatterns := concreteWildcardPatterns(patternSegments, paths)
+	if len(concretePatterns) == 0 {
+		return false
+	}
+	for _, concrete := range concretePatterns {
+		present := false
+		for _, path := range paths {
+			if MatchesPath(concrete, entry, path) {
 				present = true
 				break
 			}
 		}
 		if !present {
-			missing = append(missing, pattern)
+			return false
 		}
 	}
-	return missing
+	return true
+}
+
+func concreteWildcardPatterns(patternSegments []string, paths []string) []string {
+	lastWildcard := lastSegmentIndex(patternSegments, "*")
+	seen := make(map[string]bool)
+	var out []string
+	for _, path := range paths {
+		pathSegments := splitPath(path)
+		if len(pathSegments) <= lastWildcard {
+			continue
+		}
+		concrete := make([]string, len(patternSegments))
+		matches := true
+		for i, segment := range patternSegments {
+			if i > lastWildcard {
+				concrete[i] = segment
+				continue
+			}
+			if segment == "*" {
+				concrete[i] = pathSegments[i]
+				continue
+			}
+			concrete[i] = segment
+			if segment != pathSegments[i] {
+				matches = false
+				break
+			}
+		}
+		if !matches {
+			continue
+		}
+		pattern := joinEscapedSegments(concrete)
+		if !seen[pattern] {
+			seen[pattern] = true
+			out = append(out, pattern)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func joinEscapedSegments(segments []string) string {
+	escaped := make([]string, len(segments))
+	for i, segment := range segments {
+		escaped[i] = escapeSegment(segment)
+	}
+	return strings.Join(escaped, ".")
+}
+
+func lastSegmentIndex(segments []string, target string) int {
+	for i := len(segments) - 1; i >= 0; i-- {
+		if segments[i] == target {
+			return i
+		}
+	}
+	return -1
 }
 
 // FlattenTree reduces the canonical tree to sorted leaf paths: maps recurse

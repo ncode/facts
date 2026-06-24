@@ -47,6 +47,15 @@ func validateOptions(args []string) error {
 	logLevel := ""
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
+		if arg == "--" {
+			break
+		}
+		if !strings.HasPrefix(arg, "-") {
+			if IsTask(arg) {
+				continue
+			}
+			break
+		}
 		if strings.HasPrefix(arg, "-") {
 			seenRaw[rawOption(arg)] = true
 			option, ok := LookupOption(arg)
@@ -64,7 +73,7 @@ func validateOptions(args []string) error {
 			}
 		}
 		if OptionTakesSeparateValue(arg) {
-			if i+1 >= len(args) || strings.HasPrefix(args[i+1], "-") {
+			if i+1 >= len(args) {
 				return fmt.Errorf("%s requires a value", CanonicalOption(arg))
 			}
 			i++

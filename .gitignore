@@ -1,7 +1,9 @@
 *.gem
 *.rbc
 /facts
+/facts.exe
 /.config
+/coverage.out
 /coverage/
 /InstalledFiles
 /pkg/

@@ -47,9 +47,13 @@ func currentUptimeInfo(s *Session, goos string, readFile fileReader, run command
 	}
 	if goos == "linux" {
 		virtual := detectLinuxVirtualization(currentLinuxVirtualizationInputWithCommands(s, run))
-		return currentLinuxUptimeInfo(readFile, run, now, virtual.Name == "docker")
+		return currentLinuxUptimeInfo(readFile, run, now, linuxContainerUptimeUsesPID1(virtual.Name))
 	}
 	return currentPosixUptime(readFile, run, now)
+}
+
+func linuxContainerUptimeUsesPID1(name string) bool {
+	return name == "docker" || name == "kubernetes"
 }
 
 func currentLinuxUptimeInfo(readFile fileReader, run commandRunner, now func() time.Time, docker bool) uptimeInfo {
@@ -361,13 +365,20 @@ func uptimeCoreFacts(s *Session) []ResolvedFact {
 	if runtime.GOOS == "plan9" {
 		return plan9UptimeCoreFacts(s.cachedUptime())
 	}
-	uptime := s.cachedUptime()
-	loadAverages := s.cachedLoadAverages()
-	return []ResolvedFact{
+	return uptimeFacts(s.cachedUptime(), s.cachedLoadAverages())
+}
+
+func uptimeFacts(uptime uptimeInfo, loadAverages map[string]any) []ResolvedFact {
+	facts := []ResolvedFact{
 		{Name: "load_averages", Value: loadAverages},
-		{Name: "system_uptime.days", Value: int(uptime.Duration.Hours()) / 24},
-		{Name: "system_uptime.hours", Value: int(uptime.Duration.Hours())},
-		{Name: "system_uptime.seconds", Value: int(uptime.Duration.Seconds())},
-		{Name: "system_uptime.uptime", Value: uptimeString(uptime)},
 	}
+	if uptime.Known {
+		facts = append(facts,
+			ResolvedFact{Name: "system_uptime.days", Value: int64(uptime.Duration.Hours()) / 24},
+			ResolvedFact{Name: "system_uptime.hours", Value: int64(uptime.Duration.Hours())},
+			ResolvedFact{Name: "system_uptime.seconds", Value: int64(uptime.Duration.Seconds())},
+		)
+	}
+	facts = append(facts, ResolvedFact{Name: "system_uptime.uptime", Value: uptimeString(uptime)})
+	return facts
 }

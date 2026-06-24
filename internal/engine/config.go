@@ -84,7 +84,7 @@ func CurrentDefaultExternalFactDirs() []string {
 		runtime.GOOS == "windows",
 		runtime.GOOS != "windows" && os.Geteuid() == 0,
 		os.Getenv("HOME"),
-		firstNonEmpty(os.Getenv("ProgramData"), os.Getenv("APPDATA")),
+		os.Getenv("ProgramData"),
 	)
 }
 
@@ -304,15 +304,10 @@ func quotedConfigValues(content string) []string {
 }
 
 func configSection(content, name string) string {
-	start := strings.Index(strings.ToLower(content), strings.ToLower(name))
-	if start < 0 {
-		return ""
-	}
-	open := strings.IndexByte(content[start:], '{')
+	open := configSectionOpenBrace(content, name)
 	if open < 0 {
 		return ""
 	}
-	open += start
 	depth := 0
 	for i := open; i < len(content); i++ {
 		switch content[i] {
@@ -326,6 +321,95 @@ func configSection(content, name string) string {
 		}
 	}
 	return content[open+1:]
+}
+
+func configSectionOpenBrace(content, name string) int {
+	depth := 0
+	for i := 0; i < len(content); {
+		i = skipConfigSpaceCommentsAndStrings(content, i)
+		if i >= len(content) {
+			return -1
+		}
+		switch content[i] {
+		case '{':
+			depth++
+			i++
+			continue
+		case '}':
+			if depth > 0 {
+				depth--
+			}
+			i++
+			continue
+		}
+		if depth != 0 {
+			i++
+			continue
+		}
+		if !configNameAt(content, i, name) {
+			i++
+			continue
+		}
+		j := skipConfigSpaceCommentsAndStrings(content, i+len(name))
+		if j >= len(content) || content[j] != ':' && content[j] != '=' {
+			i++
+			continue
+		}
+		j = skipConfigSpaceCommentsAndStrings(content, j+1)
+		if j < len(content) && content[j] == '{' {
+			return j
+		}
+		i++
+	}
+	return -1
+}
+
+func configNameAt(content string, pos int, name string) bool {
+	if pos > 0 {
+		prev := content[pos-1]
+		if prev == '_' || prev == '-' || prev == '.' || prev >= '0' && prev <= '9' || prev >= 'A' && prev <= 'Z' || prev >= 'a' && prev <= 'z' {
+			return false
+		}
+	}
+	if len(content)-pos < len(name) || !strings.EqualFold(content[pos:pos+len(name)], name) {
+		return false
+	}
+	if next := pos + len(name); next < len(content) {
+		b := content[next]
+		if b == '_' || b == '-' || b == '.' || b >= '0' && b <= '9' || b >= 'A' && b <= 'Z' || b >= 'a' && b <= 'z' {
+			return false
+		}
+	}
+	return true
+}
+
+func skipConfigSpaceCommentsAndStrings(content string, i int) int {
+	for i < len(content) {
+		switch content[i] {
+		case ' ', '\t', '\r', '\n', ',':
+			i++
+		case '#':
+			for i < len(content) && content[i] != '\n' {
+				i++
+			}
+		case '"':
+			i++
+			for i < len(content) {
+				if content[i] == '\\' {
+					i += 2
+					continue
+				}
+				if content[i] == '"' {
+					i++
+					break
+				}
+				i++
+			}
+		default:
+			return i
+		}
+	}
+	return i
 }
 
 func lowerConfigValues(values []string) []string {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"sync"
 )
 
 // stderrLogHandler renders engine diagnostics as Ruby-compatible stderr lines
@@ -17,6 +18,7 @@ type stderrLogHandler struct {
 	color   bool
 	debug   bool
 	verbose bool
+	mu      sync.Mutex
 }
 
 func (h *stderrLogHandler) Enabled(_ context.Context, level slog.Level) bool {
@@ -33,6 +35,9 @@ func (h *stderrLogHandler) Enabled(_ context.Context, level slog.Level) bool {
 }
 
 func (h *stderrLogHandler) Handle(_ context.Context, record slog.Record) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
 	switch {
 	case record.Level >= slog.LevelError:
 	case record.Level >= slog.LevelWarn:

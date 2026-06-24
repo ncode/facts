@@ -371,7 +371,7 @@ func mapFromValues(source map[string]string, names map[string]string) map[string
 
 func dmiChassisTypeName(value string) string {
 	types := []string{
-		"Other", "", "Desktop", "Low Profile Desktop", "Pizza Box", "Mini Tower", "Tower",
+		"Other", "Unknown", "Desktop", "Low Profile Desktop", "Pizza Box", "Mini Tower", "Tower",
 		"Portable", "Laptop", "Notebook", "Hand Held", "Docking Station", "All in One", "Sub Notebook",
 		"Space-Saving", "Lunch Box", "Main System Chassis", "Expansion Chassis", "SubChassis",
 		"Bus Expansion Chassis", "Peripheral Chassis", "Storage Chassis", "Rack Mount Chassis",

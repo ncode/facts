@@ -278,11 +278,23 @@ func TestFormatYAML_quotesWindowsPath(t *testing.T) {
 
 func TestFormatYAML_formatsFloatWithoutQuotes(t *testing.T) {
 	facts := []ResolvedFact{
-		{Name: "memory", Value: 1024.0},
+		{Name: "load_average", Value: 1.35},
 	}
 
 	got := FormatYAML(facts)
-	want := "memory: 1024.0\n"
+	want := "load_average: 1.35\n"
+	if got != want {
+		t.Fatalf("FormatYAML() = %q, want %q", got, want)
+	}
+}
+
+func TestFormatYAML_formatsNestedArrayValuesAsYAML(t *testing.T) {
+	facts := []ResolvedFact{
+		{Name: "nested", Value: []any{[]any{"a", "b"}, map[string]any{"name": "c"}}, UserQuery: "nested"},
+	}
+
+	got := FormatYAML(facts)
+	want := "nested:\n- [a, b]\n- name: c\n"
 	if got != want {
 		t.Fatalf("FormatYAML() = %q, want %q", got, want)
 	}
@@ -384,6 +396,30 @@ func TestFormatHOCON_formatsArrayValues(t *testing.T) {
 
 	got := FormatHOCON(facts)
 	want := "processors={\n    models=[\"Apple M4 Pro\",\"Apple M4 Max\"]\n}\n"
+	if got != want {
+		t.Fatalf("FormatHOCON() = %q, want %q", got, want)
+	}
+}
+
+func TestFormatHOCON_quotesUnsafeStringValues(t *testing.T) {
+	facts := []ResolvedFact{
+		{Name: "external.payload", Value: "a=b # not syntax"},
+	}
+
+	got := FormatHOCON(facts)
+	want := "external={\n    payload=\"a=b # not syntax\"\n}\n"
+	if got != want {
+		t.Fatalf("FormatHOCON() = %q, want %q", got, want)
+	}
+}
+
+func TestFormatHOCON_preservesFloatPrecision(t *testing.T) {
+	facts := []ResolvedFact{
+		{Name: "load_average", Value: 1.35},
+	}
+
+	got := FormatHOCON(facts)
+	want := "load_average=1.35\n"
 	if got != want {
 		t.Fatalf("FormatHOCON() = %q, want %q", got, want)
 	}

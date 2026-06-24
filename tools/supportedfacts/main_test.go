@@ -48,6 +48,24 @@ func TestRenderedDocsUseSchemaPlatformVocabulary(t *testing.T) {
 	}
 }
 
+func TestExampleOutputReturnsErrorForMissingPlatform(t *testing.T) {
+	if _, err := exampleOutput("missing-platform"); err == nil {
+		t.Fatal("exampleOutput(missing-platform) err = nil, want error")
+	}
+}
+
+func TestExampleOutputReturnsErrorForMalformedJSON(t *testing.T) {
+	original := exampleJSON["linux"]
+	exampleJSON["linux"] = "{"
+	t.Cleanup(func() {
+		exampleJSON["linux"] = original
+	})
+
+	if _, err := exampleOutput("linux"); err == nil {
+		t.Fatal("exampleOutput(malformed) err = nil, want error")
+	}
+}
+
 func repoRoot(t *testing.T) string {
 	t.Helper()
 	dir, err := os.Getwd()

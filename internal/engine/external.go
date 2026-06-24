@@ -331,10 +331,19 @@ func (l externalFactLoader) loadExternalFactFile(path string, mode os.FileMode) 
 	ext := strings.ToLower(filepath.Ext(path))
 	switch ext {
 	case ".txt":
+		if !mode.IsRegular() {
+			return nil, nil
+		}
 		return l.loadExternalTxtFacts(path)
 	case ".json":
+		if !mode.IsRegular() {
+			return nil, nil
+		}
 		return l.loadExternalJSONFacts(path)
 	case ".yaml", ".yml":
+		if !mode.IsRegular() {
+			return nil, nil
+		}
 		return l.loadExternalYAMLFacts(path)
 	case ".rb":
 		l.s.warn(fmt.Sprintf("Ruby fact files are not supported by the Go port; skipping %s. Rewrite it as an executable external fact (see docs/CUSTOM_FACT_MIGRATION.md).", path))
@@ -391,6 +400,7 @@ func (l externalFactLoader) loadExternalTxtFacts(path string) ([]ResolvedFact, e
 }
 
 func parseKeyValueFacts(scanner *bufio.Scanner) ([]ResolvedFact, error) {
+	scanner.Buffer(make([]byte, 0, 64*1024), externalFactMaxBytes)
 	facts := []ResolvedFact{}
 	for scanner.Scan() {
 		name, value, ok := strings.Cut(scanner.Text(), "=")
@@ -542,6 +552,10 @@ func (l externalFactLoader) loadExternalJSONFacts(path string) ([]ResolvedFact, 
 	decoder.UseNumber()
 	var value any
 	if err := decoder.Decode(&value); err != nil {
+		return nil, nil
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
 		return nil, nil
 	}
 
@@ -781,6 +795,9 @@ func normalizeStructuredValue(value any) (any, error) {
 	switch v := value.(type) {
 	case json.Number:
 		if i, err := v.Int64(); err == nil {
+			if i > 1<<31-1 || i < -1<<31 {
+				return i, nil
+			}
 			return int(i), nil
 		}
 		if f, err := v.Float64(); err == nil {

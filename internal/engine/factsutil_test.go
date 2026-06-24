@@ -46,6 +46,19 @@ func TestDiscoverFamily_matchesRubyFactsUtils(t *testing.T) {
 	}
 }
 
+func TestUsesRedHatReleaseDistroExcludesOracleAndAmazonAliases(t *testing.T) {
+	for _, id := range []string{"ol", "oel", "oraclelinux", "amzn", "amazon"} {
+		t.Run(id, func(t *testing.T) {
+			if usesRedHatReleaseDistro(id) {
+				t.Fatalf("usesRedHatReleaseDistro(%q) = true, want false", id)
+			}
+		})
+	}
+	if !usesRedHatReleaseDistro("rhel") {
+		t.Fatal("usesRedHatReleaseDistro(rhel) = false, want true")
+	}
+}
+
 func TestReleaseHashFromString_matchesRubyFactsUtils(t *testing.T) {
 	tests := []struct {
 		name         string

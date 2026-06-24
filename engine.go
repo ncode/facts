@@ -120,6 +120,9 @@ func WithSystemDefaults() Option {
 // early, err satisfies errors.Is(err, ctx.Err()). Not-applicable facts are
 // absent from the Snapshot and contribute nothing to err.
 func (e *Engine) Discover(ctx context.Context, queries ...string) (*Snapshot, error) {
+	if e == nil || e.inner == nil {
+		return nil, errors.New("facts: uninitialized Engine")
+	}
 	inner, err := e.inner.Discover(ctx, queries...)
 	return &Snapshot{inner: inner}, err
 }

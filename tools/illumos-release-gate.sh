@@ -14,6 +14,10 @@ if [ "$(uname -s)" != "SunOS" ]; then
     echo "illumos-release-gate.sh must run on illumos/SunOS" >&2
     exit 1
 fi
+if ! [ -r /etc/release ] || ! grep -Eiq 'illumos|omnios|openindiana|smartos' /etc/release; then
+    echo "illumos-release-gate.sh must run on illumos/OmniOS, not Oracle Solaris" >&2
+    exit 1
+fi
 
 FACT_SET="os.name os.family os.release os.architecture os.hardware kernel.name \
 kernel.release.full kernel.version.full kernel.release.major virtual is_virtual \

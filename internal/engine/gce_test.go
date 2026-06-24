@@ -95,6 +95,18 @@ func TestGCEFactsSkipInvalidMetadata(t *testing.T) {
 	}
 }
 
+func TestGCEFactsRequireGoogleMetadataFlavor(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Metadata-Flavor", "NotGoogle")
+		_, _ = w.Write([]byte(`{"some":"metadata"}`))
+	}))
+	t.Cleanup(server.Close)
+
+	if got := gceFacts(context.Background(), newGCEClient(server.URL, server.Client())); len(got) != 0 {
+		t.Fatalf("gceFacts(context.Background(), ) = %#v, want no facts for spoofed metadata flavor", got)
+	}
+}
+
 func TestLinuxGCEFactsSkipsMetadataWhenBIOSVendorIsNotGoogleLikeRuby(t *testing.T) {
 	var requested atomic.Bool
 	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {

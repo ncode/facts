@@ -440,8 +440,13 @@ func detectLinuxVirtualization(input linuxVirtualizationInput) virtualization {
 		if name := virtWhatVirtualization(input.VirtWhatOutput, input.ProcStatus); name != "" {
 			return virtualization{Name: name, IsVirtual: true}
 		}
-		if name := dmiProductHypervisor(input.DMIProductName); name != "" {
-			return virtualization{Name: name, IsVirtual: true}
+		if virtual := detectDMIHostVirtualization(dmiVirtualizationInput{
+			Manufacturer: input.DMISysVendor,
+			ProductName:  input.DMIProductName,
+			BIOSVendor:   input.DMIBIOSVendor,
+			PCIOutput:    input.LspciOutput,
+		}); virtual.IsVirtual {
+			return virtual
 		}
 		if name := parseVMwareCommand(input.VMwareCommand); name != "" {
 			return virtualization{Name: name, IsVirtual: true}

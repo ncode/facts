@@ -422,6 +422,37 @@ func TestLoadExternalFacts_jsonFacts(t *testing.T) {
 	}
 }
 
+func TestLoadExternalFacts_ignoresJSONWithTrailingTokens(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "site.json"), []byte(`{"site":"lab"} garbage`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := LoadExternalFacts(testSession, []string{dir})
+	if err != nil {
+		t.Fatalf("LoadExternalFacts(testSession) err = %v, want nil for malformed structured file", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("LoadExternalFacts(testSession) = %#v, want no facts", got)
+	}
+}
+
+func TestLoadExternalFacts_preservesLargeJSONIntegerAsInt64(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "site.json"), []byte(`{"big":2147483648}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := LoadExternalFacts(testSession, []string{dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []ResolvedFact{{Name: "big", Value: int64(2147483648), Type: "external"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("LoadExternalFacts(testSession) = %#v, want %#v", got, want)
+	}
+}
+
 func TestLoadExternalFacts_yamlFacts(t *testing.T) {
 	dir := t.TempDir()
 	content := []byte("site: lab\nfeatures:\n  - yaml\n  - external\nnested:\n  enabled: true\ncount: 3\n")
@@ -453,6 +484,44 @@ func TestLoadExternalFacts_yamlFacts(t *testing.T) {
 	}
 	if len(want) != 0 {
 		t.Fatalf("missing facts: %#v", want)
+	}
+}
+
+func TestExternalFactLoader_ignoresNonRegularStructuredFiles(t *testing.T) {
+	opened := false
+	host := &fakeExternalFactLoaderHost{
+		openFunc: func(string) (io.ReadCloser, error) {
+			opened = true
+			return io.NopCloser(strings.NewReader(`{"site":"lab"}`)), nil
+		},
+	}
+
+	got, err := externalFactLoader{s: testSession, host: host}.loadExternalFactFile("site.json", os.ModeNamedPipe)
+	if err != nil {
+		t.Fatalf("loadExternalFactFile() err = %v, want nil", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("loadExternalFactFile() = %#v, want no facts", got)
+	}
+	if opened {
+		t.Fatal("loadExternalFactFile opened non-regular structured file")
+	}
+}
+
+func TestLoadExternalFacts_acceptsLongKeyValueLineWithinLimit(t *testing.T) {
+	dir := t.TempDir()
+	value := strings.Repeat("x", 70*1024)
+	if err := os.WriteFile(filepath.Join(dir, "site.txt"), []byte("site="+value+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := LoadExternalFacts(testSession, []string{dir})
+	if err != nil {
+		t.Fatalf("LoadExternalFacts(testSession) err = %v, want nil", err)
+	}
+	want := []ResolvedFact{{Name: "site", Value: value, Type: "external"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("LoadExternalFacts(testSession) = %#v, want long site fact", got)
 	}
 }
 

@@ -39,7 +39,7 @@ func discoverFamily(id string) string {
 // carries Red Hat branding that must not leak into os.distro.
 func usesRedHatReleaseDistro(id string) bool {
 	switch strings.ToLower(id) {
-	case "ol", "amzn":
+	case "ol", "oel", "oraclelinux", "amzn", "amazon":
 		return false
 	}
 	return discoverFamily(id) == "RedHat"

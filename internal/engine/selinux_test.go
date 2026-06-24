@@ -48,8 +48,12 @@ func TestSELinuxFactsDisabledWithoutMountpointOrConfig(t *testing.T) {
 
 	writeFile(t, filepath.Join(dir, "mounts"), "none /sys/fs/selinux selinuxfs rw 0 0\n")
 	core = selinuxFacts(filepath.Join(dir, "mounts"), filepath.Join(dir, "missing-config"), os.ReadFile)
-	if got := Collection(core)["os"].(map[string]any)["selinux"].(map[string]any)["enabled"]; got != false {
-		t.Fatalf("os.selinux.enabled = %#v, want false without config", got)
+	selinux := Collection(core)["os"].(map[string]any)["selinux"].(map[string]any)
+	if got := selinux["enabled"]; got != true {
+		t.Fatalf("os.selinux.enabled = %#v, want true with selinuxfs even without config", got)
+	}
+	if _, ok := selinux["config_mode"]; ok {
+		t.Fatalf("os.selinux.config_mode = %#v, want omitted without config", selinux["config_mode"])
 	}
 }
 
@@ -93,5 +97,27 @@ func TestSELinuxFactsKeepsMissingPolicyVersionNil(t *testing.T) {
 
 	if got := Collection(core)["os"].(map[string]any)["selinux"].(map[string]any)["policy_version"]; got != nil {
 		t.Fatalf("os.selinux.policy_version = %#v, want nil", got)
+	}
+}
+
+func TestSELinuxFactsOmitsEnforcementWhenEnforceIsUnreadableOrInvalid(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	mountpoint := filepath.Join(dir, "selinux")
+	if err := os.Mkdir(mountpoint, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(dir, "mounts"), "none "+mountpoint+" selinuxfs rw 0 0\n")
+	writeFile(t, filepath.Join(dir, "config"), "SELINUX=enforcing\nSELINUXTYPE=targeted\n")
+	writeFile(t, filepath.Join(mountpoint, "enforce"), "unexpected\n")
+
+	core := selinuxFacts(filepath.Join(dir, "mounts"), filepath.Join(dir, "config"), os.ReadFile)
+	selinux := Collection(core)["os"].(map[string]any)["selinux"].(map[string]any)
+	if _, ok := selinux["enforced"]; ok {
+		t.Fatalf("os.selinux.enforced = %#v, want omitted for invalid enforce content", selinux["enforced"])
+	}
+	if _, ok := selinux["current_mode"]; ok {
+		t.Fatalf("os.selinux.current_mode = %#v, want omitted for invalid enforce content", selinux["current_mode"])
 	}
 }

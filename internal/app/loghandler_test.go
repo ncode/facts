@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"log/slog"
+	"sync"
 	"testing"
 )
 
@@ -36,4 +37,19 @@ func TestStderrLogHandlerDropsErrorClassKeepsWarnDebug(t *testing.T) {
 			t.Fatalf("stderr = %q, want %q", got, want)
 		}
 	})
+}
+
+func TestStderrLogHandlerConcurrentHandle(t *testing.T) {
+	var stderr bytes.Buffer
+	logger := slog.New(&stderrLogHandler{stderr: &stderr})
+
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Go(func() {
+			for range 50 {
+				logger.Warn("heads up")
+			}
+		})
+	}
+	wg.Wait()
 }

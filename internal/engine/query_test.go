@@ -91,6 +91,25 @@ func TestSelect_matchesWildcardFactNameLikeRubyQueryParser(t *testing.T) {
 	}
 }
 
+func TestSelect_wildcardFactNameEscapesOtherRegexpCharacters(t *testing.T) {
+	facts := []ResolvedFact{
+		{Name: "metric[prod].*", Value: "literal", Type: "external"},
+	}
+
+	selected := Select(facts, []string{"metric[prod]cpu"})
+	if len(selected) != 1 {
+		t.Fatalf("Select() returned %d facts, want 1", len(selected))
+	}
+
+	got := selected[0]
+	if got.Name != "metric[prod].*" {
+		t.Fatalf("Name = %q, want metric[prod].*", got.Name)
+	}
+	if got.Value != "literal" {
+		t.Fatalf("Value = %#v, want literal", got.Value)
+	}
+}
+
 func TestSelect_doesNotMatchWildcardNameForDottedStructuredQuery(t *testing.T) {
 	facts := []ResolvedFact{
 		{Name: "ssh.*key", Value: "wildcard", Type: "external"},
@@ -118,6 +137,19 @@ func TestCollectionWithDottedFactsKeepsExistingScalarOnNestedCollision(t *testin
 	facts := []ResolvedFact{
 		{Name: "mygroup.fact1", Value: "g1_f1_value", Type: "custom"},
 		{Name: "mygroup.fact1.subfact1", Value: "g1_sg1_f1_value", Type: "custom"},
+	}
+
+	got := CollectionWithDottedFacts(facts, true)
+	want := map[string]any{"mygroup": map[string]any{"fact1": "g1_f1_value"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("CollectionWithDottedFacts() = %#v, want %#v", got, want)
+	}
+}
+
+func TestCollectionWithDottedFactsKeepsExistingMapOnScalarCollision(t *testing.T) {
+	facts := []ResolvedFact{
+		{Name: "mygroup.fact1", Value: "g1_f1_value", Type: "custom"},
+		{Name: "mygroup", Value: "scalar_value", Type: "custom"},
 	}
 
 	got := CollectionWithDottedFacts(facts, true)

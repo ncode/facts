@@ -193,6 +193,23 @@ func TestDMIFact_replacesInvalidUTF8InLinuxSysfsValues(t *testing.T) {
 	}
 }
 
+func TestDMIFact_mapsUnknownLinuxNumericChassisType(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "chassis_type"), []byte("2\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got := dmiFact(dir)
+	want := map[string]any{
+		"chassis": map[string]any{
+			"type": "Unknown",
+		},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("dmiFact() = %#v, want %#v", got, want)
+	}
+}
+
 func TestFreeBSDDMIFacts_returnsStructuredFacts(t *testing.T) {
 	values := map[string]string{
 		"smbios.bios.reldate":     "12/12/2018",

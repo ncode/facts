@@ -62,6 +62,18 @@ func TestNew_defaultEngineIsHermetic(t *testing.T) {
 	}
 }
 
+func TestEngineDiscover_uninitializedReceiverReturnsError(t *testing.T) {
+	var nilEngine *Engine
+	if snap, err := nilEngine.Discover(context.Background()); err == nil || snap != nil {
+		t.Fatalf("nil Engine Discover() = %#v, %v, want nil snapshot and error", snap, err)
+	}
+
+	var zero Engine
+	if snap, err := zero.Discover(context.Background()); err == nil || snap != nil {
+		t.Fatalf("zero Engine Discover() = %#v, %v, want nil snapshot and error", snap, err)
+	}
+}
+
 func TestWithExternalDirs_loadsExactlyOptedDirs(t *testing.T) {
 	t.Setenv("FACTER_env_probe", "leaked")
 	dir := t.TempDir()
@@ -592,6 +604,24 @@ func TestAs_shapeMismatchFailsLoudly(t *testing.T) {
 	}
 	if got != (osFact{}) {
 		t.Fatalf("As[osFact](os) = %#v, want zero value on mismatch", got)
+	}
+}
+
+func TestAs_rejectsMapAnyKeyStringCollisions(t *testing.T) {
+	eng, err := New(WithFact("ambiguous", func(context.Context) (any, error) {
+		return map[any]any{"1": "string-key", 1: "int-key"}, nil
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap, err := eng.Discover(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = As[map[string]string](snap, "ambiguous")
+	if err == nil || !strings.Contains(err.Error(), `duplicate map key after string normalization: "1"`) {
+		t.Fatalf("As ambiguous err = %v, want duplicate normalized key error", err)
 	}
 }
 

@@ -119,6 +119,40 @@ func TestDetectLinuxVirtualization_detectsOpenVZ(t *testing.T) {
 	}
 }
 
+func TestDetectLinuxVirtualization_detectsKVMFromDMI(t *testing.T) {
+	tests := []struct {
+		name  string
+		input linuxVirtualizationInput
+		want  virtualization
+	}{
+		{
+			name: "qemu system vendor",
+			input: linuxVirtualizationInput{
+				DMISysVendor:   "QEMU",
+				DMIProductName: "Standard PC (i440FX + PIIX, 1996)",
+			},
+			want: virtualization{Name: "kvm", IsVirtual: true},
+		},
+		{
+			name: "seabios vendor",
+			input: linuxVirtualizationInput{
+				DMIBIOSVendor:  "SeaBIOS",
+				DMIProductName: "Standard PC (i440FX + PIIX, 1996)",
+			},
+			want: virtualization{Name: "kvm", IsVirtual: true},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := detectLinuxVirtualization(tt.input)
+			if got != tt.want {
+				t.Fatalf("detectLinuxVirtualization() = %#v, want %#v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestDetectLinuxVirtualization_detectsDMIProductHypervisors(t *testing.T) {
 	got := detectLinuxVirtualization(linuxVirtualizationInput{DMIProductName: "Bochs Machine"})
 	want := virtualization{Name: "bochs", IsVirtual: true}

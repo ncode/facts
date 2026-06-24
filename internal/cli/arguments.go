@@ -12,8 +12,18 @@ func PrepareArguments(args []string) []string {
 
 	priority := make([]string, 0, len(prepared))
 	normal := make([]string, 0, len(prepared))
+	afterDelimiter := false
 	for i := 0; i < len(prepared); i++ {
 		arg := prepared[i]
+		if afterDelimiter {
+			normal = append(normal, arg)
+			continue
+		}
+		if arg == "--" {
+			normal = append(normal, arg)
+			afterDelimiter = true
+			continue
+		}
 		if IsTaskFlag(arg) || IsTask(arg) {
 			priority = append(priority, arg)
 			continue
@@ -29,7 +39,11 @@ func PrepareArguments(args []string) []string {
 
 func expandShortOptions(args []string) []string {
 	expanded := make([]string, 0, len(args))
-	for _, arg := range args {
+	for i, arg := range args {
+		if arg == "--" {
+			expanded = append(expanded, args[i:]...)
+			break
+		}
 		if len(arg) <= 2 || arg[0] != '-' || arg[1] == '-' || strings.ContainsRune(arg, '=') {
 			expanded = append(expanded, arg)
 			continue
@@ -48,6 +62,9 @@ func expandShortOptions(args []string) []string {
 func containsKnownTaskOrMappedFlag(args []string) bool {
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
+		if arg == "--" {
+			return false
+		}
 		if IsTask(arg) || IsTaskFlag(arg) {
 			return true
 		}

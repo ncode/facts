@@ -63,14 +63,22 @@ func collectFacts(facts []ResolvedFact, includeTypedDotted bool) (map[string]any
 
 // ValueForQuery returns the value selected by fact.UserQuery from fact.Value.
 func ValueForQuery(fact ResolvedFact) any {
+	value, _ := valueForQuery(fact)
+	return value
+}
+
+func valueForQuery(fact ResolvedFact) (any, bool) {
 	query := fact.UserQuery
 	if query == "" || query == fact.Name {
-		return fact.Value
+		if fact.Value == nil {
+			return nil, fact.Type == "custom" || fact.Type == "external"
+		}
+		return fact.Value, true
 	}
 	if !strings.HasPrefix(query, fact.Name+".") {
-		return dig(fact.Value, strings.Split(query, "."))
+		return digValue(fact.Value, strings.Split(query, "."))
 	}
-	return dig(fact.Value, strings.Split(strings.TrimPrefix(query, fact.Name+"."), "."))
+	return digValue(fact.Value, strings.Split(strings.TrimPrefix(query, fact.Name+"."), "."))
 }
 
 func insert(root map[string]any, parts []string, value any) bool {
@@ -78,6 +86,9 @@ func insert(root map[string]any, parts []string, value any) bool {
 		return false
 	}
 	if len(parts) == 1 {
+		if _, ok := root[parts[0]].(map[string]any); ok {
+			return false
+		}
 		root[parts[0]] = value
 		return true
 	}
@@ -105,16 +116,21 @@ func factTypeLabel(factType string) string {
 }
 
 func dig(value any, parts []string) any {
+	value, _ = digValue(value, parts)
+	return value
+}
+
+func digValue(value any, parts []string) (any, bool) {
 	if len(parts) == 0 {
-		return value
+		return value, true
 	}
 	switch v := value.(type) {
 	case map[string]any:
 		next, ok := v[parts[0]]
 		if !ok {
-			return nil
+			return nil, false
 		}
-		return dig(next, parts[1:])
+		return digValue(next, parts[1:])
 	case map[any]any:
 		next, ok := v[parts[0]]
 		if !ok {
@@ -127,35 +143,35 @@ func dig(value any, parts []string) any {
 			}
 		}
 		if !ok {
-			return nil
+			return nil, false
 		}
-		return dig(next, parts[1:])
+		return digValue(next, parts[1:])
 	case []any:
 		index, err := strconv.Atoi(parts[0])
 		if err != nil || index < 0 || index >= len(v) {
-			return nil
+			return nil, false
 		}
-		return dig(v[index], parts[1:])
+		return digValue(v[index], parts[1:])
 	case []string:
 		index, err := strconv.Atoi(parts[0])
 		if err != nil || index < 0 || index >= len(v) {
-			return nil
+			return nil, false
 		}
 		if len(parts) > 1 {
-			return nil
+			return nil, false
 		}
-		return v[index]
+		return v[index], true
 	case []int:
 		index, err := strconv.Atoi(parts[0])
 		if err != nil || index < 0 || index >= len(v) {
-			return nil
+			return nil, false
 		}
 		if len(parts) > 1 {
-			return nil
+			return nil, false
 		}
-		return v[index]
+		return v[index], true
 	default:
-		return nil
+		return nil, false
 	}
 }
 

@@ -5,6 +5,20 @@ import (
 	"time"
 )
 
+func TestWindowsTimezoneKeepsValidUTF8ZoneName(t *testing.T) {
+	t.Parallel()
+
+	zone := "Hora estándar"
+	got := currentWindowsTimezone("windows", zone, "850", func() string {
+		t.Fatal("registry codepage should not be used for valid UTF-8")
+		return ""
+	})
+
+	if got != zone {
+		t.Fatalf("currentWindowsTimezone() = %q, want %q", got, zone)
+	}
+}
+
 func TestWindowsTimezoneUsesAPICodepage(t *testing.T) {
 	t.Parallel()
 

@@ -326,6 +326,15 @@ func TestCurrentProcessorISAUsesOpenBSDUnameProcessor(t *testing.T) {
 	}
 }
 
+func TestCurrentProcessorISAWindowsFallsBackWhenWMIHasNoISA(t *testing.T) {
+	s := NewSession()
+	s.host = &fakeHostOS{platform: "windows", runOutput: ""}
+
+	if got := currentProcessorISA(s, "windows", "amd64", func(string, ...string) string { return "" }); got != "amd64" {
+		t.Fatalf("currentProcessorISA(windows) = %q, want amd64 fallback", got)
+	}
+}
+
 func TestCoreFacts_processorSpeedOmittedWhenProbeYieldsNothing(t *testing.T) {
 	collection := Collection(CoreFacts(testSession))
 	processors, ok := collection["processors"].(map[string]any)
@@ -527,6 +536,26 @@ func TestLinuxProcessorPhysicalCountFallsBackToSysfsPackageIDsLikeRuby(t *testin
 	cpuinfo := "processor\t: 0\nmodel name\t: CPU\nprocessor\t: 1\nmodel name\t: CPU\n"
 	if got, want := linuxProcessorPhysicalCount(cpuinfo, sysCPU), 2; got != want {
 		t.Fatalf("linuxProcessorPhysicalCount() = %d, want %d", got, want)
+	}
+}
+
+func TestCurrentLinuxProcessorPhysicalCountUsesHostSysfsWhenCPUInfoMissing(t *testing.T) {
+	host := &fakeHostOS{
+		files: map[string][]byte{
+			"/sys/devices/system/cpu/cpu0/topology/physical_package_id": []byte("0\n"),
+			"/sys/devices/system/cpu/cpu1/topology/physical_package_id": []byte("1\n"),
+		},
+		dirs: map[string][]os.DirEntry{
+			"/sys/devices/system/cpu": fakeDirEntries("cpu0", "cpu1"),
+		},
+	}
+
+	got := currentLinuxProcessorPhysicalCount("/proc/cpuinfo", "/sys/devices/system/cpu", host)
+	if got != 2 {
+		t.Fatalf("currentLinuxProcessorPhysicalCount() = %d, want sysfs fallback count 2", got)
+	}
+	if !reflect.DeepEqual(host.readDirCalls, []string{"/sys/devices/system/cpu"}) {
+		t.Fatalf("readDir calls = %#v, want sysfs path", host.readDirCalls)
 	}
 }
 

@@ -170,7 +170,7 @@ func (gc *gceClient) get(ctx context.Context, path string) (string, bool) {
 		return "", false
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK || resp.Header.Get("Metadata-Flavor") == "" && resp.Header.Get("Metadata-flavor") == "" {
+	if resp.StatusCode != http.StatusOK || resp.Header.Get("Metadata-Flavor") != "Google" {
 		return "", false
 	}
 	data, err := io.ReadAll(io.LimitReader(resp.Body, gceMaxBodyBytes))

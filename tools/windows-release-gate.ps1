@@ -6,6 +6,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$RemoveBuiltFacts = $false
 
 $isWindowsHost = $IsWindows
 if ($null -eq $isWindowsHost) {
@@ -19,7 +20,8 @@ if (-not $isWindowsHost) {
 
 try {
     if ($FactsPath -eq "") {
-        $FactsPath = Join-Path ([System.IO.Path]::GetTempPath()) "facts-release-gate.exe"
+        $FactsPath = Join-Path ([System.IO.Path]::GetTempPath()) ("facts-release-gate-{0}.exe" -f [System.Guid]::NewGuid())
+        $RemoveBuiltFacts = $true
         & go build -o $FactsPath ./cmd/facts
         if ($LASTEXITCODE -ne 0) {
             throw "go build ./cmd/facts failed with exit code $LASTEXITCODE"
@@ -140,5 +142,10 @@ if (-not ($facts["fips_enabled"] -is [bool])) {
 catch {
     Write-Error "windows-release-gate failed: $_"
     exit 1
+}
+finally {
+    if ($RemoveBuiltFacts -and (Test-Path -LiteralPath $FactsPath)) {
+        Remove-Item -LiteralPath $FactsPath -Force -ErrorAction SilentlyContinue
+    }
 }
 exit 0

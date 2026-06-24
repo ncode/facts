@@ -211,7 +211,47 @@ func FilterBlockedFacts(facts []ResolvedFact, blocked map[string]bool) []Resolve
 		if blocked[fact.Name] || blocked[root] {
 			continue
 		}
+		fact.Value = pruneBlockedDescendants(fact.Name, fact.Value, blocked)
 		filtered = append(filtered, fact)
 	}
 	return filtered
+}
+
+func pruneBlockedDescendants(name string, value any, blocked map[string]bool) any {
+	var pruned any
+	for blockedName := range blocked {
+		if !strings.HasPrefix(blockedName, name+".") {
+			continue
+		}
+		if pruned == nil {
+			pruned = deepCopyValue(value)
+		}
+		pruned = pruneDottedValue(pruned, strings.Split(strings.TrimPrefix(blockedName, name+"."), "."))
+	}
+	if pruned == nil {
+		return value
+	}
+	return pruned
+}
+
+func pruneDottedValue(value any, parts []string) any {
+	if len(parts) == 0 {
+		return value
+	}
+	switch v := value.(type) {
+	case map[string]any:
+		if len(parts) == 1 {
+			delete(v, parts[0])
+			return v
+		}
+		child, ok := v[parts[0]]
+		if !ok {
+			return v
+		}
+		v[parts[0]] = pruneDottedValue(child, parts[1:])
+		if childMap, ok := v[parts[0]].(map[string]any); ok && len(childMap) == 0 {
+			delete(v, parts[0])
+		}
+	}
+	return value
 }

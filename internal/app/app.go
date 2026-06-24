@@ -498,6 +498,10 @@ func writeVersionQuery(stdout io.Writer, jsonOutput, yamlOutput, hoconOutput boo
 	if err != nil {
 		return err
 	}
+	if strings.HasSuffix(out, "\n") {
+		_, err = fmt.Fprint(stdout, out)
+		return err
+	}
 	_, err = fmt.Fprintln(stdout, out)
 	return err
 }

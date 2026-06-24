@@ -172,7 +172,7 @@ func TestEC2Facts_returnsMetadataAndUserdataForAWSHypervisors(t *testing.T) {
 		case "GET /latest/meta-data/instance_type":
 			_, _ = w.Write([]byte("c1.medium"))
 		case "GET /latest/user-data/":
-			_, _ = w.Write([]byte("userdata"))
+			_, _ = w.Write([]byte("  #!/bin/sh\necho userdata\n"))
 		default:
 			http.NotFound(w, r)
 		}
@@ -189,7 +189,7 @@ func TestEC2Facts_returnsMetadataAndUserdataForAWSHypervisors(t *testing.T) {
 	if got, want := metadata["instance_type"], "c1.medium"; got != want {
 		t.Fatalf("ec2_metadata.instance_type = %#v, want %#v", got, want)
 	}
-	if got, want := got["ec2_userdata"], "userdata"; got != want {
+	if got, want := got["ec2_userdata"], "  #!/bin/sh\necho userdata\n"; got != want {
 		t.Fatalf("ec2_userdata = %#v, want %#v", got, want)
 	}
 	if fact := factByName(facts, "cloud.provider"); fact == nil || fact.Value != "aws" {
@@ -232,6 +232,11 @@ func TestLinuxAWSCloudProviderRequiresVirtWhatAWSForRootKVM(t *testing.T) {
 	run = func(string, ...string) string { return "aws" }
 	if !linuxAWSCloudProvider("kvm", metadata, 0, executable, run) {
 		t.Fatal("linuxAWSCloudProvider(kvm root virt-what=aws) = false, want true")
+	}
+
+	run = func(string, ...string) string { return "kvm\naws\n" }
+	if !linuxAWSCloudProvider("kvm", metadata, 0, executable, run) {
+		t.Fatal("linuxAWSCloudProvider(kvm root virt-what includes aws) = false, want true")
 	}
 
 	if !linuxAWSCloudProvider("kvm", metadata, 512, executable, func(string, ...string) string { return "kvm" }) {
