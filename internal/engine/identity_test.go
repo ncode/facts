@@ -97,6 +97,58 @@ func TestParseWindowsAdministratorGroupsDetectsDenyOnlyAdmin(t *testing.T) {
 	}
 }
 
+func TestParseWindowsAdministratorGroups(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		output string
+		want   bool
+		wantOK bool
+	}{
+		{
+			name:   "blank output has unknown privilege",
+			output: " \n\t",
+		},
+		{
+			name: "enabled administrators group by name",
+			output: strings.Join([]string{
+				`Group Name                                 Type             SID          Attributes`,
+				`========================================== ================ ============ ===============================================`,
+				`BUILTIN\Administrators                    Alias            S-1-5-32-544 Mandatory group, Enabled by default, Enabled group`,
+			}, "\n"),
+			want:   true,
+			wantOK: true,
+		},
+		{
+			name: "enabled administrators group by SID",
+			output: strings.Join([]string{
+				`Everyone                                  Well-known group S-1-1-0      Mandatory group, Enabled by default, Enabled group`,
+				`Local account and member of Administrators group Alias S-1-5-32-544 Mandatory group, Enabled group`,
+			}, "\n"),
+			want:   true,
+			wantOK: true,
+		},
+		{
+			name: "no administrators group means known unprivileged",
+			output: strings.Join([]string{
+				`Everyone                                  Well-known group S-1-1-0 Mandatory group, Enabled group`,
+				`BUILTIN\Users                             Alias            S-1-5-32-545 Mandatory group, Enabled group`,
+			}, "\n"),
+			wantOK: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := parseWindowsAdministratorGroups(tt.output)
+			if got != tt.want || ok != tt.wantOK {
+				t.Fatalf("parseWindowsAdministratorGroups() = %v, %v; want %v, %v", got, ok, tt.want, tt.wantOK)
+			}
+		})
+	}
+}
+
 func TestIdentityFactFromInfoPOSIXReturnsNumericUIDAndGID(t *testing.T) {
 	t.Parallel()
 
@@ -118,6 +170,15 @@ func TestIdentityFactFromInfoPOSIXReturnsNumericUIDAndGID(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("identityFactFromInfo(posix) = %#v, want %#v", got, want)
+	}
+}
+
+func TestIdentityCoreFactsUsesSessionPlatform(t *testing.T) {
+	s := NewSessionContext(t.Context())
+	s.host = &fakeHostOS{platform: "plan9"}
+
+	if got := identityCoreFacts(s); got != nil {
+		t.Fatalf("identityCoreFacts(plan9 session) = %#v, want nil", got)
 	}
 }
 

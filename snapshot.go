@@ -13,6 +13,11 @@ import (
 // tree plus pure query and decode operations over it. Facts within a Snapshot
 // are mutually consistent; freshness is obtained by discovering again, never
 // by mutating. Safe for concurrent use.
+//
+// Returned values are defensive copies of the public fact graph: maps, slices,
+// arrays, pointers, and exported struct fields are cloned. Unexported struct
+// fields in custom fact values are preserved by shallow value copy and are
+// outside the deep-clone guarantee.
 type Snapshot struct {
 	inner *engine.Snapshot
 }

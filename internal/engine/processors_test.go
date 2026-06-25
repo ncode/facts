@@ -1,9 +1,11 @@
 package engine
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -95,6 +97,28 @@ func TestParseWindowsProcessorsFallsBackWhenLogicalCountIsZero(t *testing.T) {
 	}
 }
 
+func TestParseWindowsProcessorsHandlesMissingCoreCounts(t *testing.T) {
+	t.Parallel()
+
+	input := strings.Join([]string{
+		"Name=Pretty_Name",
+		"Architecture=0",
+		"NumberOfLogicalProcessors=2",
+		"NumberOfCores=bad",
+	}, "\r\n")
+
+	got := parseWindowsProcessors(input, discardLog())
+	want := processorInfo{
+		ISA:           "x86",
+		Models:        []string{"Pretty_Name"},
+		LogicalCount:  2,
+		PhysicalCount: 1,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("parseWindowsProcessors() = %#v, want %#v", got, want)
+	}
+}
+
 func TestParseWindowsProcessorsLogsUnknownArchitectureLikeRubyResolver(t *testing.T) {
 	debugMessages := []string{}
 	logger := captureLogger(&debugMessages, nil, nil)
@@ -131,6 +155,33 @@ func TestCurrentWindowsProcessorsQueriesWMIC(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got.Models, []string{"Pretty_Name"}) {
 		t.Fatalf("Models = %#v, want Pretty_Name", got.Models)
+	}
+}
+
+func TestCurrentProcessorInfoWiresWindowsWMICOutput(t *testing.T) {
+	t.Parallel()
+
+	got := currentProcessorInfo("windows", func(name string, args ...string) string {
+		if name != "wmic" || !reflect.DeepEqual(args, []string{"cpu", "get", "Name,Architecture,NumberOfLogicalProcessors,NumberOfCores", "/value"}) {
+			t.Fatalf("run(%q, %#v), want wmic processor query", name, args)
+		}
+		return "Name=Pretty_Name\r\nArchitecture=9\r\nNumberOfLogicalProcessors=4\r\nNumberOfCores=2\r\n"
+	}, discardLog())
+
+	if got.LogicalCount != 4 || got.CoresPerSocket != 2 || got.ThreadsPerCore != 2 || got.ISA != "x64" {
+		t.Fatalf("currentProcessorInfo(windows) = %#v", got)
+	}
+}
+
+func TestCurrentProcessorInfoSkipsUnsupportedPlatform(t *testing.T) {
+	t.Parallel()
+
+	got := currentProcessorInfo("plan9", func(string, ...string) string {
+		t.Fatal("currentProcessorInfo(unsupported) ran command")
+		return ""
+	}, discardLog())
+	if !reflect.DeepEqual(got, processorInfo{}) {
+		t.Fatalf("currentProcessorInfo(unsupported) = %#v, want empty", got)
 	}
 }
 
@@ -206,6 +257,169 @@ func TestCurrentProcessorInfoWiresFreeBSDSysctlOutput(t *testing.T) {
 	}
 }
 
+func TestProcessorProbesUseSessionPlatformForFreeBSD(t *testing.T) {
+	s := NewSessionContext(context.Background())
+	s.host = &fakeHostOS{
+		platform: "freebsd",
+		runOutputs: map[string]string{
+			fakeRunKey("sysctl", "-n", "hw.ncpu"):      "4\n",
+			fakeRunKey("sysctl", "-n", "hw.model"):     "Intel CPU\n",
+			fakeRunKey("sysctl", "-n", "hw.clockrate"): "2400\n",
+		},
+	}
+
+	info := probePlatformProcessorInfo(s)
+	if info.LogicalCount != 4 || info.SpeedHz != 2_400_000_000 || info.CoresPerSocket != 4 || info.ThreadsPerCore != 1 {
+		t.Fatalf("probePlatformProcessorInfo() = %#v", info)
+	}
+
+	if got := probeProcessorSpeed(s); got != "2.40 GHz" {
+		t.Fatalf("probeProcessorSpeed() = %q, want 2.40 GHz", got)
+	}
+	wantModels := []string{"Intel CPU", "Intel CPU", "Intel CPU", "Intel CPU"}
+	if got := probeProcessorModels(s); !reflect.DeepEqual(got, wantModels) {
+		t.Fatalf("probeProcessorModels() = %#v, want %#v", got, wantModels)
+	}
+	if cores, threads := probeProcessorTopology(s); cores != 4 || threads != 1 {
+		t.Fatalf("probeProcessorTopology() = %d, %d; want 4, 1", cores, threads)
+	}
+}
+
+func TestProcessorProbesUseSessionPlatformForDarwin(t *testing.T) {
+	s := NewSessionContext(context.Background())
+	s.host = &fakeHostOS{
+		platform: "darwin",
+		runOutputs: map[string]string{
+			fakeRunKey("sysctl",
+				"hw.logicalcpu_max",
+				"hw.physicalcpu_max",
+				"machdep.cpu.brand_string",
+				"hw.cpufrequency_max",
+				"machdep.cpu.core_count",
+				"machdep.cpu.thread_count",
+			): strings.Join([]string{
+				"hw.logicalcpu_max: 8",
+				"hw.physicalcpu_max: 4",
+				"machdep.cpu.brand_string: Apple M2",
+				"hw.cpufrequency_max: 3200000000",
+				"machdep.cpu.core_count: 4",
+				"machdep.cpu.thread_count: 8",
+			}, "\n"),
+		},
+	}
+
+	if got := probeProcessorSpeed(s); got != "3.20 GHz" {
+		t.Fatalf("probeProcessorSpeed() = %q, want 3.20 GHz", got)
+	}
+	models := probeProcessorModels(s)
+	if len(models) != 8 || models[0] != "Apple M2" || models[7] != "Apple M2" {
+		t.Fatalf("probeProcessorModels() = %#v, want eight Apple M2 entries", models)
+	}
+	if cores, threads := probeProcessorTopology(s); cores != 4 || threads != 2 {
+		t.Fatalf("probeProcessorTopology() = %d, %d; want 4, 2", cores, threads)
+	}
+}
+
+func TestProcessorProbesUseSessionPlatformForWindows(t *testing.T) {
+	s := NewSessionContext(context.Background())
+	s.host = &fakeHostOS{
+		platform: "windows",
+		runOutputs: map[string]string{
+			fakeRunKey("wmic", "cpu", "get", "Name,Architecture,NumberOfLogicalProcessors,NumberOfCores", "/value"): "Name=Pretty CPU\r\nArchitecture=9\r\nNumberOfLogicalProcessors=4\r\nNumberOfCores=2\r\n",
+		},
+	}
+
+	info := probePlatformProcessorInfo(s)
+	if info.ISA != "x64" || info.LogicalCount != 4 || info.PhysicalCount != 1 || info.CoresPerSocket != 2 || info.ThreadsPerCore != 2 {
+		t.Fatalf("probePlatformProcessorInfo() = %#v", info)
+	}
+	if got := probeProcessorModels(s); !reflect.DeepEqual(got, []string{"Pretty CPU"}) {
+		t.Fatalf("probeProcessorModels() = %#v, want Pretty CPU", got)
+	}
+	if cores, threads := probeProcessorTopology(s); cores != 2 || threads != 2 {
+		t.Fatalf("probeProcessorTopology() = %d, %d; want 2, 2", cores, threads)
+	}
+}
+
+func TestProcessorProbesUseSessionPlatformForLinux(t *testing.T) {
+	cpuinfo := strings.Join([]string{
+		"processor\t: 0",
+		"model name\t: Pretty CPU",
+		"cpu MHz\t\t: 1800.000",
+		"siblings\t: 4",
+		"cpu cores\t: 2",
+		"flags\t\t: fpu cx8 cmov mmx fxsr sse2 syscall lm cx16 lahf_lm popcnt sse4_1 sse4_2 ssse3 abm avx avx2 bmi1 bmi2 f16c fma movbe xsave",
+		"processor\t: 1",
+		"model name\t: Pretty CPU",
+	}, "\n")
+	s := NewSessionContext(context.Background())
+	s.host = &fakeHostOS{
+		platform: "linux",
+		files: map[string][]byte{
+			"/proc/cpuinfo": []byte(cpuinfo),
+		},
+		runOutputs: map[string]string{
+			fakeRunKey("uname", "-m"): "x86_64\n",
+		},
+	}
+
+	if got := probeProcessorSpeed(s); got != "1.80 GHz" {
+		t.Fatalf("probeProcessorSpeed() = %q, want 1.80 GHz", got)
+	}
+	if got := probeProcessorModels(s); !reflect.DeepEqual(got, []string{"Pretty CPU", "Pretty CPU"}) {
+		t.Fatalf("probeProcessorModels() = %#v, want two Pretty CPU entries", got)
+	}
+	if cores, threads := probeProcessorTopology(s); cores != 2 || threads != 2 {
+		t.Fatalf("probeProcessorTopology() = %d, %d; want 2, 2", cores, threads)
+	}
+	wantExtensions := []string{"x86_64", "x86_64-v1", "x86_64-v2", "x86_64-v3"}
+	if got := probeProcessorExtensions(s); !reflect.DeepEqual(got, wantExtensions) {
+		t.Fatalf("probeProcessorExtensions() = %#v, want %#v", got, wantExtensions)
+	}
+}
+
+func TestProbePlatformProcessorInfoUsesSessionPlatformForPlan9(t *testing.T) {
+	s := NewSessionContext(context.Background())
+	s.host = &fakeHostOS{
+		platform: "plan9",
+		files: map[string][]byte{
+			"/dev/sysstat": []byte("0 1 2\n\n1 2 3\n"),
+			"/dev/cputype": []byte("\n"),
+			"/dev/archctl": []byte(plan9Fixture(t, "archctl")),
+		},
+	}
+
+	got := probePlatformProcessorInfo(s)
+	want := processorInfo{
+		LogicalCount: 2,
+		Models:       []string{"Core 2/Xeon 3600", "Core 2/Xeon 3600"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("probePlatformProcessorInfo() = %#v, want %#v", got, want)
+	}
+}
+
+func TestProcessorsCoreFactsUsesSessionPlatformForISAFallback(t *testing.T) {
+	s := NewSessionContext(context.Background())
+	s.host = &fakeHostOS{
+		platform: "windows",
+		runOutputs: map[string]string{
+			fakeRunKey("uname", "-m"): "x86_64\n",
+			fakeRunKey("wmic", "cpu", "get", "Name,Architecture,NumberOfLogicalProcessors,NumberOfCores", "/value"): "Name=Pretty CPU\r\nArchitecture=10\r\nNumberOfLogicalProcessors=4\r\nNumberOfCores=2\r\n",
+		},
+	}
+
+	got := Collection(processorsCoreFacts(s))
+	processors, ok := got["processors"].(map[string]any)
+	if !ok {
+		t.Fatalf("processors facts = %#v, want map", got["processors"])
+	}
+	want := architectureName("windows", windowsHardwareFromGoArch(runtime.GOARCH))
+	if processors["isa"] != want {
+		t.Fatalf("processors.isa = %#v, want Windows-normalized fallback %#v", processors["isa"], want)
+	}
+}
+
 func TestCurrentProcessorInfoWiresGenericBSDSysctlOutput(t *testing.T) {
 	t.Parallel()
 
@@ -275,6 +489,15 @@ func TestCurrentProcessorInfoWiresDragonFlySysctlOutput(t *testing.T) {
 	}
 }
 
+func TestParseFreeBSDProcessorsRejectsInvalidValues(t *testing.T) {
+	t.Parallel()
+
+	got := parseFreeBSDProcessors("not-a-count\n", "Intel CPU\n", "not-a-speed\n")
+	if !reflect.DeepEqual(got, processorInfo{}) {
+		t.Fatalf("parseFreeBSDProcessors(invalid) = %#v, want empty processor info", got)
+	}
+}
+
 func TestCurrentProcessorInfoWiresIllumosPsrinfoOutput(t *testing.T) {
 	t.Parallel()
 
@@ -313,6 +536,27 @@ func TestCurrentProcessorInfoIllumosParsesCoreAndThreadCounts(t *testing.T) {
 	}
 }
 
+func TestParseIllumosProcessorsInfersCountsFromClockedModels(t *testing.T) {
+	t.Parallel()
+
+	got := parseIllumosProcessors(`
+  x86 (GenuineIntel 906E9 family 6 model 158 step 9 clock 3600 MHz)
+	Intel(r) Core(tm) i7-7700 CPU @ 3.60GHz
+`)
+	want := processorInfo{
+		ISA:            "x86",
+		SpeedHz:        3_600_000_000,
+		Models:         []string{"Intel(r) Core(tm) i7-7700 CPU @ 3.60GHz"},
+		LogicalCount:   1,
+		PhysicalCount:  1,
+		CoresPerSocket: 1,
+		ThreadsPerCore: 1,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("parseIllumosProcessors() = %#v, want %#v", got, want)
+	}
+}
+
 func TestCurrentProcessorISAUsesOpenBSDUnameProcessor(t *testing.T) {
 	got := currentProcessorISA(testSession, "openbsd", "amd64", func(name string, args ...string) string {
 		if name != "uname" || !reflect.DeepEqual(args, []string{"-p"}) {
@@ -323,6 +567,17 @@ func TestCurrentProcessorISAUsesOpenBSDUnameProcessor(t *testing.T) {
 
 	if got != "i386" {
 		t.Fatalf("currentProcessorISA(testSession, openbsd) = %q, want i386", got)
+	}
+}
+
+func TestCurrentProcessorISAFallsBackWhenUnameProcessorIsUnknown(t *testing.T) {
+	t.Parallel()
+
+	for _, output := range []string{"", "unknown\n"} {
+		got := currentProcessorISA(testSession, "linux", "x86_64", func(string, ...string) string { return output })
+		if got != "x86_64" {
+			t.Fatalf("currentProcessorISA(%q) = %q, want fallback", output, got)
+		}
 	}
 }
 
@@ -472,6 +727,20 @@ func TestParseLinuxProcessorSpeed(t *testing.T) {
 	}
 }
 
+func TestParseLinuxProcessorSpeedRejectsMissingInvalidAndZeroMHz(t *testing.T) {
+	t.Parallel()
+
+	for _, input := range []string{
+		"processor\t: 0\nmodel name\t: CPU\n",
+		"cpu MHz\t\t: not-a-number\n",
+		"cpu MHz\t\t: 0\n",
+	} {
+		if got := parseLinuxProcessorSpeed(input); got != "" {
+			t.Fatalf("parseLinuxProcessorSpeed(%q) = %q, want empty", input, got)
+		}
+	}
+}
+
 func TestParseLinuxProcessorModels(t *testing.T) {
 	input := "processor\t: 0\nmodel name\t: Intel(R) Core(TM) i7-4980HQ CPU @ 2.80GHz\n" +
 		"processor\t: 1\nmodel name\t: Intel(R) Core(TM) i7-4980HQ CPU @ 2.80GHz\n"
@@ -559,6 +828,124 @@ func TestCurrentLinuxProcessorPhysicalCountUsesHostSysfsWhenCPUInfoMissing(t *te
 	}
 }
 
+func TestCurrentLinuxProcessorPhysicalCountUsesHostCPUInfoFirst(t *testing.T) {
+	host := &fakeHostOS{
+		files: map[string][]byte{
+			"/proc/cpuinfo": []byte("processor: 0\nphysical id: 0\nprocessor: 1\nphysical id: 1\n"),
+		},
+		dirs: map[string][]os.DirEntry{
+			"/sys/devices/system/cpu": fakeDirEntries("cpu0", "cpu1"),
+		},
+	}
+
+	got := currentLinuxProcessorPhysicalCount("/proc/cpuinfo", "/sys/devices/system/cpu", host)
+	if got != 2 {
+		t.Fatalf("currentLinuxProcessorPhysicalCount() = %d, want cpuinfo physical count 2", got)
+	}
+	if len(host.readDirCalls) != 0 {
+		t.Fatalf("readDir calls = %#v, want none when cpuinfo has physical IDs", host.readDirCalls)
+	}
+}
+
+func TestLinuxProcessorPhysicalCountUsesCPUInfoPhysicalIDs(t *testing.T) {
+	t.Parallel()
+
+	cpuinfo := "processor\t: 0\nphysical id\t: 0\nprocessor\t: 1\nphysical id\t: 1\n"
+	got := linuxProcessorPhysicalCountWithReaders(cpuinfo, "/unused", nil, func(string) ([]os.DirEntry, error) {
+		t.Fatal("linuxProcessorPhysicalCountWithReaders() read sysfs despite cpuinfo physical IDs")
+		return nil, nil
+	})
+	if got != 2 {
+		t.Fatalf("linuxProcessorPhysicalCountWithReaders() = %d, want 2", got)
+	}
+}
+
+func TestLinuxProcessorPhysicalCountHandlesSysfsReadFailures(t *testing.T) {
+	t.Parallel()
+
+	if got := linuxProcessorPhysicalCountWithReaders("", "/sys/cpu", nil, func(string) ([]os.DirEntry, error) {
+		return nil, os.ErrNotExist
+	}); got != 0 {
+		t.Fatalf("linuxProcessorPhysicalCountWithReaders(readDir error) = %d, want 0", got)
+	}
+
+	got := linuxProcessorPhysicalCountWithReaders(
+		"",
+		"/sys/cpu",
+		func(string) ([]byte, error) { return nil, os.ErrPermission },
+		func(string) ([]os.DirEntry, error) { return fakeDirEntries("cpu0"), nil },
+	)
+	if got != 0 {
+		t.Fatalf("linuxProcessorPhysicalCountWithReaders(readFile error) = %d, want 0", got)
+	}
+}
+
+func TestLinuxProcessorPhysicalCountUsesInjectedReader(t *testing.T) {
+	sysCPU := t.TempDir()
+	if err := os.Mkdir(filepath.Join(sysCPU, "cpu0"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	readFile := func(path string) ([]byte, error) {
+		want := filepath.Join(sysCPU, "cpu0", "topology", "physical_package_id")
+		if path != want {
+			t.Fatalf("readFile(%q), want %q", path, want)
+		}
+		return []byte("7\n"), nil
+	}
+
+	if got := linuxProcessorPhysicalCount("", sysCPU, readFile); got != 1 {
+		t.Fatalf("linuxProcessorPhysicalCount() = %d, want 1", got)
+	}
+}
+
+func TestLinuxCPUEntryNameAcceptsOnlyNumberedCPUEntries(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		want bool
+	}{
+		{name: "cpu0", want: true},
+		{name: "cpu12", want: true},
+		{name: "cpu", want: false},
+		{name: "cpuindex", want: false},
+		{name: "node0", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := linuxCPUEntryName(tt.name); got != tt.want {
+				t.Fatalf("linuxCPUEntryName(%q) = %v, want %v", tt.name, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIllumosProcessorHelpersParseCountsAndClock(t *testing.T) {
+	t.Parallel()
+
+	line := "The physical processor has 2 cores and 4 virtual processors (0-3)"
+	if got := illumosVirtualProcessorCount(line); got != 4 {
+		t.Fatalf("illumosVirtualProcessorCount() = %d, want 4", got)
+	}
+	if got := illumosCoreCount(line); got != 2 {
+		t.Fatalf("illumosCoreCount() = %d, want 2", got)
+	}
+	if got := illumosClockMHz("x86 (GenuineIntel clock 3600 MHz)"); got != 3600 {
+		t.Fatalf("illumosClockMHz() = %d, want 3600", got)
+	}
+	for _, input := range []string{"not a processor line", "The physical processor has virtual processors", "x86 no clock"} {
+		if got := illumosVirtualProcessorCount(input); got != 0 {
+			t.Fatalf("illumosVirtualProcessorCount(%q) = %d, want 0", input, got)
+		}
+		if got := illumosCoreCount(input); got != 0 {
+			t.Fatalf("illumosCoreCount(%q) = %d, want 0", input, got)
+		}
+		if got := illumosClockMHz(input); got != 0 {
+			t.Fatalf("illumosClockMHz(%q) = %d, want 0", input, got)
+		}
+	}
+}
+
 func TestParseLinuxProcessorExtensions_derivesX86Levels(t *testing.T) {
 	input := "flags : fpu cx8 cmov mmx fxsr sse2 syscall lm cx16 lahf_lm popcnt sse4_1 sse4_2 ssse3 abm avx avx2 bmi1 bmi2 f16c fma movbe xsave\n"
 
@@ -566,5 +953,27 @@ func TestParseLinuxProcessorExtensions_derivesX86Levels(t *testing.T) {
 	want := []string{"x86_64", "x86_64-v1", "x86_64-v2", "x86_64-v3"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("parseLinuxProcessorExtensions() = %#v, want %#v", got, want)
+	}
+}
+
+func TestParseLinuxProcessorExtensionsHandlesFallbackAndV4(t *testing.T) {
+	t.Parallel()
+
+	if got := parseLinuxProcessorExtensions("flags : ignored\n", "arm64"); !reflect.DeepEqual(got, []string{"arm64"}) {
+		t.Fatalf("parseLinuxProcessorExtensions(non-x86) = %#v, want architecture only", got)
+	}
+
+	input := "vendor_id : GenuineIntel\nflags : fpu cx8 cmov mmx fxsr sse2 syscall lm cx16 lahf_lm popcnt sse4_1 sse4_2 ssse3 abm avx avx2 bmi1 bmi2 f16c fma movbe xsave avx512f avx512bw avx512cd avx512dq avx512vl\n"
+	got := parseLinuxProcessorExtensions(input, "x86_64")
+	want := []string{"x86_64", "x86_64-v1", "x86_64-v2", "x86_64-v3", "x86_64-v4"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("parseLinuxProcessorExtensions(v4) = %#v, want %#v", got, want)
+	}
+
+	if containsAll(wordsSet("fpu mmx"), []string{"fpu", "sse2"}) {
+		t.Fatal("containsAll() = true, want false when a required flag is missing")
+	}
+	if got := sortedProcessorExtensions(map[string]bool{"": true, "x86_64": true}); !reflect.DeepEqual(got, []string{"x86_64"}) {
+		t.Fatalf("sortedProcessorExtensions() = %#v, want empty extension omitted", got)
 	}
 }

@@ -64,6 +64,36 @@ func TestPathEntries_splitsAndDropsEmpty(t *testing.T) {
 	}
 }
 
+func TestRootedPathAndIsSymlinkHelpers(t *testing.T) {
+	if got, want := rootedPath("/", "var/cache"), "/var/cache"; got != want {
+		t.Fatalf("rootedPath(/) = %q, want %q", got, want)
+	}
+	root := t.TempDir()
+	if got, want := rootedPath(root, "var/cache"), filepath.Join(root, "var/cache"); got != want {
+		t.Fatalf("rootedPath(temp) = %q, want %q", got, want)
+	}
+
+	lstat := func(path string) (os.FileInfo, error) {
+		switch path {
+		case "/link":
+			return fakeFileInfo{name: "link", mode: os.ModeSymlink | 0o777}, nil
+		case "/regular":
+			return fakeFileInfo{name: "regular"}, nil
+		default:
+			return nil, os.ErrNotExist
+		}
+	}
+	if !isSymlink("/link", lstat) {
+		t.Fatal("isSymlink(/link) = false, want true")
+	}
+	if isSymlink("/regular", lstat) {
+		t.Fatal("isSymlink(/regular) = true, want false")
+	}
+	if isSymlink("/missing", lstat) {
+		t.Fatal("isSymlink(/missing) = true, want false")
+	}
+}
+
 func TestCoreFacts_includeFacterVersion(t *testing.T) {
 	collection := Collection(CoreFacts(testSession))
 

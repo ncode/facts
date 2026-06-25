@@ -5,7 +5,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -72,8 +71,12 @@ func ec2Facts(s *Session, client *ec2Client, virt virtualization) []ResolvedFact
 }
 
 func cloudProviderFact(s *Session, virt virtualization, ec2Metadata map[string]any) *ResolvedFact {
-	if runtime.GOOS == "linux" {
-		if !linuxAWSCloudProvider(virt.Name, ec2Metadata, os.Geteuid(), fileExecutable, s.commandOutput) {
+	return cloudProviderFactForPlatform(s.goos(), virt, ec2Metadata, os.Geteuid(), fileExecutable, s.commandOutput)
+}
+
+func cloudProviderFactForPlatform(goos string, virt virtualization, ec2Metadata map[string]any, euid int, executable func(string) bool, run func(string, ...string) string) *ResolvedFact {
+	if goos == "linux" {
+		if !linuxAWSCloudProvider(virt.Name, ec2Metadata, euid, executable, run) {
 			return nil
 		}
 		return &ResolvedFact{Name: "cloud.provider", Value: "aws"}

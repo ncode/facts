@@ -53,3 +53,16 @@ func TestStderrLogHandlerConcurrentHandle(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+func TestStderrLogHandlerAttrsAndGroupsDoNotRender(t *testing.T) {
+	var stderr bytes.Buffer
+	handler := &stderrLogHandler{stderr: &stderr, verbose: true}
+
+	grouped := handler.WithAttrs([]slog.Attr{slog.String("ignored", "value")}).
+		WithGroup("group")
+
+	slog.New(grouped).Info("hello", "also", "ignored")
+	if got, want := stderr.String(), "INFO Facts - hello\n"; got != want {
+		t.Fatalf("stderr = %q, want %q", got, want)
+	}
+}

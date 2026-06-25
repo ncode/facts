@@ -15,7 +15,10 @@ import (
 )
 
 func currentTimezone(s *Session, goos string) string {
-	zone := time.Now().Format("MST")
+	return currentTimezoneForZone(s, goos, time.Now().Format("MST"))
+}
+
+func currentTimezoneForZone(s *Session, goos, zone string) string {
 	if goos != "windows" {
 		return zone
 	}
@@ -44,14 +47,14 @@ func currentWindowsTimezone(goos, zone, apiCodepage string, registryCodepage fun
 }
 
 func currentWindowsAPICodepage(s *Session) string {
-	if runtime.GOOS != "windows" {
+	if s.goos() != "windows" {
 		return ""
 	}
 	return firstNumber(s.commandOutput("cmd", "/c", "chcp"))
 }
 
 func currentWindowsRegistryCodepage(s *Session) string {
-	if runtime.GOOS != "windows" {
+	if s.goos() != "windows" {
 		return ""
 	}
 	return parseWindowsACPRegistry(s.commandOutput("reg", "query", `HKLM\SYSTEM\CurrentControlSet\Control\Nls\CodePage`, "/v", "ACP"))

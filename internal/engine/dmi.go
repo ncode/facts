@@ -73,12 +73,16 @@ func dmiBIOSVendor(dmi map[string]any) string {
 }
 
 func currentFreeBSDDMIFacts(s *Session) []ResolvedFact {
-	if runtime.GOOS != "freebsd" {
+	return currentFreeBSDDMIFactsForPlatform(runtime.GOOS, s.commandOutput)
+}
+
+func currentFreeBSDDMIFactsForPlatform(goos string, run commandRunner) []ResolvedFact {
+	if goos != "freebsd" {
 		return nil
 	}
 	values := make(map[string]string, len(freeBSDDMIKeys))
 	for _, key := range freeBSDDMIKeys {
-		values[key] = s.commandOutput("/bin/kenv", key)
+		values[key] = run("/bin/kenv", key)
 	}
 	return freeBSDDMIFacts(values)
 }
@@ -87,53 +91,69 @@ func currentFreeBSDDMIFacts(s *Session) []ResolvedFact {
 // FreeBSD builder. kenv is PATH-resolved here (DragonFly ships it outside
 // FreeBSD's /bin/kenv path).
 func currentDragonFlyDMIFacts(s *Session) []ResolvedFact {
-	if runtime.GOOS != "dragonfly" {
+	return currentDragonFlyDMIFactsForPlatform(runtime.GOOS, s.commandOutput)
+}
+
+func currentDragonFlyDMIFactsForPlatform(goos string, run commandRunner) []ResolvedFact {
+	if goos != "dragonfly" {
 		return nil
 	}
 	values := make(map[string]string, len(freeBSDDMIKeys))
 	for _, key := range freeBSDDMIKeys {
-		values[key] = s.commandOutput("kenv", key)
+		values[key] = run("kenv", key)
 	}
 	if facts := freeBSDDMIFacts(values); len(facts) > 0 {
 		return facts
 	}
 	return dragonFlyDMIDecodeFacts(
-		s.commandOutput("/usr/local/sbin/dmidecode", "-t", "bios"),
-		s.commandOutput("/usr/local/sbin/dmidecode", "-t", "system"),
-		s.commandOutput("/usr/local/sbin/dmidecode", "-t", "chassis"),
+		run("/usr/local/sbin/dmidecode", "-t", "bios"),
+		run("/usr/local/sbin/dmidecode", "-t", "system"),
+		run("/usr/local/sbin/dmidecode", "-t", "chassis"),
 	)
 }
 
 func currentOpenBSDDMIFacts(s *Session) []ResolvedFact {
-	if runtime.GOOS != "openbsd" {
+	return currentOpenBSDDMIFactsForPlatform(runtime.GOOS, s.commandOutput)
+}
+
+func currentOpenBSDDMIFactsForPlatform(goos string, run commandRunner) []ResolvedFact {
+	if goos != "openbsd" {
 		return nil
 	}
 	values := make(map[string]string, len(openBSDDMIKeys))
 	for _, key := range openBSDDMIKeys {
-		values[key] = s.commandOutput("/sbin/sysctl", "-n", key)
+		values[key] = run("/sbin/sysctl", "-n", key)
 	}
 	return openBSDDMIFacts(values)
 }
 
 func currentNetBSDDMIFacts(s *Session) []ResolvedFact {
-	if runtime.GOOS != "netbsd" {
+	return currentNetBSDDMIFactsForPlatform(runtime.GOOS, s.commandOutput)
+}
+
+func currentNetBSDDMIFactsForPlatform(goos string, run commandRunner) []ResolvedFact {
+	if goos != "netbsd" {
 		return nil
 	}
 	values := make(map[string]string, len(netBSDDMIKeys))
 	for _, key := range netBSDDMIKeys {
-		values[key] = s.commandOutput("/sbin/sysctl", "-n", key)
+		values[key] = run("/sbin/sysctl", "-n", key)
 	}
 	return netBSDDMIFacts(values)
 }
 
 func currentIllumosDMIFacts(s *Session) []ResolvedFact {
-	if runtime.GOOS != "illumos" {
+	return currentIllumosDMIFactsForPlatform(runtime.GOOS, s.commandOutput)
+}
+
+func currentIllumosDMIFactsForPlatform(goos string, run commandRunner) []ResolvedFact {
+	if goos != "illumos" {
 		return nil
 	}
 	return illumosDMIFacts(
-		s.commandOutput("/usr/sbin/smbios", "-t", "SMB_TYPE_BIOS"),
-		s.commandOutput("/usr/sbin/smbios", "-t", "SMB_TYPE_SYSTEM"),
-		s.commandOutput("/usr/sbin/smbios", "-t", "SMB_TYPE_CHASSIS"),
+		run("/usr/sbin/smbios", "-t", "SMB_TYPE_BIOS"),
+		run("/usr/sbin/smbios", "-t", "SMB_TYPE_SYSTEM"),
+		run("/usr/sbin/smbios", "-t", "SMB_TYPE_CHASSIS"),
 	)
 }
 

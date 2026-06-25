@@ -3,7 +3,6 @@ package engine
 import (
 	"net"
 	"path"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -267,7 +266,7 @@ func plan9ProcessorsCoreFacts(info processorInfo, isa string) []ResolvedFact {
 }
 
 func plan9NetworkingCoreFacts(s *Session) []ResolvedFact {
-	return plan9NetworkingCoreFactsWithGlob(s, filepath.Glob)
+	return plan9NetworkingCoreFactsWithGlob(s, s.glob)
 }
 
 func plan9NetworkingCoreFactsWithGlob(s *Session, glob pathGlobber) []ResolvedFact {
@@ -300,9 +299,9 @@ func plan9UptimeCoreFacts(uptime uptimeInfo) []ResolvedFact {
 		return nil
 	}
 	return []ResolvedFact{
-		{Name: "system_uptime.days", Value: int(uptime.Duration.Hours()) / 24},
-		{Name: "system_uptime.hours", Value: int(uptime.Duration.Hours())},
-		{Name: "system_uptime.seconds", Value: int(uptime.Duration.Seconds())},
+		{Name: "system_uptime.days", Value: int64(uptime.Duration.Hours()) / 24},
+		{Name: "system_uptime.hours", Value: int64(uptime.Duration.Hours())},
+		{Name: "system_uptime.seconds", Value: int64(uptime.Duration.Seconds())},
 		{Name: "system_uptime.uptime", Value: uptimeString(uptime)},
 	}
 }

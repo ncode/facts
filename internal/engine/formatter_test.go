@@ -129,6 +129,64 @@ func TestBuildFormatterMachineFormatsIgnoreColorize(t *testing.T) {
 	}
 }
 
+func TestYAMLScalarFormatsInlineValues(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		value any
+		want  string
+	}{
+		{name: "nil", value: nil, want: `""`},
+		{name: "boolean string", value: "true", want: "'true'"},
+		{name: "plain string", value: "host-example", want: "host-example"},
+		{name: "quoted string", value: "needs space", want: `"needs space"`},
+		{name: "int", value: 42, want: "42"},
+		{name: "float", value: 3.5, want: "3.5"},
+		{name: "bool", value: true, want: "true"},
+		{name: "map", value: map[string]any{"b": 2, "a": "true"}, want: "{a: 'true', b: 2}"},
+		{name: "any slice", value: []any{"web", 2}, want: "[web, 2]"},
+		{name: "string slice", value: []string{"web", "db"}, want: "[web, db]"},
+		{name: "int slice", value: []int{1, 2}, want: "[1, 2]"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := yamlScalar(tt.value); got != tt.want {
+				t.Fatalf("yamlScalar(%#v) = %q, want %q", tt.value, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsPlainYAMLStringAcceptsOnlyRubySafeScalars(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		value string
+		want  bool
+	}{
+		{name: "empty", value: "", want: false},
+		{name: "word with dash underscore slash and space", value: "host_id-1 /rack", want: true},
+		{name: "colon would become mapping syntax", value: "fe80::1", want: false},
+		{name: "yaml true prefix", value: "TrueNAS", want: false},
+		{name: "lowercase off", value: "off", want: false},
+		{name: "contains unsupported punctuation", value: "hello.world", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := isPlainYAMLString(tt.value); got != tt.want {
+				t.Fatalf("isPlainYAMLString(%q) = %v, want %v", tt.value, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestFormatJSON_noUserQueryBuildsStructuredFacts(t *testing.T) {
 	facts := []ResolvedFact{
 		{Name: "os.name", Value: "Darwin"},
@@ -300,6 +358,18 @@ func TestFormatYAML_formatsNestedArrayValuesAsYAML(t *testing.T) {
 	}
 }
 
+func TestFormatYAML_formatsMultiKeyMapsInSequencesAsValidYAML(t *testing.T) {
+	facts := []ResolvedFact{
+		{Name: "nested", Value: []any{map[string]any{"b": 2, "a": "true"}}, UserQuery: "nested"},
+	}
+
+	got := FormatYAML(facts)
+	want := "nested:\n- {a: 'true', b: 2}\n"
+	if got != want {
+		t.Fatalf("FormatYAML() = %q, want %q", got, want)
+	}
+}
+
 func TestFormatYAML_quotesStringValuesThatYAMLWouldParseAsScalars(t *testing.T) {
 	facts := []ResolvedFact{
 		{Name: "feature.enabled", Value: "true"},
@@ -432,6 +502,27 @@ func TestFormatHOCON_singleNilQueryReturnsEmptyScalar(t *testing.T) {
 
 	if got := FormatHOCON(facts); got != "" {
 		t.Fatalf("FormatHOCON() = %q, want empty", got)
+	}
+}
+
+func TestFormatHOCON_singleQueriesRenderTypedSlicesAndGenericMaps(t *testing.T) {
+	tests := []struct {
+		name  string
+		value any
+		want  string
+	}{
+		{name: "string slice", value: []string{"web", "db"}, want: "[\"web\",\"db\"]"},
+		{name: "int slice", value: []int{2, 4}, want: "[2,4]"},
+		{name: "map", value: map[string]any{"role": "web", "ports": []int{80, 443}}, want: "{\n    ports=[80,443]\n    role=web\n}"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			facts := []ResolvedFact{{Name: "query", UserQuery: "query", Value: tt.value}}
+			if got := FormatHOCON(facts); got != tt.want {
+				t.Fatalf("FormatHOCON() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 
@@ -841,5 +932,35 @@ func TestValueForQueryRejectsInvalidArrayIndexes(t *testing.T) {
 				t.Fatalf("ValueForQuery() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestFormatterScalarRendering(t *testing.T) {
+	yamlCases := []struct {
+		name  string
+		value any
+		want  string
+	}{
+		{name: "nil", value: nil, want: `""`},
+		{name: "plain string", value: "hello", want: "hello"},
+		{name: "boolean-looking string", value: "true", want: "'true'"},
+		{name: "quoted string", value: "hello:world", want: `"hello:world"`},
+		{name: "int", value: 7, want: "7"},
+		{name: "float", value: 1.5, want: "1.5"},
+		{name: "bool", value: false, want: "false"},
+	}
+	for _, tt := range yamlCases {
+		t.Run("yaml/"+tt.name, func(t *testing.T) {
+			facts := []ResolvedFact{{Name: "value", UserQuery: "value", Value: tt.value}}
+			want := "value: " + tt.want + "\n"
+			if got := FormatYAML(facts); got != want {
+				t.Fatalf("FormatYAML(%#v) = %q, want %q", tt.value, got, want)
+			}
+		})
+	}
+
+	facts := []ResolvedFact{{Name: "values", UserQuery: "values", Value: []any{"hello", 7, true}}}
+	if got, want := FormatHOCON(facts), `["hello",7,true]`; got != want {
+		t.Fatalf("FormatHOCON() = %q, want %q", got, want)
 	}
 }

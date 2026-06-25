@@ -178,6 +178,114 @@ func TestNetworkingInterfacesWindowsLogsFailureLikeRubyResolver(t *testing.T) {
 	}
 }
 
+func TestNetworkingInterfacesForPlatformPlan9UsesSessionGlob(t *testing.T) {
+	t.Parallel()
+
+	s := NewSession()
+	s.host = &fakeHostOS{
+		files: map[string][]byte{
+			"/net/ipifc/0/status": []byte(plan9Fixture(t, "ipifc_status")),
+			"/net/ether0/addr":    []byte(plan9Fixture(t, "ether0_addr")),
+		},
+		globs: map[string][]string{
+			"/net/ipifc/*/status": {"/net/ipifc/0/status"},
+		},
+	}
+	calledSnapshotProvider := false
+
+	got := networkingInterfacesForPlatform(s, "plan9", func() ([]networkInterfaceSnapshot, error) {
+		calledSnapshotProvider = true
+		return nil, nil
+	})
+	if calledSnapshotProvider {
+		t.Fatal("networkingInterfacesForPlatform(plan9) called snapshot provider")
+	}
+	if _, ok := got["ether0"]; !ok {
+		t.Fatalf("networkingInterfacesForPlatform(plan9) = %#v, want ether0", got)
+	}
+}
+
+func TestNetworkingInterfacesForPlatformLinuxAddsSessionMetadata(t *testing.T) {
+	t.Parallel()
+
+	_, ipv4, err := net.ParseCIDR("10.16.122.20/24")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ipv4.IP = net.ParseIP("10.16.122.20")
+	_, ipv6, err := net.ParseCIDR("fe80::250:56ff:fe9a:8481/64")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ipv6.IP = net.ParseIP("fe80::250:56ff:fe9a:8481")
+
+	s := NewSession()
+	s.host = &fakeHostOS{
+		platform: "linux",
+		files: map[string][]byte{
+			"/run/systemd/netif/leases/7":   []byte("SERVER_ADDRESS=10.16.122.163\n"),
+			"/proc/net/if_inet6":            []byte("fe80000000000000025056fffe9a8481 02 40 20 80 eth0\n"),
+			"/sys/class/net/eth0/operstate": []byte("up\n"),
+			"/sys/class/net/eth0/speed":     []byte("1000\n"),
+			"/sys/class/net/eth0/duplex":    []byte("full\n"),
+		},
+		stats: map[string]os.FileInfo{
+			"/sys/class/net/eth0/device": fakeFileInfo{name: "device"},
+		},
+		runOutputs: map[string]string{
+			fakeRunKey("ip", "route", "show"):       "default via 10.16.122.1 dev eth0 src 10.16.122.21\n",
+			fakeRunKey("ip", "-6", "route", "show"): "default via fe80::1 dev eth0 src 2001:db8::10 metric 1024\n",
+		},
+	}
+
+	got := networkingInterfacesForPlatform(s, "linux", func() ([]networkInterfaceSnapshot, error) {
+		return []networkInterfaceSnapshot{{
+			Interface: net.Interface{
+				Name:         "eth0",
+				Index:        7,
+				MTU:          1500,
+				Flags:        net.FlagUp | net.FlagBroadcast | net.FlagMulticast,
+				HardwareAddr: net.HardwareAddr{0x00, 0x50, 0x56, 0x9a, 0xf8, 0x6b},
+			},
+			Addrs: []net.Addr{ipv4, ipv6},
+		}}, nil
+	})
+
+	eth0, ok := got["eth0"].(map[string]any)
+	if !ok {
+		t.Fatalf("eth0 = %#v, want map", got["eth0"])
+	}
+	for key, want := range map[string]any{
+		"dhcp":              "10.16.122.163",
+		"operational_state": "up",
+		"physical":          true,
+		"speed":             1000,
+		"duplex":            "full",
+	} {
+		if got := eth0[key]; got != want {
+			t.Fatalf("eth0.%s = %#v, want %#v", key, got, want)
+		}
+	}
+	bindings, _ := eth0["bindings"].([]any)
+	if !bindingsContainAddress(bindings, "10.16.122.21") {
+		t.Fatalf("eth0.bindings = %#v, want route source address", eth0["bindings"])
+	}
+	bindings6, _ := eth0["bindings6"].([]any)
+	if !bindingsContainAddress(bindings6, "2001:db8::10") {
+		t.Fatalf("eth0.bindings6 = %#v, want IPv6 route source address", eth0["bindings6"])
+	}
+	for _, raw := range bindings6 {
+		binding, _ := raw.(map[string]any)
+		if binding["address"] == "fe80::250:56ff:fe9a:8481" {
+			if got, want := binding["flags"], []string{"permanent"}; !reflect.DeepEqual(got, want) {
+				t.Fatalf("link-local IPv6 flags = %#v, want %#v", got, want)
+			}
+			return
+		}
+	}
+	t.Fatalf("eth0.bindings6 = %#v, want link-local binding with flags", eth0["bindings6"])
+}
+
 func TestNetworkingInterfacesWindowsReplacesInvalidFriendlyNameLikeRubyResolver(t *testing.T) {
 	t.Parallel()
 
@@ -455,6 +563,144 @@ func TestAddRouteSourceBindingsAddsMissingInterfaceAddresses(t *testing.T) {
 	}
 }
 
+func TestAddLinuxRouteSourceBindingsUsesIPv4AndIPv6Routes(t *testing.T) {
+	t.Parallel()
+
+	host := &fakeHostOS{runOutputs: map[string]string{
+		fakeRunKey("ip", "route", "show"):       "default via 10.16.112.1 dev ens192 src 10.16.125.217\n",
+		fakeRunKey("ip", "-6", "route", "show"): "2001:db8::/64 dev ens192 src 2001:db8::20\n",
+	}}
+	s := NewSession()
+	s.host = host
+	interfaces := map[string]any{
+		"ens192": map[string]any{
+			"bindings":  []any{map[string]any{"address": "10.16.112.10"}},
+			"bindings6": []any{map[string]any{"address": "2001:db8::10"}},
+		},
+	}
+
+	addLinuxRouteSourceBindings(s, interfaces)
+
+	if got := interfaces["ens192"].(map[string]any)["bindings"]; !reflect.DeepEqual(got, []any{
+		map[string]any{"address": "10.16.112.10"},
+		map[string]any{"address": "10.16.125.217"},
+	}) {
+		t.Fatalf("bindings = %#v", got)
+	}
+	if got := interfaces["ens192"].(map[string]any)["bindings6"]; !reflect.DeepEqual(got, []any{
+		map[string]any{"address": "2001:db8::10"},
+		map[string]any{"address": "2001:db8::20"},
+	}) {
+		t.Fatalf("bindings6 = %#v", got)
+	}
+}
+
+func TestWindowsFQDNCombinesHostnameAndDomainLikeRubyResolver(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		hostname string
+		domain   string
+		want     string
+	}{
+		{name: "empty hostname", domain: "example.test", want: ""},
+		{name: "no domain", hostname: "host", want: "host"},
+		{name: "already fqdn", hostname: "host.example.test", domain: "ignored.test", want: "host.example.test"},
+		{name: "short hostname and domain", hostname: "host", domain: "example.test", want: "host.example.test"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := windowsFQDN(tt.hostname, tt.domain); got != tt.want {
+				t.Fatalf("windowsFQDN(%q, %q) = %q, want %q", tt.hostname, tt.domain, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestWindowsIPConfigAdapterNameParsesOnlyAdapterHeaders(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		header string
+		want   string
+	}{
+		{header: "Ethernet adapter Ethernet0:", want: "Ethernet0"},
+		{header: "Wireless LAN adapter Wi-Fi:", want: "Wi-Fi"},
+		{header: "Tunnel adapter isatap.example.test:", want: "isatap.example.test"},
+		{header: "Connection-specific DNS Suffix  . : example.test", want: ""},
+		{header: "Ethernet:", want: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.header, func(t *testing.T) {
+			if got := windowsIPConfigAdapterName(tt.header); got != tt.want {
+				t.Fatalf("windowsIPConfigAdapterName(%q) = %q, want %q", tt.header, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseWindowsRegistryStringValue(t *testing.T) {
+	t.Parallel()
+
+	input := strings.Join([]string{
+		`HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters`,
+		"    Domain    REG_SZ    example.test",
+		"    SearchList    REG_SZ",
+		"    Hostname    REG_DWORD    0x1",
+	}, "\n")
+
+	tests := []struct {
+		name   string
+		key    string
+		want   string
+		wantOK bool
+	}{
+		{name: "value present", key: "Domain", want: "example.test", wantOK: true},
+		{name: "empty REG_SZ value is present", key: "SearchList", want: "", wantOK: true},
+		{name: "wrong registry type", key: "Hostname", want: "", wantOK: false},
+		{name: "missing key", key: "DhcpDomain", want: "", wantOK: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := parseWindowsRegistryStringValue(input, tt.key)
+			if got != tt.want || ok != tt.wantOK {
+				t.Fatalf("parseWindowsRegistryStringValue(%q) = %q, %v; want %q, %v", tt.key, got, ok, tt.want, tt.wantOK)
+			}
+		})
+	}
+}
+
+func TestIgnoredIPAddressFiltersNonRoutableAddresses(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		address string
+		want    bool
+	}{
+		{address: "", want: true},
+		{address: "not-an-ip", want: true},
+		{address: "127.0.0.1", want: true},
+		{address: "::1", want: true},
+		{address: "169.254.10.20", want: true},
+		{address: "fe80::1", want: true},
+		{address: "fc00::1", want: true},
+		{address: "192.0.2.10", want: false},
+		{address: "2001:db8::1", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.address, func(t *testing.T) {
+			if got := ignoredIPAddress(tt.address); got != tt.want {
+				t.Fatalf("ignoredIPAddress(%q) = %v, want %v", tt.address, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestParseLinuxIfInet6Flags_matchesRubyIfInet6(t *testing.T) {
 	t.Parallel()
 
@@ -489,6 +735,20 @@ func TestParseLinuxIfInet6Flags_matchesRubyIfInet6(t *testing.T) {
 	}
 }
 
+func TestParseLinuxIfInet6FlagsSkipsMalformedRows(t *testing.T) {
+	t.Parallel()
+
+	input := strings.Join([]string{
+		"too few fields",
+		"not-32-hex 02 40 20 80 eth0",
+		"20010db8000000000000000000000001 02 40 20 not-hex eth0",
+		"20010db8000000000000000000000002 02 40 20 00 eth0",
+	}, "\n")
+	if got := parseLinuxIfInet6Flags(input); len(got) != 0 {
+		t.Fatalf("parseLinuxIfInet6Flags(malformed) = %#v, want empty", got)
+	}
+}
+
 func TestAddLinuxIfInet6FlagsToBindings(t *testing.T) {
 	t.Parallel()
 
@@ -505,6 +765,37 @@ func TestAddLinuxIfInet6FlagsToBindings(t *testing.T) {
 	binding := interfaces["ens160"].(map[string]any)["bindings6"].([]any)[0].(map[string]any)
 	if got, want := binding["flags"], []string{"permanent"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("binding flags = %#v, want %#v", got, want)
+	}
+}
+
+func TestAddLinuxIfInet6FlagsIgnoresMalformedInterfacesAndBindings(t *testing.T) {
+	t.Parallel()
+
+	interfaces := map[string]any{
+		"not-map":       "ignored",
+		"no-bindings":   map[string]any{"mac": "00:00:5e:00:53:01"},
+		"bad-bindings":  map[string]any{"bindings6": "ignored"},
+		"mixed-binding": map[string]any{"bindings6": []any{"ignored", map[string]any{}, map[string]any{"address": "2001:db8::10"}}},
+	}
+	flags := map[string]map[string][]string{
+		"missing":       {"2001:db8::10": {"permanent"}},
+		"not-map":       {"2001:db8::10": {"permanent"}},
+		"no-bindings":   {"2001:db8::10": {"permanent"}},
+		"bad-bindings":  {"2001:db8::10": {"permanent"}},
+		"mixed-binding": {"2001:db8::20": {"temporary"}},
+	}
+
+	addLinuxIfInet6Flags(interfaces, flags)
+
+	bindings := interfaces["mixed-binding"].(map[string]any)["bindings6"].([]any)
+	for _, raw := range bindings {
+		binding, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		if _, ok := binding["flags"]; ok {
+			t.Fatalf("addLinuxIfInet6Flags() added flags to malformed or non-matching binding %#v", binding)
+		}
 	}
 }
 
@@ -1033,6 +1324,92 @@ lo0: flags=8049<UP,LOOPBACK,RUNNING,MULTICAST> metric 0 mtu 16384
 	groups: lo
 `
 
+func TestDragonFlyIPv4MaskParsesHexAndDottedMasks(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		value string
+		want  string
+	}{
+		{value: "", want: ""},
+		{value: "0xffffff00", want: "255.255.255.0"},
+		{value: "255.255.0.0", want: "255.255.0.0"},
+		{value: "not-a-mask", want: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.value, func(t *testing.T) {
+			got := netmaskString(dragonFlyIPv4Mask(tt.value))
+			if got != tt.want {
+				t.Fatalf("dragonFlyIPv4Mask(%q) = %q, want %q", tt.value, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDragonFlyIPv4BindingBuildsNetworkFromOptionalMask(t *testing.T) {
+	t.Parallel()
+
+	binding, ok := dragonFlyIPv4Binding([]string{"inet", "10.0.2.15", "netmask", "0xffffff00", "broadcast", "10.0.2.255"})
+	if !ok {
+		t.Fatal("dragonFlyIPv4Binding(valid) ok = false, want true")
+	}
+	if binding["address"] != "10.0.2.15" || binding["netmask"] != "255.255.255.0" || binding["network"] != "10.0.2.0" {
+		t.Fatalf("dragonFlyIPv4Binding(valid) = %#v", binding)
+	}
+
+	binding, ok = dragonFlyIPv4Binding([]string{"inet", "10.0.2.15"})
+	if !ok {
+		t.Fatal("dragonFlyIPv4Binding(no mask) ok = false, want true")
+	}
+	if _, exists := binding["netmask"]; exists {
+		t.Fatalf("dragonFlyIPv4Binding(no mask) = %#v, want no netmask", binding)
+	}
+	if _, exists := binding["network"]; exists {
+		t.Fatalf("dragonFlyIPv4Binding(no mask) = %#v, want no network", binding)
+	}
+	if binding, ok := dragonFlyIPv4Binding([]string{"inet", "not-an-ip"}); ok || binding != nil {
+		t.Fatalf("dragonFlyIPv4Binding(invalid) = %#v, %v; want nil, false", binding, ok)
+	}
+}
+
+func TestDragonFlyIPv6BindingBuildsNetworkFromOptionalPrefix(t *testing.T) {
+	t.Parallel()
+
+	binding, ok := dragonFlyIPv6Binding([]string{"inet6", "fe80::1%vtnet0", "prefixlen", "64"})
+	if !ok {
+		t.Fatal("dragonFlyIPv6Binding(valid) ok = false, want true")
+	}
+	for key, want := range map[string]any{
+		"address": "fe80::1",
+		"netmask": "ffff:ffff:ffff:ffff::",
+		"network": "fe80::",
+		"scope6":  "link",
+	} {
+		if binding[key] != want {
+			t.Fatalf("dragonFlyIPv6Binding(valid)[%s] = %#v, want %#v", key, binding[key], want)
+		}
+	}
+
+	binding, ok = dragonFlyIPv6Binding([]string{"inet6", "2001:db8::1", "prefixlen", "invalid"})
+	if !ok {
+		t.Fatal("dragonFlyIPv6Binding(invalid prefix) ok = false, want true")
+	}
+	if _, exists := binding["netmask"]; exists {
+		t.Fatalf("dragonFlyIPv6Binding(invalid prefix) = %#v, want no netmask", binding)
+	}
+	if _, exists := binding["network"]; exists {
+		t.Fatalf("dragonFlyIPv6Binding(invalid prefix) = %#v, want no network", binding)
+	}
+	if binding["scope6"] != "global" {
+		t.Fatalf("dragonFlyIPv6Binding(invalid prefix) scope6 = %#v, want global", binding["scope6"])
+	}
+
+	if binding, ok := dragonFlyIPv6Binding([]string{"inet6", "10.0.2.15"}); ok || binding != nil {
+		t.Fatalf("dragonFlyIPv6Binding(IPv4) = %#v, %v; want nil, false", binding, ok)
+	}
+}
+
 func TestNetworkingInterfacesForPlatformDragonFlyFallsBackToIfconfigWhenGoHasNoInterfaces(t *testing.T) {
 	t.Parallel()
 
@@ -1337,6 +1714,350 @@ func TestLinuxDHCPServerReadsDHClientLeaseForInterface(t *testing.T) {
 	}
 }
 
+func TestLinuxDHCPCDDHCPServer(t *testing.T) {
+	t.Parallel()
+
+	content := strings.Join([]string{
+		"interface eth0",
+		"static ip_address=192.0.2.10/24",
+		"dhcp_server_identifier='10.32.10.163'",
+	}, "\n")
+	if got, want := linuxDHCPCDDHCPServer(content), "10.32.10.163"; got != want {
+		t.Fatalf("linuxDHCPCDDHCPServer() = %q, want %q", got, want)
+	}
+	if got := linuxDHCPCDDHCPServer("interface eth0\nstatic routers=10.32.10.1\n"); got != "" {
+		t.Fatalf("linuxDHCPCDDHCPServer(no server) = %q, want empty", got)
+	}
+}
+
+func TestLinuxDHCPServerFromLeaseDirReadsMatchingLease(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "00-commented.lease"), `lease {
+  # interface "eth0";
+  option dhcp-server-identifier 10.66.66.66;
+}`)
+	writeFile(t, filepath.Join(dir, "dhclient.leases"), `lease {
+  interface "eth0-backup";
+  option dhcp-server-identifier 10.99.99.98;
+}
+lease {
+  interface "eth0";
+  option dhcp-server-identifier 10.32.10.163;
+}
+lease {
+  interface "eth0.100";
+  option dhcp-server-identifier 10.99.99.97;
+}`)
+	writeFile(t, filepath.Join(dir, "dhclient.en1.lease"), `lease {
+  interface "en1";
+  option dhcp-server-identifier 10.99.99.99;
+}`)
+	writeFile(t, filepath.Join(dir, "not-a-lease.txt"), `SERVER_ADDRESS=192.0.2.1`)
+
+	if got, want := linuxDHCPServerFromLeaseDir(dir, "eth0"), "10.32.10.163"; got != want {
+		t.Fatalf("linuxDHCPServerFromLeaseDir() = %q, want %q", got, want)
+	}
+	if got, want := linuxDHCPServerFromLeaseDir(dir, "eth0-backup"), "10.99.99.98"; got != want {
+		t.Fatalf("linuxDHCPServerFromLeaseDir(eth0-backup) = %q, want %q", got, want)
+	}
+}
+
+func TestLinuxDHCPServerFromLeaseDirUsesFilenameFallbackWhenInterfaceValueMalformed(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "dhclient.eth0.lease"), `lease {
+  interface "broken
+  option host-name "router";
+  option dhcp-server-identifier 10.32.10.163;
+}`)
+
+	if got, want := linuxDHCPServerFromLeaseDir(dir, "eth0"), "10.32.10.163"; got != want {
+		t.Fatalf("linuxDHCPServerFromLeaseDir() = %q, want filename fallback server %q", got, want)
+	}
+}
+
+func TestLinuxDHCPServerFromLeaseDirDoesNotUseFilenameFallbackForUnrelatedExplicitInterface(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "dhclient.eth0.lease"), `lease {
+  interface "eth1";
+  option dhcp-server-identifier 10.99.99.99;
+}`)
+
+	if got := linuxDHCPServerFromLeaseDir(dir, "eth0"); got != "" {
+		t.Fatalf("linuxDHCPServerFromLeaseDir() = %q, want empty for explicit non-matching interface", got)
+	}
+}
+
+func TestLinuxDHCPServerFromLeaseDirStopsAtMatchingLeaseWithoutServer(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "dhclient.eth0.lease"), `lease {
+  interface "eth0";
+  option host-name "dhcp-server-identifier 10.88.88.88";
+  # option dhcp-server-identifier 10.99.99.99;
+}`)
+	writeFile(t, filepath.Join(dir, "zz-dhclient.eth0.lease"), `lease {
+  interface "eth0";
+  option dhcp-server-identifier 10.32.10.163;
+}`)
+
+	if got := linuxDHCPServerFromLeaseDir(dir, "eth0"); got != "" {
+		t.Fatalf("linuxDHCPServerFromLeaseDir() = %q, want empty latest matching lease server", got)
+	}
+}
+
+func TestLinuxDHClientDHCPServerForInterfaceFallsBackWhenInterfaceIsOutsideLeaseBlock(t *testing.T) {
+	t.Parallel()
+
+	content := `interface "eth0";
+lease {
+  option dhcp-server-identifier 10.32.10.163;
+}`
+
+	got, ok := linuxDHClientDHCPServerForInterface(content, "eth0")
+	if !ok {
+		t.Fatal("linuxDHClientDHCPServerForInterface() ok = false, want true")
+	}
+	if got != "10.32.10.163" {
+		t.Fatalf("linuxDHClientDHCPServerForInterface() = %q, want 10.32.10.163", got)
+	}
+
+	content = `interface "eth0";
+lease {
+  option dhcp-server-identifier 10.32.10.163;
+}
+lease {
+  interface "eth1";
+  option dhcp-server-identifier 10.99.99.99;
+}`
+	got, ok = linuxDHClientDHCPServerForInterface(content, "eth0")
+	if !ok {
+		t.Fatal("linuxDHClientDHCPServerForInterface(mixed) ok = false, want true")
+	}
+	if got != "" {
+		t.Fatalf("linuxDHClientDHCPServerForInterface(mixed) = %q, want empty ambiguous mixed lease", got)
+	}
+
+	content = `interface "eth0";
+lease {
+  option dhcp-server-identifier 10.32.10.163;
+}
+lease {
+  option dhcp-server-identifier 10.99.99.99;
+}`
+	got, ok = linuxDHClientDHCPServerForInterface(content, "eth0")
+	if !ok {
+		t.Fatal("linuxDHClientDHCPServerForInterface(multiple unqualified) ok = false, want true")
+	}
+	if got != "10.99.99.99" {
+		t.Fatalf("linuxDHClientDHCPServerForInterface(multiple unqualified) = %q, want latest matching lease", got)
+	}
+}
+
+func TestLinuxDHClientDHCPServerForInterfaceIgnoresCommentAndQuotedBraces(t *testing.T) {
+	t.Parallel()
+
+	content := `# lease { ignored }
+lease {
+  # } ignored comment brace
+  option host-name "edge-}router";
+  interface "eth0";
+  option dhcp-server-identifier 10.32.10.163;
+}
+lease {
+  interface "eth1";
+  option dhcp-server-identifier 10.99.99.99;
+}`
+
+	got, ok := linuxDHClientDHCPServerForInterface(content, "eth0")
+	if !ok {
+		t.Fatal("linuxDHClientDHCPServerForInterface() ok = false, want true")
+	}
+	if got != "10.32.10.163" {
+		t.Fatalf("linuxDHClientDHCPServerForInterface() = %q, want 10.32.10.163", got)
+	}
+}
+
+func TestLinuxDHClientDHCPServerForInterfaceSkipsHeaderAndInterfaceComments(t *testing.T) {
+	t.Parallel()
+
+	content := `lease # dhclient permits comments in whitespace
+{
+  interface # comment before value
+  "eth0";
+  option dhcp-server-identifier 10.32.10.163;
+}
+lease # another header comment
+{
+  interface "eth1";
+  option dhcp-server-identifier 10.99.99.99;
+}`
+
+	got, ok := linuxDHClientDHCPServerForInterface(content, "eth0")
+	if !ok {
+		t.Fatal("linuxDHClientDHCPServerForInterface() ok = false, want true")
+	}
+	if got != "10.32.10.163" {
+		t.Fatalf("linuxDHClientDHCPServerForInterface() = %q, want 10.32.10.163", got)
+	}
+	if blocks := linuxDHClientLeaseBlocks(content); len(blocks) != 2 {
+		t.Fatalf("linuxDHClientLeaseBlocks() found %d blocks, want 2", len(blocks))
+	}
+}
+
+func TestLinuxDHClientDHCPServerForInterfaceMatchesInlineInterfaceStatement(t *testing.T) {
+	t.Parallel()
+
+	content := `lease { interface "eth1"; option dhcp-server-identifier 10.99.99.99; }
+lease { interface "eth0"; option dhcp-server-identifier 10.32.10.163; }`
+
+	got, ok := linuxDHClientDHCPServerForInterface(content, "eth0")
+	if !ok {
+		t.Fatal("linuxDHClientDHCPServerForInterface() ok = false, want true")
+	}
+	if got != "10.32.10.163" {
+		t.Fatalf("linuxDHClientDHCPServerForInterface() = %q, want 10.32.10.163", got)
+	}
+}
+
+func TestLinuxDHClientDHCPServerForInterfaceLatestMatchingLeaseWithoutServerWins(t *testing.T) {
+	t.Parallel()
+
+	content := `lease {
+  interface "eth0";
+  option dhcp-server-identifier 10.32.10.163;
+}
+lease {
+  interface "eth0";
+  option host-name "dhcp-server-identifier 10.88.88.88";
+  # option dhcp-server-identifier 10.99.99.99;
+}`
+
+	got, ok := linuxDHClientDHCPServerForInterface(content, "eth0")
+	if !ok {
+		t.Fatal("linuxDHClientDHCPServerForInterface() ok = false, want true")
+	}
+	if got != "" {
+		t.Fatalf("linuxDHClientDHCPServerForInterface() = %q, want empty latest matching lease server", got)
+	}
+}
+
+func TestLinuxDHClientDHCPServerForInterfaceResyncsAfterMalformedLeaseBlock(t *testing.T) {
+	t.Parallel()
+
+	content := `lease {
+  interface "eth0";
+  option dhcp-server-identifier 10.32.10.163;
+lease {
+  interface "eth1";
+  option dhcp-server-identifier 10.99.99.99;
+}`
+
+	got, ok := linuxDHClientDHCPServerForInterface(content, "eth0")
+	if !ok {
+		t.Fatal("linuxDHClientDHCPServerForInterface() ok = false, want true")
+	}
+	if got != "" {
+		t.Fatalf("linuxDHClientDHCPServerForInterface() = %q, want empty when only later valid block belongs to eth1", got)
+	}
+
+	blocks := linuxDHClientLeaseBlocks(content)
+	if len(blocks) != 1 || !dhclientContentMatchesInterface(blocks[0], "eth1") {
+		t.Fatalf("linuxDHClientLeaseBlocks() = %#v, want resynced eth1 block", blocks)
+	}
+}
+
+func TestLinuxDHClientLeaseBlocksResyncsAcrossRepeatedMalformedBlocks(t *testing.T) {
+	t.Parallel()
+
+	var content strings.Builder
+	for i := 0; i < 128; i++ {
+		content.WriteString("lease {\n")
+		content.WriteString("  interface \"stale\";\n")
+	}
+	content.WriteString(`lease {
+  interface "eth0";
+  option dhcp-server-identifier 10.32.10.163;
+}`)
+
+	blocks := linuxDHClientLeaseBlocks(content.String())
+	if len(blocks) != 1 || !dhclientContentMatchesInterface(blocks[0], "eth0") {
+		t.Fatalf("linuxDHClientLeaseBlocks() = %#v, want final eth0 block", blocks)
+	}
+}
+
+func TestLinuxDHClientDHCPServerForInterfaceResyncsAfterUnterminatedQuotedString(t *testing.T) {
+	t.Parallel()
+
+	content := `lease {
+  interface "eth0";
+  option host-name "unterminated
+lease {
+  interface "eth1";
+  option dhcp-server-identifier 10.99.99.99;
+}`
+
+	got, ok := linuxDHClientDHCPServerForInterface(content, "eth0")
+	if !ok {
+		t.Fatal("linuxDHClientDHCPServerForInterface() ok = false, want true")
+	}
+	if got != "" {
+		t.Fatalf("linuxDHClientDHCPServerForInterface() = %q, want empty when only later valid block belongs to eth1", got)
+	}
+
+	blocks := linuxDHClientLeaseBlocks(content)
+	if len(blocks) != 1 || !dhclientContentMatchesInterface(blocks[0], "eth1") {
+		t.Fatalf("linuxDHClientLeaseBlocks() = %#v, want resynced eth1 block", blocks)
+	}
+}
+
+func TestDHClientScannerIgnoresInterfaceTokensInCommentsAndStrings(t *testing.T) {
+	t.Parallel()
+
+	content := `# interface "commented0";
+lease {
+  option host-name "interface \"quoted0\"";
+  interface "eth0";
+}`
+
+	got := dhclientInterfaceNames(content)
+	want := []string{"eth0"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("dhclientInterfaceNames(%q) = %#v, want %#v", content, got, want)
+	}
+}
+
+func TestDHClientScannerHandlesMalformedBlocksAndQuotedStrings(t *testing.T) {
+	t.Parallel()
+
+	if got := linuxDHClientLeaseBlocks(`lease { interface "eth0";`); len(got) != 0 {
+		t.Fatalf("linuxDHClientLeaseBlocks(unclosed) = %#v, want empty", got)
+	}
+	if got := linuxDHClientLeaseBlocks(`release { interface "eth0"; }`); len(got) != 0 {
+		t.Fatalf("linuxDHClientLeaseBlocks(release keyword) = %#v, want empty", got)
+	}
+	if value, next, ok := dhclientQuotedStringValue(`not quoted`, 0); ok || value != "" || next != 0 {
+		t.Fatalf("dhclientQuotedStringValue(unquoted) = %q, %d, %v; want empty, 0, false", value, next, ok)
+	}
+	if value, _, ok := dhclientQuotedStringValue(`"eth\"0"`, 0); !ok || value != `eth"0` {
+		t.Fatalf("dhclientQuotedStringValue(escaped) = %q, %v; want eth\"0, true", value, ok)
+	}
+	if value, _, ok := dhclientQuotedStringValue(`"unterminated`, 0); ok || value != "" {
+		t.Fatalf("dhclientQuotedStringValue(unterminated) = %q, %v; want empty, false", value, ok)
+	}
+	for _, input := range []string{"\"eth\n0\"", "\"eth\\\n0\""} {
+		if value, _, ok := dhclientQuotedStringValue(input, 0); ok || value != "" {
+			t.Fatalf("dhclientQuotedStringValue(%q) = %q, %v; want empty, false", input, value, ok)
+		}
+	}
+}
+
 func TestLinuxDHClientDHCPServerUsesLastLeaseServer(t *testing.T) {
 	t.Parallel()
 
@@ -1367,6 +2088,36 @@ SERVER_ADDRESS=35.32.82.9
 
 	if got, want := linuxDHCPServerFromRoot(testSession, root, "lo", 1), "35.32.82.9"; got != want {
 		t.Fatalf("linuxDHCPServerFromRoot(testSession) = %q, want %q", got, want)
+	}
+}
+
+func TestAddLinuxDHCPServersFromSnapshotsAddsInterfaceDHCP(t *testing.T) {
+	t.Parallel()
+
+	host := &fakeHostOS{
+		files: map[string][]byte{
+			"/run/systemd/netif/leases/7": []byte("SERVER_ADDRESS=10.16.122.163\n"),
+			"/run/systemd/netif/leases/8": []byte("SERVER_ADDRESS=10.16.123.163\n"),
+		},
+	}
+	s := NewSession()
+	s.host = host
+	values := map[string]any{
+		"eth0": map[string]any{"bindings": []any{map[string]any{"address": "10.16.122.20"}}},
+		"eth1": map[string]any{"bindings": []any{map[string]any{"address": "10.16.123.20"}}},
+	}
+	snapshots := []networkInterfaceSnapshot{
+		{Interface: net.Interface{Name: "eth1", Index: 8}},
+		{Interface: net.Interface{Name: "eth0", Index: 7}},
+	}
+
+	addLinuxDHCPServersFromSnapshots(s, values, snapshots)
+
+	if got, want := values["eth0"].(map[string]any)["dhcp"], "10.16.122.163"; got != want {
+		t.Fatalf("eth0 dhcp = %#v, want %q", got, want)
+	}
+	if got, want := values["eth1"].(map[string]any)["dhcp"], "10.16.123.163"; got != want {
+		t.Fatalf("eth1 dhcp = %#v, want %q", got, want)
 	}
 }
 
@@ -1451,6 +2202,60 @@ func TestPrimaryIPv6BindingReturnsMatchingBinding(t *testing.T) {
 	}
 }
 
+func TestPrimaryIPv6BindingReturnsNilForEmptyMalformedOrMissingBinding(t *testing.T) {
+	t.Parallel()
+
+	interfaces := map[string]any{
+		"bad":     "ignored",
+		"no-list": map[string]any{"bindings6": "ignored"},
+		"en0": map[string]any{
+			"bindings6": []any{"ignored", map[string]any{"address": "2001:db8::10"}},
+		},
+	}
+	for _, primary := range []string{"", "2001:db8::20"} {
+		if got := primaryIPv6Binding(interfaces, primary); got != nil {
+			t.Fatalf("primaryIPv6Binding(%q) = %#v, want nil", primary, got)
+		}
+	}
+}
+
+func TestNetworkAddressReturnsMaskedAddress(t *testing.T) {
+	t.Parallel()
+
+	ip := &net.IPNet{IP: net.ParseIP("192.0.2.42"), Mask: net.CIDRMask(24, 32)}
+	if got := networkAddress(ip); got != "192.0.2.0" {
+		t.Fatalf("networkAddress(IPv4) = %q, want 192.0.2.0", got)
+	}
+	ip = &net.IPNet{IP: net.ParseIP("2001:db8::42"), Mask: net.CIDRMask(64, 128)}
+	if got := networkAddress(ip); got != "2001:db8::" {
+		t.Fatalf("networkAddress(IPv6) = %q, want 2001:db8::", got)
+	}
+	if got := networkAddress(nil); got != "" {
+		t.Fatalf("networkAddress(nil) = %q, want empty", got)
+	}
+}
+
+func TestParseInterfaceAddrAcceptsIPNetAndIPAddrOnly(t *testing.T) {
+	t.Parallel()
+
+	ipNet := &net.IPNet{IP: net.ParseIP("192.0.2.10"), Mask: net.CIDRMask(24, 32)}
+	ip, parsedNet, ok := parseInterfaceAddr(ipNet)
+	if !ok || !ip.Equal(ipNet.IP) || parsedNet == nil || !parsedNet.IP.Equal(ipNet.IP) || !reflect.DeepEqual(parsedNet.Mask, ipNet.Mask) {
+		t.Fatalf("parseInterfaceAddr(IPNet) = %v, %#v, %v; want %v, equivalent net, true", ip, parsedNet, ok, ipNet.IP)
+	}
+
+	ipAddr := &net.IPAddr{IP: net.ParseIP("2001:db8::1")}
+	ip, parsedNet, ok = parseInterfaceAddr(ipAddr)
+	if !ok || !ip.Equal(ipAddr.IP) || parsedNet != nil {
+		t.Fatalf("parseInterfaceAddr(IPAddr) = %v, %#v, %v; want %v, nil, true", ip, parsedNet, ok, ipAddr.IP)
+	}
+
+	ip, parsedNet, ok = parseInterfaceAddr(fakeAddr("192.0.2.10"))
+	if ok || ip != nil || parsedNet != nil {
+		t.Fatalf("parseInterfaceAddr(fakeAddr) = %v, %#v, %v; want nil, nil, false", ip, parsedNet, ok)
+	}
+}
+
 func TestPrimaryIPv6ScopeReturnsBindingScope(t *testing.T) {
 	t.Parallel()
 
@@ -1464,6 +2269,33 @@ func TestPrimaryIPv6ScopeReturnsBindingScope(t *testing.T) {
 
 	if got := primaryIPv6Scope(interfaces, "fe80::250:56ff:fe9a:8481"); got != "link" {
 		t.Fatalf("primaryIPv6Scope() = %q, want link", got)
+	}
+}
+
+func TestPrimaryIPv6ScopeDefaultsToGlobalForRoutableAddressWithoutScope(t *testing.T) {
+	t.Parallel()
+
+	interfaces := map[string]any{
+		"en0": map[string]any{
+			"bindings6": []any{
+				map[string]any{"address": "2001:db8::10"},
+			},
+		},
+	}
+
+	if binding := primaryIPv6Binding(interfaces, "2001:db8::10"); binding == nil {
+		t.Fatal("primaryIPv6Binding() = nil; test fixture must contain the primary address")
+	}
+	if got := primaryIPv6Scope(interfaces, "2001:db8::10"); got != "global" {
+		t.Fatalf("primaryIPv6Scope() = %q, want global", got)
+	}
+}
+
+func TestPrimaryIPv6ScopeOmitsEmptyPrimaryAddress(t *testing.T) {
+	t.Parallel()
+
+	if got := primaryIPv6Scope(map[string]any{"en0": map[string]any{}}, ""); got != "" {
+		t.Fatalf("primaryIPv6Scope(empty) = %q, want empty", got)
 	}
 }
 
@@ -1583,6 +2415,24 @@ func TestPrimaryIPv6AddressIgnoresMissingPrimaryInterface(t *testing.T) {
 	}
 }
 
+func TestPrimaryIPv6AddressIgnoresMalformedBindings(t *testing.T) {
+	t.Parallel()
+
+	interfaces := map[string]any{
+		"en0": map[string]any{
+			"bindings6": []any{
+				"not a binding",
+				map[string]any{"address": "not an ip"},
+				map[string]any{"address": "2001:db8::10"},
+			},
+		},
+	}
+
+	if got := primaryIPv6Address(interfaces, "en0"); got != "2001:db8::10" {
+		t.Fatalf("primaryIPv6Address(malformed bindings) = %q, want 2001:db8::10", got)
+	}
+}
+
 func TestInterfaceBindingIncludesIPv6Scope(t *testing.T) {
 	t.Parallel()
 
@@ -1593,6 +2443,7 @@ func TestInterfaceBindingIncludesIPv6Scope(t *testing.T) {
 	}{
 		{"global", "2001:db8::10", "global"},
 		{"link local", "fe80::1", "link"},
+		{"site local", "fec0::1", "site"},
 		{"loopback", "::1", "host"},
 		{"IPv4 compatible", "::192.0.2.128", "compat,global"},
 	}
@@ -1603,6 +2454,16 @@ func TestInterfaceBindingIncludesIPv6Scope(t *testing.T) {
 				t.Fatalf("interfaceBinding(%s)[scope6] = %#v, want %q", tt.ip, got["scope6"], tt.want)
 			}
 		})
+	}
+}
+
+func TestIsIPv6SiteLocalRejectsInvalidAndNonSiteLocalAddresses(t *testing.T) {
+	t.Parallel()
+
+	for _, ip := range []net.IP{nil, net.ParseIP("192.0.2.10"), net.ParseIP("2001:db8::1"), net.ParseIP("fe80::1")} {
+		if isIPv6SiteLocal(ip) {
+			t.Fatalf("isIPv6SiteLocal(%v) = true, want false", ip)
+		}
 	}
 }
 
@@ -1740,6 +2601,23 @@ func TestPrimaryIPv4BindingFindsNetmaskAndNetwork(t *testing.T) {
 	}
 }
 
+func TestPrimaryIPv4BindingReturnsNilForEmptyMalformedOrMissingBinding(t *testing.T) {
+	t.Parallel()
+
+	interfaces := map[string]any{
+		"bad":     "ignored",
+		"no-list": map[string]any{"bindings": "ignored"},
+		"eth0": map[string]any{
+			"bindings": []any{"ignored", map[string]any{"address": "192.0.2.10"}},
+		},
+	}
+	for _, primary := range []string{"", "192.0.2.20"} {
+		if got := primaryIPv4Binding(interfaces, primary); got != nil {
+			t.Fatalf("primaryIPv4Binding(%q) = %#v, want nil", primary, got)
+		}
+	}
+}
+
 func TestPrimaryInterfaceFactFindsMAC(t *testing.T) {
 	interfaces := map[string]any{
 		"eth0": map[string]any{"mac": "00:50:56:9a:61:46"},
@@ -1749,6 +2627,18 @@ func TestPrimaryInterfaceFactFindsMAC(t *testing.T) {
 	got := primaryInterfaceFact(interfaces, "eth1", "mac")
 	if got != "00:50:56:9a:61:47" {
 		t.Fatalf("primaryInterfaceFact() = %#v, want eth1 MAC", got)
+	}
+}
+
+func TestPrimaryInterfaceFactReturnsNilForMissingInterface(t *testing.T) {
+	interfaces := map[string]any{
+		"eth0": "not-a-map",
+	}
+
+	for _, name := range []string{"", "eth0", "missing"} {
+		if got := primaryInterfaceFact(interfaces, name, "mac"); got != nil {
+			t.Fatalf("primaryInterfaceFact(%q) = %#v, want nil", name, got)
+		}
 	}
 }
 
@@ -2044,6 +2934,15 @@ func TestHostnameFactValuesExposeNilDomainForShortLinuxHostnameLikeRubyResolver(
 	}
 }
 
+func TestHostnameFactValuesOmitFQDNAndDomainWhenHostnameLookupFailed(t *testing.T) {
+	t.Parallel()
+
+	fqdnValue, domainValue := hostnameFactValues(nil, "foo.example.test", "example.test")
+	if fqdnValue != nil || domainValue != nil {
+		t.Fatalf("hostnameFactValues(nil) = %#v, %#v; want nil, nil", fqdnValue, domainValue)
+	}
+}
+
 func TestHostNameFromLookupReturnsNilValueWhenLookupFailsLikeRubyResolver(t *testing.T) {
 	debugMessages := []string{}
 	logger := captureLogger(&debugMessages, nil, nil)
@@ -2093,3 +2992,202 @@ func TestLinuxHostNameFromLookupsFallsBackWhenPrimaryLookupReturnsZeroAddressLik
 		t.Fatalf("hostname fact value = %#v, want kernel-host", value)
 	}
 }
+
+func TestLinuxHostNameFromLookupsFallsBackWhenPrimaryLookupFails(t *testing.T) {
+	hostname, value := linuxHostNameFromLookups(
+		func() (string, error) { return "", errors.New("hostname unavailable") },
+		func() string { return "kernel-host" },
+		discardLog(),
+	)
+
+	if hostname != "kernel-host" || value != "kernel-host" {
+		t.Fatalf("linuxHostNameFromLookups() = %q, %#v; want kernel-host", hostname, value)
+	}
+}
+
+func TestLinuxHostNameFromLookupsReturnsNilWhenFallbackIsMissingOrUnusable(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		fallback func() string
+	}{
+		{name: "missing fallback"},
+		{name: "empty fallback", fallback: func() string { return " " }},
+		{name: "zero address fallback", fallback: func() string { return "0.0.0.0" }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			hostname, value := linuxHostNameFromLookups(
+				func() (string, error) { return "", nil },
+				tt.fallback,
+				discardLog(),
+			)
+			if hostname != "" || value != nil {
+				t.Fatalf("linuxHostNameFromLookups() = %q, %#v; want empty nil", hostname, value)
+			}
+		})
+	}
+}
+
+func TestLinuxHostNameFromLookupsPrefersUsablePrimaryLookup(t *testing.T) {
+	fallbackCalled := false
+	hostname, value := linuxHostNameFromLookups(
+		func() (string, error) { return "socket-host", nil },
+		func() string {
+			fallbackCalled = true
+			return "kernel-host"
+		},
+		discardLog(),
+	)
+
+	if hostname != "socket-host" || value != "socket-host" {
+		t.Fatalf("linuxHostNameFromLookups() = %q, %#v; want socket-host", hostname, value)
+	}
+	if fallbackCalled {
+		t.Fatal("linuxHostNameFromLookups() called fallback for usable primary hostname")
+	}
+}
+
+func TestFQDNReturnsEmptyAndAlreadyQualifiedNames(t *testing.T) {
+	tests := []struct {
+		name     string
+		hostname string
+		want     string
+	}{
+		{name: "empty", hostname: "", want: ""},
+		{name: "already qualified", hostname: "node.example.test", want: "node.example.test"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := fqdn(tt.hostname); got != tt.want {
+				t.Fatalf("fqdn(%q) = %q, want %q", tt.hostname, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFQDNWithLookupUsesReverseLookupAndFallsBack(t *testing.T) {
+	t.Parallel()
+
+	got := fqdnWithLookup("node", func(host string) ([]string, error) {
+		if host != "node" {
+			t.Fatalf("lookup host = %q, want node", host)
+		}
+		return []string{"node.example.test."}, nil
+	})
+	if got != "node.example.test" {
+		t.Fatalf("fqdnWithLookup() = %q, want node.example.test", got)
+	}
+
+	for _, tt := range []struct {
+		name  string
+		addrs []string
+		err   error
+	}{
+		{name: "lookup error", err: os.ErrNotExist},
+		{name: "empty lookup"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got := fqdnWithLookup("node", func(string) ([]string, error) {
+				return tt.addrs, tt.err
+			})
+			if got != "node" {
+				t.Fatalf("fqdnWithLookup(%s) = %q, want node", tt.name, got)
+			}
+		})
+	}
+}
+
+func TestHostNameForPlatformUsesLinuxFallbackOnlyOnLinux(t *testing.T) {
+	hostname, value := hostNameForPlatform(
+		"linux",
+		func() (string, error) { return "", nil },
+		func() string { return "kernel-host" },
+		discardLog(),
+	)
+	if hostname != "kernel-host" || value != "kernel-host" {
+		t.Fatalf("linux hostNameForPlatform() = %q, %#v, want kernel-host", hostname, value)
+	}
+
+	hostname, value = hostNameForPlatform(
+		"darwin",
+		func() (string, error) { return "", nil },
+		func() string {
+			t.Fatal("non-Linux platform used Linux hostname fallback")
+			return "unused"
+		},
+		discardLog(),
+	)
+	if hostname != "" || value != "" {
+		t.Fatalf("darwin hostNameForPlatform() = %q, %#v, want empty lookup result", hostname, value)
+	}
+}
+
+func TestReadLinuxKernelHostnameUsesInjectedReader(t *testing.T) {
+	readFile := func(path string) ([]byte, error) {
+		if path != "/proc/sys/kernel/hostname" {
+			t.Fatalf("path = %q, want kernel hostname path", path)
+		}
+		return []byte("kernel-host\n"), nil
+	}
+
+	if got := readLinuxKernelHostname(readFile); got != "kernel-host" {
+		t.Fatalf("readLinuxKernelHostname() = %q, want kernel-host", got)
+	}
+}
+
+func TestIPFromAddrAcceptsIPNetAndIPAddrOnly(t *testing.T) {
+	ipNet := &net.IPNet{IP: net.ParseIP("192.0.2.10"), Mask: net.CIDRMask(24, 32)}
+	if got, ok := ipFromAddr(ipNet); !ok || !got.Equal(ipNet.IP) {
+		t.Fatalf("ipFromAddr(IPNet) = %v, %v, want %v, true", got, ok, ipNet.IP)
+	}
+	ipAddr := &net.IPAddr{IP: net.ParseIP("2001:db8::1")}
+	if got, ok := ipFromAddr(ipAddr); !ok || !got.Equal(ipAddr.IP) {
+		t.Fatalf("ipFromAddr(IPAddr) = %v, %v, want %v, true", got, ok, ipAddr.IP)
+	}
+	if got, ok := ipFromAddr(fakeAddr("192.0.2.10")); ok || got != nil {
+		t.Fatalf("ipFromAddr(fakeAddr) = %v, %v, want nil, false", got, ok)
+	}
+}
+
+func TestIPv6SelectionRankRejectsNonCandidates(t *testing.T) {
+	for _, raw := range []string{"", "192.0.2.10", "::1", "::"} {
+		if rank, ok := ipv6SelectionRank(net.ParseIP(raw)); ok {
+			t.Fatalf("ipv6SelectionRank(%q) = %d, true; want false", raw, rank)
+		}
+	}
+}
+
+func TestPrimaryIPv6FromAddrsPrefersGlobalAndSkipsLinkLocal(t *testing.T) {
+	addrs := []net.Addr{
+		ipNetAddr("fe80::1", 64),
+		ipNetAddr("fd00::10", 64),
+		ipNetAddr("2001:db8::10", 64),
+		ipNetAddr("192.0.2.10", 24),
+	}
+
+	if got := primaryIPv6FromAddrs(addrs); got != "2001:db8::10" {
+		t.Fatalf("primaryIPv6FromAddrs() = %q, want global address", got)
+	}
+	if got := primaryIPv6FromAddrs([]net.Addr{ipNetAddr("fe80::1", 64)}); got != "" {
+		t.Fatalf("primaryIPv6FromAddrs(link-local only) = %q, want empty", got)
+	}
+}
+
+func ipNetAddr(raw string, bits int) net.Addr {
+	ip := net.ParseIP(raw)
+	maskBits := 128
+	if ip.To4() != nil {
+		maskBits = 32
+	}
+	return &net.IPNet{IP: ip, Mask: net.CIDRMask(bits, maskBits)}
+}
+
+type fakeAddr string
+
+func (a fakeAddr) Network() string { return "fake" }
+func (a fakeAddr) String() string  { return string(a) }

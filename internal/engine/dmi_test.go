@@ -97,6 +97,30 @@ func TestDMIFacts_omittedWhenNoDataResolves(t *testing.T) {
 	}
 }
 
+func TestDMIBIOSVendorReadsNestedVendorOnly(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		dmi  map[string]any
+		want string
+	}{
+		{name: "missing bios", dmi: map[string]any{"manufacturer": "Acme"}, want: ""},
+		{name: "wrong bios shape", dmi: map[string]any{"bios": "Acme BIOS"}, want: ""},
+		{name: "missing vendor", dmi: map[string]any{"bios": map[string]any{"version": "1.0"}}, want: ""},
+		{name: "vendor", dmi: map[string]any{"bios": map[string]any{"vendor": "SeaBIOS"}}, want: "SeaBIOS"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := dmiBIOSVendor(tt.dmi); got != tt.want {
+				t.Fatalf("dmiBIOSVendor() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestParseLinuxOSRelease_splitsDebianMajorAndMinorRelease(t *testing.T) {
 	got := parseLinuxOSRelease("ID=debian\nVERSION_ID=10.02\n")
 
@@ -293,6 +317,28 @@ func TestDragonFlyDMIFacts_fallsBackToDMIDecodeWhenKenvHasNoSMBIOS(t *testing.T)
 	}
 }
 
+func TestDragonFlyDMIFactsPrefersKenvSMBIOSValues(t *testing.T) {
+	values := map[string]string{
+		"smbios.system.maker":   "DragonFly Maker",
+		"smbios.system.product": "DragonFly Product",
+	}
+
+	facts := dragonFlyDMIFacts(values, "Vendor: dmidecode BIOS", "Manufacturer: dmidecode", "Type: Other")
+	collection := Collection(facts)
+
+	want := map[string]any{
+		"dmi": map[string]any{
+			"manufacturer": "DragonFly Maker",
+			"product": map[string]any{
+				"name": "DragonFly Product",
+			},
+		},
+	}
+	if !reflect.DeepEqual(collection, want) {
+		t.Fatalf("dragonFlyDMIFacts() = %#v, want %#v", collection, want)
+	}
+}
+
 func TestOpenBSDDMIFacts_returnsStructuredFacts(t *testing.T) {
 	values := map[string]string{
 		"hw.vendor":    "Phoenix Technologies LTD",
@@ -323,6 +369,170 @@ func TestOpenBSDDMIFacts_returnsStructuredFacts(t *testing.T) {
 	}
 	if !reflect.DeepEqual(collection, want) {
 		t.Fatalf("openBSDDMIFacts() = %#v, want %#v", collection, want)
+	}
+}
+
+func TestBSDDMIFactsOmitEmptyValues(t *testing.T) {
+	if got := openBSDDMIFacts(nil); got != nil {
+		t.Fatalf("openBSDDMIFacts(nil) = %#v, want nil", got)
+	}
+	if got := netBSDDMIFacts(map[string]string{"machdep.dmi.system-vendor": "   "}); got != nil {
+		t.Fatalf("netBSDDMIFacts(blank) = %#v, want nil", got)
+	}
+}
+
+func TestCurrentBSDDMIFactsQueryPlatformSources(t *testing.T) {
+	t.Parallel()
+
+	t.Run("freebsd", func(t *testing.T) {
+		t.Parallel()
+
+		calls := map[string]bool{}
+		facts := currentFreeBSDDMIFactsForPlatform("freebsd", func(name string, args ...string) string {
+			if name != "/bin/kenv" || len(args) != 1 {
+				t.Fatalf("run(%q, %#v), want /bin/kenv <key>", name, args)
+			}
+			calls[args[0]] = true
+			if args[0] == "smbios.system.maker" {
+				return "FreeBSD Maker\n"
+			}
+			return ""
+		})
+		if got := Collection(facts)["dmi"].(map[string]any)["manufacturer"]; got != "FreeBSD Maker" {
+			t.Fatalf("freebsd manufacturer = %#v, want FreeBSD Maker", got)
+		}
+		for _, key := range freeBSDDMIKeys {
+			if !calls[key] {
+				t.Fatalf("freebsd DMI did not query %s", key)
+			}
+		}
+	})
+
+	t.Run("dragonfly", func(t *testing.T) {
+		t.Parallel()
+
+		calls := map[string]bool{}
+		facts := currentDragonFlyDMIFactsForPlatform("dragonfly", func(name string, args ...string) string {
+			key := fakeRunKey(name, args...)
+			calls[key] = true
+			switch key {
+			case fakeRunKey("kenv", "smbios.system.maker"):
+				return "DragonFly Maker\n"
+			case fakeRunKey("/usr/local/sbin/dmidecode", "-t", "system"):
+				return "Manufacturer: fallback\n"
+			default:
+				return ""
+			}
+		})
+		if got := Collection(facts)["dmi"].(map[string]any)["manufacturer"]; got != "DragonFly Maker" {
+			t.Fatalf("dragonfly manufacturer = %#v, want DragonFly Maker", got)
+		}
+		if calls[fakeRunKey("/usr/local/sbin/dmidecode", "-t", "system")] {
+			t.Fatal("dragonfly DMI queried dmidecode despite kenv SMBIOS data")
+		}
+		for _, key := range freeBSDDMIKeys {
+			if !calls[fakeRunKey("kenv", key)] {
+				t.Fatalf("dragonfly DMI did not query %s", key)
+			}
+		}
+	})
+
+	t.Run("openbsd", func(t *testing.T) {
+		t.Parallel()
+
+		calls := map[string]bool{}
+		facts := currentOpenBSDDMIFactsForPlatform("openbsd", func(name string, args ...string) string {
+			if name != "/sbin/sysctl" || len(args) != 2 || args[0] != "-n" {
+				t.Fatalf("run(%q, %#v), want /sbin/sysctl -n <key>", name, args)
+			}
+			calls[args[1]] = true
+			if args[1] == "hw.vendor" {
+				return "OpenBSD Vendor\n"
+			}
+			return ""
+		})
+		if got := Collection(facts)["dmi"].(map[string]any)["manufacturer"]; got != "OpenBSD Vendor" {
+			t.Fatalf("openbsd manufacturer = %#v, want OpenBSD Vendor", got)
+		}
+		for _, key := range openBSDDMIKeys {
+			if !calls[key] {
+				t.Fatalf("openbsd DMI did not query %s", key)
+			}
+		}
+	})
+
+	t.Run("netbsd", func(t *testing.T) {
+		t.Parallel()
+
+		calls := map[string]bool{}
+		facts := currentNetBSDDMIFactsForPlatform("netbsd", func(name string, args ...string) string {
+			if name != "/sbin/sysctl" || len(args) != 2 || args[0] != "-n" {
+				t.Fatalf("run(%q, %#v), want /sbin/sysctl -n <key>", name, args)
+			}
+			calls[args[1]] = true
+			if args[1] == "machdep.dmi.system-vendor" {
+				return "NetBSD Vendor\n"
+			}
+			return ""
+		})
+		if got := Collection(facts)["dmi"].(map[string]any)["manufacturer"]; got != "NetBSD Vendor" {
+			t.Fatalf("netbsd manufacturer = %#v, want NetBSD Vendor", got)
+		}
+		for _, key := range netBSDDMIKeys {
+			if !calls[key] {
+				t.Fatalf("netbsd DMI did not query %s", key)
+			}
+		}
+	})
+
+	t.Run("illumos", func(t *testing.T) {
+		t.Parallel()
+
+		calls := map[string]bool{}
+		facts := currentIllumosDMIFactsForPlatform("illumos", func(name string, args ...string) string {
+			key := fakeRunKey(name, args...)
+			calls[key] = true
+			if key == fakeRunKey("/usr/sbin/smbios", "-t", "SMB_TYPE_SYSTEM") {
+				return "Manufacturer: illumos Maker\n"
+			}
+			return ""
+		})
+		if got := Collection(facts)["dmi"].(map[string]any)["manufacturer"]; got != "illumos Maker" {
+			t.Fatalf("illumos manufacturer = %#v, want illumos Maker", got)
+		}
+		for _, key := range []string{
+			fakeRunKey("/usr/sbin/smbios", "-t", "SMB_TYPE_BIOS"),
+			fakeRunKey("/usr/sbin/smbios", "-t", "SMB_TYPE_SYSTEM"),
+			fakeRunKey("/usr/sbin/smbios", "-t", "SMB_TYPE_CHASSIS"),
+		} {
+			if !calls[key] {
+				t.Fatalf("illumos DMI did not query %q", key)
+			}
+		}
+	})
+}
+
+func TestCurrentPlatformDMIFactsSkipOtherPlatforms(t *testing.T) {
+	t.Parallel()
+
+	run := func(string, ...string) string {
+		t.Fatal("DMI platform helper ran command for non-matching platform")
+		return ""
+	}
+	if got := currentFreeBSDDMIFactsForPlatform("linux", run); got != nil {
+		t.Fatalf("currentFreeBSDDMIFactsForPlatform(linux) = %#v, want nil", got)
+	}
+	if got := currentDragonFlyDMIFactsForPlatform("linux", run); got != nil {
+		t.Fatalf("currentDragonFlyDMIFactsForPlatform(linux) = %#v, want nil", got)
+	}
+	if got := currentOpenBSDDMIFactsForPlatform("linux", run); got != nil {
+		t.Fatalf("currentOpenBSDDMIFactsForPlatform(linux) = %#v, want nil", got)
+	}
+	if got := currentNetBSDDMIFactsForPlatform("linux", run); got != nil {
+		t.Fatalf("currentNetBSDDMIFactsForPlatform(linux) = %#v, want nil", got)
+	}
+	if got := currentIllumosDMIFactsForPlatform("linux", run); got != nil {
+		t.Fatalf("currentIllumosDMIFactsForPlatform(linux) = %#v, want nil", got)
 	}
 }
 
@@ -407,9 +617,47 @@ func TestIllumosDMIFacts_returnsStructuredFactsFromSMBIOS(t *testing.T) {
 	}
 }
 
+func TestIllumosDMIFactsFallsBackToChassisTypeKey(t *testing.T) {
+	chassis := `ID    SIZE TYPE
+768   41   SMB_TYPE_CHASSIS (type 3) (system enclosure or chassis)
+  Type: rack
+`
+
+	facts := illumosDMIFacts("", "", chassis)
+	collection := Collection(facts)
+
+	want := map[string]any{
+		"dmi": map[string]any{
+			"chassis": map[string]any{"type": "rack"},
+		},
+	}
+	if !reflect.DeepEqual(collection, want) {
+		t.Fatalf("illumosDMIFacts() = %#v, want %#v", collection, want)
+	}
+}
+
 func TestIllumosDMIFacts_omitsDMIWhenSMBIOSHasNoValues(t *testing.T) {
 	if got := illumosDMIFacts("", "", ""); got != nil {
 		t.Fatalf("illumosDMIFacts(empty) = %#v, want nil", got)
+	}
+}
+
+func TestParseWindowsWMIRecordsSkipsMalformedLinesAndSplitsRepeatedNames(t *testing.T) {
+	input := strings.Join([]string{
+		"Name=CPU One",
+		"malformed",
+		"NumberOfCores=2",
+		"Name=CPU Two",
+		"NumberOfCores=4",
+	}, "\r\n")
+
+	got := parseWindowsWMIRecords(input)
+	want := []map[string]string{
+		{"Name": "CPU One", "NumberOfCores": "2"},
+		{"Name": "CPU Two", "NumberOfCores": "4"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("parseWindowsWMIRecords() = %#v, want %#v", got, want)
 	}
 }
 

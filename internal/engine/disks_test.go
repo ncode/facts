@@ -90,6 +90,44 @@ func TestPartitionsFactMatchesFreeBSDGPTMountsByPartlabel(t *testing.T) {
 	}
 }
 
+func TestPartitionForMountDeviceMatchesNamesLabelsAndUUIDs(t *testing.T) {
+	t.Parallel()
+
+	partitions := map[string]any{
+		"ada0p2":  map[string]any{"partuuid": "7f6ec6ec-2e4e-11ef-9a8a-0800276f7822"},
+		"vtbd0p2": map[string]any{"partlabel": "rootfs"},
+		"sda1":    map[string]any{"filesystem": "ext4"},
+		"ignored": "not a partition map",
+	}
+
+	tests := []struct {
+		name   string
+		device string
+		want   string
+	}{
+		{name: "direct key", device: "sda1", want: "sda1"},
+		{name: "dev prefix", device: "/dev/sda1", want: "sda1"},
+		{name: "gpt label", device: "/dev/gpt/rootfs", want: "vtbd0p2"},
+		{name: "gpt uuid", device: "/dev/gptid/7f6ec6ec-2e4e-11ef-9a8a-0800276f7822", want: "ada0p2"},
+		{name: "missing", device: "/dev/gpt/missing"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := partitionForMountDevice(partitions, tt.device)
+			if tt.want == "" {
+				if got != nil {
+					t.Fatalf("partitionForMountDevice(%q) = %#v, want nil", tt.device, got)
+				}
+				return
+			}
+			want := partitions[tt.want].(map[string]any)
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("partitionForMountDevice(%q) = %#v, want partition %q", tt.device, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestPartitionsFactReturnsPartitionsWithoutMountpoints(t *testing.T) {
 	partitions := map[string]any{
 		"/dev/sda1": map[string]any{"filesystem": "ext3"},
@@ -104,6 +142,47 @@ func TestPartitionsFactReturnsPartitionsWithoutMountpoints(t *testing.T) {
 func TestPartitionsFactReturnsNilForEmptyPartitions(t *testing.T) {
 	if got := partitionsFact(map[string]any{}, map[string]any{"/": map[string]any{"device": "/dev/sda1"}}); got != nil {
 		t.Fatalf("partitionsFact() = %#v, want nil", got)
+	}
+}
+
+func TestParseLinuxLSBLKPropertyLineHandlesQuotedAndUnquotedValues(t *testing.T) {
+	t.Parallel()
+
+	line := `NAME="sda1" FSTYPE=ext4 LABEL="data \"disk\"" EMPTY="" BROKEN="unterminated`
+	got := parseLinuxLSBLKPropertyLine(line)
+	want := map[string]string{
+		"NAME":   "sda1",
+		"FSTYPE": "ext4",
+		"LABEL":  `data "disk"`,
+		"BROKEN": "unterminated",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("parseLinuxLSBLKPropertyLine(%q) = %#v, want %#v", line, got, want)
+	}
+}
+
+func TestParseLinuxLSBLKPropertiesSkipsRowsWithoutValues(t *testing.T) {
+	t.Parallel()
+
+	input := "NAME=\"sda1\" FSTYPE=\"ext4\"\nNAME=\"sda2\"\nMISSING=\"name\"\n"
+	got := parseLinuxLSBLKProperties(input)
+	want := map[string]map[string]string{
+		"sda1": {"FSTYPE": "ext4"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("parseLinuxLSBLKProperties(%q) = %#v, want %#v", input, got, want)
+	}
+}
+
+func TestLinuxLSBLKVersionParsesUtilLinuxVersion(t *testing.T) {
+	t.Parallel()
+
+	major, minor, ok := linuxLSBLKVersion("lsblk from util-linux 2.39.3\n")
+	if !ok || major != 2 || minor != 39 {
+		t.Fatalf("linuxLSBLKVersion() = %d, %d, %v; want 2, 39, true", major, minor, ok)
+	}
+	if major, minor, ok := linuxLSBLKVersion("lsblk unknown\n"); ok || major != 0 || minor != 0 {
+		t.Fatalf("linuxLSBLKVersion(no version) = %d, %d, %v; want 0, 0, false", major, minor, ok)
 	}
 }
 
@@ -234,6 +313,27 @@ func TestParseFreeBSDGeomPartitions_returnsRubyCompatiblePartitionFacts(t *testi
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("parseFreeBSDGeomPartitions() = %#v, want %#v", got, want)
+	}
+}
+
+func TestFreeBSDPartitionTypePrefersTypeThenRawType(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		config freeBSDGeomConfig
+		want   string
+	}{
+		{name: "type", config: freeBSDGeomConfig{Type: " freebsd-zfs ", RawType: "raw"}, want: "freebsd-zfs"},
+		{name: "raw type fallback", config: freeBSDGeomConfig{RawType: " efi "}, want: "efi"},
+		{name: "empty", config: freeBSDGeomConfig{Type: " ", RawType: "\t"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := freeBSDPartitionType(tt.config); got != tt.want {
+				t.Fatalf("freeBSDPartitionType(%#v) = %q, want %q", tt.config, got, tt.want)
+			}
+		})
 	}
 }
 
@@ -427,14 +527,58 @@ func TestParseBSDDiskNamesSplitsOpenBSDCommaSeparatedNames(t *testing.T) {
 	}
 }
 
+func TestIsBSDDiskNameAllowsOnlyAlnumDeviceNames(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]bool{
+		"":        false,
+		"sd0":     true,
+		"nvme0":   true,
+		"da0p1":   true,
+		"sd0:":    false,
+		"sd0-":    false,
+		"sd0.eli": false,
+	}
+	for name, want := range tests {
+		if got := isBSDDiskName(name); got != want {
+			t.Fatalf("isBSDDiskName(%q) = %v, want %v", name, got, want)
+		}
+	}
+}
+
+func TestCurrentBSDDisksOmitWhenNoRunnableDiskData(t *testing.T) {
+	t.Parallel()
+
+	if got := currentBSDDisks("openbsd", nil); got != nil {
+		t.Fatalf("currentBSDDisks(nil run) = %#v, want nil", got)
+	}
+	if got := currentBSDDisks("openbsd", func(string, ...string) string { return "" }); got != nil {
+		t.Fatalf("currentBSDDisks(no devices) = %#v, want nil", got)
+	}
+	got := currentBSDDisks("openbsd", func(name string, args ...string) string {
+		switch fakeRunKey(name, args...) {
+		case fakeRunKey("sysctl", "-n", "hw.disknames"):
+			return "sd0:942d2f143e47054f\n"
+		case fakeRunKey("disklabel", "sd0"):
+			return ""
+		default:
+			t.Fatalf("unexpected command %q %#v", name, args)
+			return ""
+		}
+	})
+	if got != nil {
+		t.Fatalf("currentBSDDisks(empty disklabel) = %#v, want nil", got)
+	}
+}
+
 func TestCurrentOpenBSDPartitionsReadsEveryDiskName(t *testing.T) {
 	got := currentOpenBSDPartitions(func(name string, args ...string) string {
-		switch strings.Join(append([]string{name}, args...), " ") {
-		case "sysctl -n hw.disknames":
+		switch fakeRunKey(name, args...) {
+		case fakeRunKey("sysctl", "-n", "hw.disknames"):
 			return "sd0:942d2f143e47054f,sd1:1111111111111111\n"
-		case "disklabel sd0":
+		case fakeRunKey("disklabel", "sd0"):
 			return openBSDDisklabelSD0
-		case "disklabel sd1":
+		case fakeRunKey("disklabel", "sd1"):
 			return strings.ReplaceAll(openBSDDisklabelSD0, "sd0", "sd1")
 		default:
 			t.Fatalf("unexpected command %q %#v", name, args)
@@ -445,6 +589,81 @@ func TestCurrentOpenBSDPartitionsReadsEveryDiskName(t *testing.T) {
 		if _, ok := got[key]; !ok {
 			t.Fatalf("currentOpenBSDPartitions() = %#v, want key %q", got, key)
 		}
+	}
+}
+
+func TestCurrentOpenBSDPartitionsOmitWhenNoRunnableDiskData(t *testing.T) {
+	t.Parallel()
+
+	if got := currentOpenBSDPartitions(nil); got != nil {
+		t.Fatalf("currentOpenBSDPartitions(nil run) = %#v, want nil", got)
+	}
+	if got := currentOpenBSDPartitions(func(string, ...string) string { return "" }); got != nil {
+		t.Fatalf("currentOpenBSDPartitions(no devices) = %#v, want nil", got)
+	}
+}
+
+func TestCurrentNetBSDPartitionsReadsDkctlWedges(t *testing.T) {
+	disklabelCalled := false
+	got := currentNetBSDPartitions(func(name string, args ...string) string {
+		switch fakeRunKey(name, args...) {
+		case fakeRunKey("sysctl", "-n", "hw.disknames"):
+			return "ld4\n"
+		case fakeRunKey("sh", "-c", "disklabel ld4 2>/dev/null || true"):
+			disklabelCalled = true
+			return strings.Replace(netBSDDisklabelLD4, "bytes/sector: 512", "bytes/sector: 4096", 1)
+		case fakeRunKey("dkctl", "ld4", "listwedges"):
+			if !disklabelCalled {
+				t.Fatal("currentNetBSDPartitions() read wedges before disklabel")
+			}
+			return netBSDWedgesLD4
+		default:
+			t.Fatalf("unexpected command %q %#v", name, args)
+			return ""
+		}
+	})
+
+	want := map[string]any{
+		"/dev/dk0": map[string]any{"filesystem": "msdos", "partlabel": "EFI", "size": "640.00 MiB", "size_bytes": 671_088_640},
+		"/dev/dk1": map[string]any{"filesystem": "ffs", "partlabel": "netbsd-root", "size": "79.22 GiB", "size_bytes": 85_060_485_120},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("currentNetBSDPartitions() = %#v, want %#v", got, want)
+	}
+	if !disklabelCalled {
+		t.Fatal("currentNetBSDPartitions() did not read disklabel before parsing wedges")
+	}
+}
+
+func TestCurrentNetBSDPartitionsFallsBackToDisklabelWhenNoWedges(t *testing.T) {
+	t.Parallel()
+
+	got := currentNetBSDPartitions(func(name string, args ...string) string {
+		switch fakeRunKey(name, args...) {
+		case fakeRunKey("sysctl", "-n", "hw.disknames"):
+			return "ld4\n"
+		case fakeRunKey("sh", "-c", "disklabel ld4 2>/dev/null || true"):
+			return netBSDDisklabelLD4
+		case fakeRunKey("dkctl", "ld4", "listwedges"):
+			return ""
+		default:
+			t.Fatalf("unexpected command %q %#v", name, args)
+			return ""
+		}
+	})
+	if _, ok := got["/dev/ld4e"]; !ok {
+		t.Fatalf("currentNetBSDPartitions() = %#v, want fallback disklabel partition /dev/ld4e", got)
+	}
+}
+
+func TestCurrentNetBSDPartitionsOmitWhenNoRunnableDiskData(t *testing.T) {
+	t.Parallel()
+
+	if got := currentNetBSDPartitions(nil); got != nil {
+		t.Fatalf("currentNetBSDPartitions(nil run) = %#v, want nil", got)
+	}
+	if got := currentNetBSDPartitions(func(string, ...string) string { return "" }); got != nil {
+		t.Fatalf("currentNetBSDPartitions(no devices) = %#v, want nil", got)
 	}
 }
 
@@ -655,6 +874,52 @@ func TestCurrentIllumosPartitionsReadsVTOCSlices(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("currentIllumosPartitions() = %#v, want %#v", got, want)
+	}
+}
+
+func TestCurrentIllumosPartitionsOmitWhenNoRunnableDiskData(t *testing.T) {
+	t.Parallel()
+
+	run := func(string, ...string) string {
+		t.Fatal("currentIllumosPartitions() ran command without whole slices")
+		return ""
+	}
+	if got := currentIllumosPartitions(nil, func(string) ([]string, error) { return nil, nil }); got != nil {
+		t.Fatalf("currentIllumosPartitions(nil run) = %#v, want nil", got)
+	}
+	if got := currentIllumosPartitions(run, nil); got != nil {
+		t.Fatalf("currentIllumosPartitions(nil glob) = %#v, want nil", got)
+	}
+	if got := currentIllumosPartitions(run, func(string) ([]string, error) { return nil, os.ErrNotExist }); got != nil {
+		t.Fatalf("currentIllumosPartitions(glob error) = %#v, want nil", got)
+	}
+	if got := currentIllumosPartitions(run, func(string) ([]string, error) { return []string{"/dev/rdsk/not-a-whole-slice"}, nil }); got != nil {
+		t.Fatalf("currentIllumosPartitions(no whole slices) = %#v, want nil", got)
+	}
+}
+
+func TestIllumosPartitionFilesystemSkipsUnknownAndDeviceErrors(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "valid", input: "zfs\n", want: "zfs"},
+		{name: "empty", input: "", want: ""},
+		{name: "unknown", input: "unknown_fstyp\n", want: ""},
+		{name: "device error", input: "/dev/rdsk/c9t0d0s0: I/O error\n", want: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := illumosPartitionFilesystem(tt.input); got != tt.want {
+				t.Fatalf("illumosPartitionFilesystem(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
 	}
 }
 
@@ -1062,6 +1327,104 @@ func TestCurrentPartitionsUsesSessionHostGlobForIllumos(t *testing.T) {
 	}
 }
 
+func TestCurrentPartitionsDispatchesBySessionPlatform(t *testing.T) {
+	freeBSDGeom, err := os.ReadFile(filepath.Join("testdata", "kern.geom.confxml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name      string
+		host      *fakeHostOS
+		wantKey   string
+		wantCalls []fakeHostRunCall
+	}{
+		{
+			name: "freebsd",
+			host: &fakeHostOS{
+				platform: "freebsd",
+				runOutputs: map[string]string{
+					fakeRunKey("sysctl", "-n", "kern.geom.confxml"): string(freeBSDGeom),
+				},
+			},
+			wantKey: "ada0p1",
+			wantCalls: []fakeHostRunCall{
+				{name: "sysctl", args: []string{"-n", "kern.geom.confxml"}},
+			},
+		},
+		{
+			name: "openbsd",
+			host: &fakeHostOS{
+				platform: "openbsd",
+				runOutputs: map[string]string{
+					fakeRunKey("sysctl", "-n", "hw.disknames"): "sd0:942d2f143e47054f\n",
+					fakeRunKey("disklabel", "sd0"):             openBSDDisklabelSD0,
+				},
+			},
+			wantKey: "/dev/sd0a",
+			wantCalls: []fakeHostRunCall{
+				{name: "sysctl", args: []string{"-n", "hw.disknames"}},
+				{name: "disklabel", args: []string{"sd0"}},
+			},
+		},
+		{
+			name: "netbsd",
+			host: &fakeHostOS{
+				platform: "netbsd",
+				runOutputs: map[string]string{
+					fakeRunKey("sysctl", "-n", "hw.disknames"):                  "ld4\n",
+					fakeRunKey("sh", "-c", "disklabel ld4 2>/dev/null || true"): netBSDDisklabelLD4,
+					fakeRunKey("dkctl", "ld4", "listwedges"):                    netBSDWedgesLD4,
+				},
+			},
+			wantKey: "/dev/dk0",
+			wantCalls: []fakeHostRunCall{
+				{name: "sysctl", args: []string{"-n", "hw.disknames"}},
+				{name: "sh", args: []string{"-c", "disklabel ld4 2>/dev/null || true"}},
+				{name: "dkctl", args: []string{"ld4", "listwedges"}},
+			},
+		},
+		{
+			name: "dragonfly",
+			host: &fakeHostOS{
+				platform: "dragonfly",
+				runOutputs: map[string]string{
+					fakeRunKey("sysctl", "-n", "kern.disks"): "da0\n",
+					fakeRunKey("disklabel", "da0"):           "disklabel: Operation not supported by device\n",
+					fakeRunKey("disklabel", "da0s1"):         dragonFlyDisklabelDA0S1,
+					fakeRunKey("disklabel", "da0s2"):         "disklabel: Operation not supported by device\n",
+					fakeRunKey("disklabel", "da0s3"):         "disklabel: Operation not supported by device\n",
+					fakeRunKey("disklabel", "da0s4"):         "disklabel: Operation not supported by device\n",
+				},
+			},
+			wantKey: "/dev/da0s1a",
+			wantCalls: []fakeHostRunCall{
+				{name: "sysctl", args: []string{"-n", "kern.disks"}},
+				{name: "disklabel", args: []string{"da0"}},
+				{name: "disklabel", args: []string{"da0s1"}},
+				{name: "disklabel", args: []string{"da0s2"}},
+				{name: "disklabel", args: []string{"da0s3"}},
+				{name: "disklabel", args: []string{"da0s4"}},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := NewSessionContext(t.Context())
+			s.host = tt.host
+
+			got := currentPartitions(s)
+			if _, ok := got[tt.wantKey]; !ok {
+				t.Fatalf("currentPartitions(%s) = %#v, want key %q", tt.name, got, tt.wantKey)
+			}
+			if !reflect.DeepEqual(tt.host.runCalls, tt.wantCalls) {
+				t.Fatalf("run calls = %#v, want %#v", tt.host.runCalls, tt.wantCalls)
+			}
+		})
+	}
+}
+
 func TestParseLinuxFilesystems_sortsAndSkipsPseudoEntries(t *testing.T) {
 	input := "nodev\tsysfs\nnodev\tproc\next4\nfuseblk\nxfs\n"
 
@@ -1080,6 +1443,24 @@ func TestCurrentLinuxFilesystemsUnreadableProcMatchesRubyResolver(t *testing.T) 
 
 	if got := currentFilesystems("linux", readFile, nil); got != nil {
 		t.Fatalf("currentFilesystems(linux) = %#v, want nil", got)
+	}
+}
+
+func TestCurrentDarwinFilesystemsReadsMountOutput(t *testing.T) {
+	t.Parallel()
+
+	got := currentFilesystems("darwin", nil, func(name string, args ...string) string {
+		if name != "mount" || len(args) != 0 {
+			t.Fatalf("run(%q, %#v), want mount", name, args)
+		}
+		return "/dev/disk3s1s1 on / (apfs, local)\nmap auto_home on /System/Volumes/Data/home (autofs, automounted)\n"
+	})
+	want := []string{"apfs", "autofs"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("currentFilesystems(darwin) = %#v, want %#v", got, want)
+	}
+	if got := currentFilesystems("darwin", nil, nil); got != nil {
+		t.Fatalf("currentFilesystems(darwin nil runner) = %#v, want nil", got)
 	}
 }
 
@@ -1114,6 +1495,41 @@ func TestCurrentZFSFactsHonorsTargetCapabilityPolicy(t *testing.T) {
 	}
 	if called {
 		t.Fatal("currentZFSFacts(openbsd) touched probes despite target policy")
+	}
+	if got := currentZFSFacts("freebsd", nil); got != nil {
+		t.Fatalf("currentZFSFacts(freebsd, nil) = %#v, want nil", got)
+	}
+}
+
+func TestCurrentZFSFactsRunsZFSAndZpoolUpgradeCommands(t *testing.T) {
+	calls := []string{}
+	run := func(name string, args ...string) string {
+		key := fakeRunKey(name, args...)
+		calls = append(calls, key)
+		switch key {
+		case fakeRunKey("zfs", "upgrade", "-v"):
+			return "1 initial version\n2 snapshot version\n"
+		case fakeRunKey("zpool", "upgrade", "-v"):
+			return "1 initial version\n2 mirror version\n"
+		default:
+			t.Fatalf("unexpected command %q %#v", name, args)
+			return ""
+		}
+	}
+
+	got := factsByName(currentZFSFacts("freebsd", run))
+	want := map[string]any{
+		"zfs.feature_numbers":   []string{"1", "2"},
+		"zfs.version":           "2",
+		"zpool.feature_numbers": []string{"1", "2"},
+		"zpool.version":         "2",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("currentZFSFacts() = %#v, want %#v", got, want)
+	}
+	wantCalls := []string{fakeRunKey("zfs", "upgrade", "-v"), fakeRunKey("zpool", "upgrade", "-v")}
+	if !reflect.DeepEqual(calls, wantCalls) {
+		t.Fatalf("calls = %#v, want %#v", calls, wantCalls)
 	}
 }
 
@@ -1353,6 +1769,259 @@ func TestLinuxMountEntriesReplaceDevRootLikeRubyResolver(t *testing.T) {
 	}
 }
 
+func TestCurrentMountEntriesLinuxReadsProcMountsAndResolvesDevRoot(t *testing.T) {
+	host := &fakeHostOS{
+		platform: "linux",
+		files: map[string][]byte{
+			"/proc/self/mounts": []byte("/dev/root / ext4 rw,noatime 0 0\n"),
+			"/proc/cmdline":     []byte("console=ttyAMA0 root=/dev/mmcblk0p2 rootfstype=ext4"),
+		},
+	}
+	s := NewSession()
+	s.host = host
+
+	got := currentMountEntries(s)
+	want := []mountEntry{{Device: "/dev/mmcblk0p2", Path: "/", Filesystem: "ext4", Options: []string{"rw", "noatime"}}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("currentMountEntries() = %#v, want %#v", got, want)
+	}
+	if len(host.runCalls) != 0 {
+		t.Fatalf("run calls = %#v, want none", host.runCalls)
+	}
+}
+
+func TestCurrentMountEntriesParsesPlatformMountOutput(t *testing.T) {
+	tests := []struct {
+		goos      string
+		outputs   map[string]string
+		want      []mountEntry
+		wantCalls []fakeHostRunCall
+	}{
+		{
+			goos: "darwin",
+			outputs: map[string]string{
+				fakeRunKey("mount"): "/dev/disk3s1s1 on / (apfs, sealed, local, read-only, journaled)\n",
+			},
+			want:      []mountEntry{{Device: "/dev/disk3s1s1", Path: "/", Filesystem: "apfs", Options: []string{"sealed", "local", "readonly", "journaled"}}},
+			wantCalls: []fakeHostRunCall{{name: "mount"}},
+		},
+		{
+			goos: "freebsd",
+			outputs: map[string]string{
+				fakeRunKey("mount"): "/dev/ada0p2 on / (ufs, local, journaled soft-updates)\n",
+			},
+			want:      []mountEntry{{Device: "/dev/ada0p2", Path: "/", Filesystem: "ufs", Options: []string{"local", "journaled soft-updates"}}},
+			wantCalls: []fakeHostRunCall{{name: "mount"}},
+		},
+		{
+			goos: "netbsd",
+			outputs: map[string]string{
+				fakeRunKey("mount"): "/dev/dk1 on / type ffs (noatime, local)\n",
+			},
+			want:      []mountEntry{{Device: "/dev/dk1", Path: "/", Filesystem: "ffs", Options: []string{"noatime", "local"}}},
+			wantCalls: []fakeHostRunCall{{name: "mount"}},
+		},
+		{
+			goos: "plan9",
+			want: []mountEntry{{Path: "/"}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.goos, func(t *testing.T) {
+			s := NewSession()
+			host := &fakeHostOS{platform: tt.goos, runOutputs: tt.outputs}
+			s.host = host
+
+			got := currentMountEntries(s)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("currentMountEntries(%s) = %#v, want %#v", tt.goos, got, tt.want)
+			}
+			if !reflect.DeepEqual(host.runCalls, tt.wantCalls) {
+				t.Fatalf("run calls = %#v, want %#v", host.runCalls, tt.wantCalls)
+			}
+		})
+	}
+}
+
+func TestCurrentMountEntriesOmitWhenPlatformSourceUnavailable(t *testing.T) {
+	t.Parallel()
+
+	for _, goos := range []string{"darwin", "freebsd", "netbsd", "linux"} {
+		t.Run(goos, func(t *testing.T) {
+			t.Parallel()
+
+			s := NewSession()
+			host := &fakeHostOS{platform: goos}
+			switch goos {
+			case "darwin", "freebsd", "netbsd":
+				host.runOutputs = map[string]string{fakeRunKey("mount"): ""}
+			}
+			s.host = host
+			if got := currentMountEntries(s); got != nil {
+				t.Fatalf("currentMountEntries(%s) = %#v, want nil", goos, got)
+			}
+		})
+	}
+}
+
+func TestRootMountpointUsesPlatformSpecificMountCommands(t *testing.T) {
+	tests := []struct {
+		goos           string
+		outputs        map[string]string
+		wantDevice     string
+		wantFilesystem string
+		wantSizeBytes  int
+		wantUsedBytes  int
+		wantAvailBytes int
+		wantCapacity   string
+		wantOptions    []string
+		wantCalls      []fakeHostRunCall
+	}{
+		{
+			goos: "openbsd",
+			outputs: map[string]string{
+				fakeRunKey("mount"):    "/dev/sd0a on / type ffs (local)\n",
+				fakeRunKey("df", "-P"): "Filesystem 512-blocks Used Available Capacity Mounted on\n/dev/sd0a 2000 1000 1000 50% /\n",
+			},
+			wantDevice:     "/dev/sd0a",
+			wantFilesystem: "ffs",
+			wantSizeBytes:  1_024_000,
+			wantUsedBytes:  512_000,
+			wantAvailBytes: 512_000,
+			wantCapacity:   "50.00%",
+			wantOptions:    []string{"local"},
+			wantCalls: []fakeHostRunCall{
+				{name: "mount"},
+				{name: "df", args: []string{"-P"}},
+			},
+		},
+		{
+			goos: "netbsd",
+			outputs: map[string]string{
+				fakeRunKey("mount"):    "/dev/dk1 on / type ffs (noatime, local)\n",
+				fakeRunKey("df", "-P"): "Filesystem 512-blocks Used Avail Capacity Mounted on\n/dev/dk1 4000 1000 3000 25% /\n",
+			},
+			wantDevice:     "/dev/dk1",
+			wantFilesystem: "ffs",
+			wantSizeBytes:  2_048_000,
+			wantUsedBytes:  512_000,
+			wantAvailBytes: 1_536_000,
+			wantCapacity:   "25.00%",
+			wantOptions:    []string{"noatime", "local"},
+			wantCalls: []fakeHostRunCall{
+				{name: "mount"},
+				{name: "df", args: []string{"-P"}},
+			},
+		},
+		{
+			goos: "dragonfly",
+			outputs: map[string]string{
+				fakeRunKey("mount"):    "da0s1d on / (hammer2, local)\n",
+				fakeRunKey("df", "-P"): "Filesystem 512-blocks Used Avail Capacity Mounted on\nda0s1d 8000 2000 6000 25% /\n",
+			},
+			wantDevice:     "/dev/da0s1d",
+			wantFilesystem: "hammer2",
+			wantSizeBytes:  4_096_000,
+			wantUsedBytes:  1_024_000,
+			wantAvailBytes: 3_072_000,
+			wantCapacity:   "25.00%",
+			wantOptions:    []string{"local"},
+			wantCalls: []fakeHostRunCall{
+				{name: "mount"},
+				{name: "df", args: []string{"-P"}},
+			},
+		},
+		{
+			goos: "illumos",
+			outputs: map[string]string{
+				fakeRunKey("mount", "-v"): "rpool/ROOT/test on / type zfs read/write/setuid/devices/dev=4310002 on Thu Jan  1 00:00:00 1970\n",
+				fakeRunKey("df", "-P"):    "Filesystem 512-blocks Used Available Capacity Mounted on\nrpool/ROOT/test 16000 4000 12000 25% /\n",
+			},
+			wantDevice:     "rpool/ROOT/test",
+			wantFilesystem: "zfs",
+			wantSizeBytes:  8_192_000,
+			wantUsedBytes:  2_048_000,
+			wantAvailBytes: 6_144_000,
+			wantCapacity:   "25.00%",
+			wantOptions:    []string{"read", "write", "setuid", "devices", "dev=4310002"},
+			wantCalls: []fakeHostRunCall{
+				{name: "mount", args: []string{"-v"}},
+				{name: "df", args: []string{"-P"}},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.goos, func(t *testing.T) {
+			host := &fakeHostOS{platform: tt.goos, runOutputs: tt.outputs}
+			s := NewSession()
+			s.host = host
+
+			got := rootMountpoint(s)
+			root, ok := got["/"].(map[string]any)
+			if !ok {
+				t.Fatalf("rootMountpoint(%s) = %#v, want / map", tt.goos, got)
+			}
+			if root["device"] != tt.wantDevice || root["filesystem"] != tt.wantFilesystem || root["size_bytes"] != tt.wantSizeBytes {
+				t.Fatalf("root mountpoint = %#v, want device %q filesystem %q size_bytes %d", root, tt.wantDevice, tt.wantFilesystem, tt.wantSizeBytes)
+			}
+			if root["used_bytes"] != tt.wantUsedBytes || root["available_bytes"] != tt.wantAvailBytes || root["capacity"] != tt.wantCapacity {
+				t.Fatalf("root mountpoint df fields = %#v, want used_bytes %d available_bytes %d capacity %q", root, tt.wantUsedBytes, tt.wantAvailBytes, tt.wantCapacity)
+			}
+			if !reflect.DeepEqual(root["options"], tt.wantOptions) {
+				t.Fatalf("root mountpoint options = %#v, want %#v", root["options"], tt.wantOptions)
+			}
+			if !reflect.DeepEqual(host.runCalls, tt.wantCalls) {
+				t.Fatalf("run calls = %#v, want %#v", host.runCalls, tt.wantCalls)
+			}
+		})
+	}
+}
+
+func TestCurrentBSDAndIllumosMountpointsFallbackToRootStatWhenMountOutputMissing(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		run  func(*Session) map[string]any
+	}{
+		{name: "dragonfly", run: currentDragonFlyMountpoints},
+		{name: "illumos", run: currentIllumosMountpoints},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			host := &fakeHostOS{
+				platform: tt.name,
+				runOutputs: map[string]string{
+					fakeRunKey("mount"):       "",
+					fakeRunKey("mount", "-v"): "",
+				},
+				mountStats: map[string]mountStat{
+					"/": {SizeBytes: 2048, UsedBytes: 1024, AvailableBytes: 1024},
+				},
+			}
+			s := NewSession()
+			s.host = host
+
+			got := tt.run(s)
+			root, ok := got["/"].(map[string]any)
+			if !ok {
+				t.Fatalf("%s mountpoints = %#v, want / mountpoint", tt.name, got)
+			}
+			if root["size_bytes"] != 2048 || root["used_bytes"] != 1024 || root["available_bytes"] != 1024 || root["capacity"] != "50.00%" {
+				t.Fatalf("%s root mountpoint = %#v, want stat-derived bytes and capacity", tt.name, root)
+			}
+			if want := []string{"/"}; !reflect.DeepEqual(host.statMountpointCalls, want) {
+				t.Fatalf("%s statMountpoint calls = %#v, want %#v", tt.name, host.statMountpointCalls, want)
+			}
+		})
+	}
+}
+
 func TestDarwinMountpointsFactUsesZeroDefaultsWhenStatFails(t *testing.T) {
 	entries := []mountEntry{{Device: "/dev/root", Path: "/", Filesystem: "ext4", Options: []string{"rw", "noatime"}}}
 	stats := func(string) (mountStat, bool) { return mountStat{}, false }
@@ -1524,6 +2193,24 @@ devfs                2       2         0   100%    /dev
 	}
 }
 
+func TestCurrentDragonFlyMountpointsUsesMountAndDFOutput(t *testing.T) {
+	t.Parallel()
+
+	s := NewSession()
+	s.host = &fakeHostOS{runOutputs: map[string]string{
+		fakeRunKey("mount"): "da0s1d on / (hammer2, local)\n",
+		fakeRunKey("df", "-P"): `Filesystem  512-blocks    Used     Avail Capacity  Mounted on
+da0s1d       247916160 2892416 245023744     1%    /
+`,
+	}}
+
+	got := currentDragonFlyMountpoints(s)
+	root := got["/"].(map[string]any)
+	if root["device"] != "/dev/da0s1d" || root["filesystem"] != "hammer2" || root["size_bytes"] != 126_933_073_920 {
+		t.Fatalf("currentDragonFlyMountpoints()[/] = %#v", root)
+	}
+}
+
 func TestDragonFlyMountDeviceOnlyNormalizesDiskPartitions(t *testing.T) {
 	tests := []struct {
 		in   string
@@ -1557,6 +2244,69 @@ swap                     5046424      133048     4913376     3%    /tmp`
 	}
 }
 
+func TestCurrentIllumosMountpointsUsesMountAndDFOutput(t *testing.T) {
+	t.Parallel()
+
+	s := NewSession()
+	s.host = &fakeHostOS{runOutputs: map[string]string{
+		fakeRunKey("mount", "-v"): "rpool/ROOT/omnios-r151058 on / type zfs read/write/setuid on Thu Jan  1 00:00:00 1970\n",
+		fakeRunKey("df", "-P"): `Filesystem            512-blocks        Used   Available Capacity  Mounted on
+rpool/ROOT/omnios-r151058    59932672     1902744    57629848     4%    /
+`,
+	}}
+
+	got := currentIllumosMountpoints(s)
+	root := got["/"].(map[string]any)
+	if root["device"] != "rpool/ROOT/omnios-r151058" || root["filesystem"] != "zfs" || root["size_bytes"] != 30_685_528_064 {
+		t.Fatalf("currentIllumosMountpoints()[/] = %#v", root)
+	}
+}
+
+func TestCurrentBSDStyleMountpointsFallbackToRootStat(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		outputs map[string]string
+		current func(*Session) map[string]any
+	}{
+		{
+			name:    "dragonfly",
+			outputs: map[string]string{fakeRunKey("mount"): ""},
+			current: currentDragonFlyMountpoints,
+		},
+		{
+			name:    "illumos",
+			outputs: map[string]string{fakeRunKey("mount", "-v"): ""},
+			current: currentIllumosMountpoints,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			host := &fakeHostOS{
+				runOutputs: tt.outputs,
+				mountStats: map[string]mountStat{
+					"/": {SizeBytes: 100, AvailableBytes: 25, UsedBytes: 75},
+				},
+			}
+			s := NewSession()
+			s.host = host
+
+			got := tt.current(s)
+			root := got["/"].(map[string]any)
+			if root["size_bytes"] != 100 || root["available_bytes"] != 25 || root["used_bytes"] != 75 {
+				t.Fatalf("current mountpoints fallback root = %#v", root)
+			}
+			if want := []string{"/"}; !reflect.DeepEqual(host.statMountpointCalls, want) {
+				t.Fatalf("statMountpoint calls = %#v, want %#v", host.statMountpointCalls, want)
+			}
+		})
+	}
+}
+
 func TestParseNetBSDMountEntries(t *testing.T) {
 	input := `/dev/dk1 on / type ffs (noatime, local)
 /dev/dk0 on /boot type msdos (local)
@@ -1571,6 +2321,42 @@ ptyfs on /dev/pts type ptyfs (local)
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("parseBSDMountEntries() = %#v, want %#v", got, want)
+	}
+}
+
+func TestParseBSDMountEntriesHandlesFreeBSDStyleFilesystemOptions(t *testing.T) {
+	t.Parallel()
+
+	input := `/dev/gpt/rootfs on / (ufs, local, journaled soft-updates)
+malformed without separator
+/dev/gpt/bad on /bad
+`
+
+	got := parseBSDMountEntries(input)
+	want := []mountEntry{
+		{Device: "/dev/gpt/rootfs", Path: "/", Filesystem: "ufs", Options: []string{"local", "journaled soft-updates"}},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("parseBSDMountEntries() = %#v, want %#v", got, want)
+	}
+}
+
+func TestParseIllumosMountEntriesHandlesLegacyAndTypedFormats(t *testing.T) {
+	t.Parallel()
+
+	input := `rpool/ROOT/omnios-r151058 on / type zfs read/write/setuid/devices/dev=4310002 on Thu Jan  1 00:00:00 1970
+/ on rpool/ROOT/omnios-r151058 read/write/setuid
+bad line
+/missing on onlyonefield
+`
+
+	got := parseIllumosMountEntries(input)
+	want := []mountEntry{
+		{Device: "rpool/ROOT/omnios-r151058", Path: "/", Filesystem: "zfs", Options: []string{"read", "write", "setuid", "devices", "dev=4310002"}},
+		{Device: "rpool/ROOT/omnios-r151058", Path: "/", Options: []string{"read", "write", "setuid"}},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("parseIllumosMountEntries() = %#v, want %#v", got, want)
 	}
 }
 

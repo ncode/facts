@@ -33,6 +33,48 @@ func TestFactCache_resolvesFreshCachedFactAndSkipsSearch(t *testing.T) {
 	}
 }
 
+func TestFactCache_disabledCachesAreNoops(t *testing.T) {
+	searched := []ResolvedFact{{Name: "os", Type: "core"}}
+
+	for _, cache := range []*FactCache{nil, {}} {
+		remaining, cached := cache.ResolveFacts(searched)
+		if !reflect.DeepEqual(remaining, searched) {
+			t.Fatalf("ResolveFacts() remaining = %#v, want %#v", remaining, searched)
+		}
+		if cached != nil {
+			t.Fatalf("ResolveFacts() cached = %#v, want nil", cached)
+		}
+		if err := cache.CacheFacts([]ResolvedFact{{Name: "os", Value: "Ubuntu", Type: "core"}}); err != nil {
+			t.Fatalf("CacheFacts() err = %v, want nil", err)
+		}
+	}
+}
+
+func TestNewFactCacheDefaultsLoggerAndIgnoresInvalidTTLs(t *testing.T) {
+	cache := NewFactCache(t.TempDir(), []FactTTL{
+		{Fact: "os", TTL: "not a ttl"},
+		{Fact: "networking", TTL: "1 hour"},
+	}, nil, nil)
+
+	if cache.logger() == nil {
+		t.Fatal("logger() = nil, want discard logger")
+	}
+	if _, ok := cache.ttls["os"]; ok {
+		t.Fatalf("ttls = %#v, want invalid os TTL ignored", cache.ttls)
+	}
+	if got, ok := cache.ttls["networking"]; !ok || got != time.Hour {
+		t.Fatalf("ttls[networking] = %v, %v, want 1h true", got, ok)
+	}
+}
+
+func TestFactCacheNilLoggerFallsBackToDiscardLogger(t *testing.T) {
+	var cache *FactCache
+
+	if cache.logger() == nil {
+		t.Fatal("nil FactCache logger() = nil, want discard logger")
+	}
+}
+
 func TestPlatformDefaultCachePathForSupportedPlatforms(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -82,6 +124,35 @@ func TestPlatformDefaultCachePathForSupportedPlatforms(t *testing.T) {
 				t.Fatalf("platformDefaultCachePathFor(%q) = %q, want %q", tt.goos, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestPlatformDefaultCachePathReadsCurrentWindowsEnvironment(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("ProgramData and APPDATA are only used by the Windows cache path")
+	}
+
+	t.Setenv("ProgramData", `C:\ProgramData`)
+	t.Setenv("APPDATA", `C:\Users\Alice\AppData\Roaming`)
+
+	got := platformDefaultCachePath()
+	want := `C:\ProgramData/PuppetLabs/facts/cache/cached_facts`
+	if got != want {
+		t.Fatalf("platformDefaultCachePath() = %q, want %q", got, want)
+	}
+}
+
+func TestPlatformDefaultCachePathUsesDefaultPathOutsideWindows(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("non-Windows default path assertion")
+	}
+	t.Setenv("ProgramData", `C:\ProgramData`)
+	t.Setenv("APPDATA", `C:\Users\Alice\AppData\Roaming`)
+
+	got := platformDefaultCachePath()
+	want := "/opt/puppetlabs/facts/cache/cached_facts"
+	if got != want {
+		t.Fatalf("platformDefaultCachePath() = %q, want %q", got, want)
 	}
 }
 
@@ -217,6 +288,19 @@ func TestFactCache_cacheFactsWritesConfiguredGroups(t *testing.T) {
 	}
 }
 
+func TestFactCache_cacheFactsReturnsNonPermissionMkdirError(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "cache-file")
+	if err := os.WriteFile(dir, []byte("not a directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cache := NewFactCache(dir, []FactTTL{{Fact: "operating system", TTL: "1 hour"}}, nil, discardLog())
+
+	err := cache.CacheFacts([]ResolvedFact{{Name: "os", Value: "Ubuntu", Type: "core"}})
+	if err == nil {
+		t.Fatal("CacheFacts() err = nil, want mkdir error for file cache path")
+	}
+}
+
 func TestFactCache_cacheFactsWritesExternalFileBasenameGroup(t *testing.T) {
 	dir := t.TempDir()
 	cache := NewFactCache(dir, []FactTTL{{Fact: "ext_file.txt", TTL: "1 hour"}}, nil, discardLog())
@@ -233,6 +317,59 @@ func TestFactCache_cacheFactsWritesExternalFileBasenameGroup(t *testing.T) {
 	}
 	if data["my_external_fact"] != "ext_fact" {
 		t.Fatalf("my_external_fact = %#v, want ext_fact", data["my_external_fact"])
+	}
+}
+
+func TestFactCache_cacheFactsSkipsFreshCacheThatAlreadyContainsFacts(t *testing.T) {
+	dir := t.TempDir()
+	cachePath := filepath.Join(dir, "operating system")
+	writeJSONFile(t, cachePath, map[string]any{
+		"cache_format_version": float64(1),
+		"os":                   "Ubuntu",
+	})
+	before, err := os.Stat(cachePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cache := NewFactCache(dir, []FactTTL{{Fact: "operating system", TTL: "1 hour"}}, nil, discardLog())
+	if err := cache.CacheFacts([]ResolvedFact{{Name: "os", Value: "Fedora", Type: "core"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	data := readJSONFile(t, cachePath)
+	if data["os"] != "Ubuntu" {
+		t.Fatalf("cached os = %#v, want fresh cache left untouched", data["os"])
+	}
+	after, err := os.Stat(cachePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !after.ModTime().Equal(before.ModTime()) {
+		t.Fatalf("cache mtime changed from %s to %s, want unchanged", before.ModTime(), after.ModTime())
+	}
+}
+
+func TestFactCache_cacheFactsRewritesStaleCache(t *testing.T) {
+	dir := t.TempDir()
+	cachePath := filepath.Join(dir, "operating system")
+	writeJSONFile(t, cachePath, map[string]any{
+		"cache_format_version": float64(1),
+		"os":                   "Ubuntu",
+	})
+	old := time.Now().Add(-2 * time.Hour)
+	if err := os.Chtimes(cachePath, old, old); err != nil {
+		t.Fatal(err)
+	}
+
+	cache := NewFactCache(dir, []FactTTL{{Fact: "operating system", TTL: "1 hour"}}, nil, discardLog())
+	if err := cache.CacheFacts([]ResolvedFact{{Name: "os", Value: "Fedora", Type: "core"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	data := readJSONFile(t, cachePath)
+	if data["os"] != "Fedora" {
+		t.Fatalf("cached os = %#v, want stale cache rewritten", data["os"])
 	}
 }
 
@@ -266,6 +403,33 @@ func TestWriteCacheFileWritesFinalFileAndRemovesTemp(t *testing.T) {
 	}
 }
 
+func TestWriteCacheFileReturnsErrorWhenParentIsMissing(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "missing", "facts.cache")
+
+	if err := writeCacheFile(path, []byte("cached"), 0o600); err == nil {
+		t.Fatal("writeCacheFile() err = nil, want missing parent directory error")
+	}
+}
+
+func TestWriteCacheFileCleansTempFileWhenRenameFails(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "facts.cache")
+	if err := os.Mkdir(path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := writeCacheFile(path, []byte("cached"), 0o600); err == nil {
+		t.Fatal("writeCacheFile() err = nil, want rename error for directory target")
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "facts.cache" {
+		t.Fatalf("cache dir entries = %#v, want only original directory target", entries)
+	}
+}
+
 func TestFactCache_ignoresUnsafeCacheGroupNames(t *testing.T) {
 	dir := t.TempDir()
 	outside := filepath.Join(dir, "..", "outside-cache")
@@ -293,6 +457,18 @@ func TestSafeCacheGroupNameRejectsWindowsSpecialNames(t *testing.T) {
 				t.Fatalf("safeCacheGroupName(%q) = true, want false", name)
 			}
 		})
+	}
+}
+
+func TestWarnCacheWriteFailureIgnoresNonPermissionErrors(t *testing.T) {
+	warnings := []string{}
+	logger := captureLogger(nil, &warnings, nil)
+
+	if warnCacheWriteFailure(os.ErrNotExist, logger) {
+		t.Fatal("warnCacheWriteFailure(os.ErrNotExist) = true, want false")
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %#v, want none", warnings)
 	}
 }
 
@@ -385,6 +561,41 @@ func TestFactCache_cacheFactsLogsNoKeysForNonObjectFreshCacheLikeRubyCacheManage
 	}
 }
 
+func TestFactCache_cacheFactsLogsNoKeysForNilFreshCacheLikeRubyCacheManager(t *testing.T) {
+	dir := t.TempDir()
+	cachePath := filepath.Join(dir, "operating system")
+	if err := os.WriteFile(cachePath, []byte("null"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	debugMessages := []string{}
+	logger := captureLogger(&debugMessages, nil, nil)
+	cache := NewFactCache(dir, []FactTTL{{Fact: "operating system", TTL: "1 hour"}}, nil, logger)
+
+	if err := cache.CacheFacts([]ResolvedFact{{Name: "os", Value: "Ubuntu", Type: "core"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	data := readJSONFile(t, cachePath)
+	if data["os"] != "Ubuntu" {
+		t.Fatalf("cached os = %#v, want Ubuntu", data["os"])
+	}
+	if data["cache_format_version"] != float64(1) {
+		t.Fatalf("cache_format_version = %#v, want 1", data["cache_format_version"])
+	}
+	wantDebugPrefix := "No keys found in " + cachePath + ". Detail:"
+	wantDebugDetail := "cached data is nil"
+	foundDebug := false
+	for _, message := range debugMessages {
+		if strings.Contains(message, wantDebugPrefix) && strings.Contains(message, wantDebugDetail) {
+			foundDebug = true
+			break
+		}
+	}
+	if !foundDebug {
+		t.Fatalf("debug messages = %#v, want one containing %q and %q", debugMessages, wantDebugPrefix, wantDebugDetail)
+	}
+}
+
 func TestFactCache_resolveFactsWarnsWhenCorruptCacheCannotBeDeletedLikeRubyCacheManager(t *testing.T) {
 	dir := t.TempDir()
 	cachePath := filepath.Join(dir, "ext_file.txt")
@@ -418,12 +629,49 @@ func TestFactCache_resolveFactsWarnsWhenCorruptCacheCannotBeDeletedLikeRubyCache
 	}
 }
 
+func TestFactCache_readCacheRejectsWrongFormatVersion(t *testing.T) {
+	dir := t.TempDir()
+	cachePath := filepath.Join(dir, "operating system")
+	writeJSONFile(t, cachePath, map[string]any{
+		"cache_format_version": float64(2),
+		"os":                   "Ubuntu",
+	})
+	cache := NewFactCache(dir, []FactTTL{{Fact: "operating system", TTL: "1 hour"}}, nil, discardLog())
+
+	got, ok := cache.readCache("operating system")
+	if ok || got != nil {
+		t.Fatalf("readCache() = %#v, %v; want nil false", got, ok)
+	}
+	if _, err := os.Stat(cachePath); !os.IsNotExist(err) {
+		t.Fatalf("cache file stat err = %v, want removed", err)
+	}
+}
+
+func TestCacheDataHasKeyMatchingFactFallsBackToContainsForInvalidPattern(t *testing.T) {
+	data := map[string]any{"site[role": "web"}
+
+	if !cacheDataHasKeyMatchingFact(data, "[") {
+		t.Fatal("cacheDataHasKeyMatchingFact() = false, want invalid regexp to match by contains")
+	}
+	if cacheDataHasKeyMatchingFact(data, "missing[") {
+		t.Fatal("cacheDataHasKeyMatchingFact() = true, want false for missing literal")
+	}
+	regexpData := map[string]any{"site-role": "web"}
+	if !cacheDataHasKeyMatchingFact(regexpData, `site.*role`) {
+		t.Fatal("cacheDataHasKeyMatchingFact() = false, want valid regexp to match")
+	}
+}
+
 func TestParseTTLDuration_matchesRubyUnits(t *testing.T) {
 	tests := []struct {
 		input string
 		want  time.Duration
 	}{
 		{input: "10000", want: 10 * time.Second},
+		{input: "2000000 us", want: 2 * time.Second},
+		{input: "1500 milliseconds", want: time.Second},
+		{input: "2 seconds", want: 2 * time.Second},
+		{input: "3 minutes", want: 3 * time.Minute},
 		{input: "30 h", want: 30 * time.Hour},
 		{input: "1 hour", want: time.Hour},
 		{input: "1 day", want: 24 * time.Hour},
@@ -444,7 +692,7 @@ func TestParseTTLDuration_matchesRubyUnits(t *testing.T) {
 
 func TestParseTTLDuration_rejectsNegativeAndOverflowingValues(t *testing.T) {
 	tooManyHours := strconv.FormatInt(int64((time.Duration(1<<63-1)/time.Hour)+1), 10) + " h"
-	for _, input := range []string{"-1 seconds", tooManyHours} {
+	for _, input := range []string{"", "1 2 3", "abc seconds", "-1 seconds", "1 fortnight", tooManyHours} {
 		t.Run(input, func(t *testing.T) {
 			if got, ok := parseTTLDuration(input); ok {
 				t.Fatalf("parseTTLDuration(%q) = %v, true; want false", input, got)

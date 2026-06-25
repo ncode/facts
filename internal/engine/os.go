@@ -157,7 +157,7 @@ func windowsArchitectureFromHardware(hardware string) string {
 var linuxI386ArchitectureRE = regexp.MustCompile(`^(?:i[3-6]86|pentium)$`)
 
 func probeArchitectureName(s *Session) string {
-	return currentArchitectureName(runtime.GOOS, s.cachedHardwareModel())
+	return currentArchitectureName(s.goos(), s.cachedHardwareModel())
 }
 
 func currentArchitectureName(goos, machine string) string {
@@ -165,17 +165,18 @@ func currentArchitectureName(goos, machine string) string {
 }
 
 func probeKernelRelease(s *Session) string {
-	if runtime.GOOS == "plan9" {
+	if s.goos() == "plan9" {
 		return ""
 	}
 	return strings.TrimSpace(s.commandOutput("uname", "-r"))
 }
 
 func probeHardwareModel(s *Session) string {
-	if runtime.GOOS == "windows" {
+	goos := s.goos()
+	if goos == "windows" {
 		return windowsHardwareFromGoArch(runtime.GOARCH)
 	}
-	if runtime.GOOS == "plan9" {
+	if goos == "plan9" {
 		return plan9Architecture(s.readFile, runtime.GOARCH)
 	}
 	out := s.commandOutput("uname", "-m")
@@ -186,7 +187,7 @@ func probeHardwareModel(s *Session) string {
 }
 
 func probeMacOSModel(s *Session) string {
-	return currentMacOSModel(runtime.GOOS, s.commandOutput)
+	return currentMacOSModel(s.goos(), s.commandOutput)
 }
 
 func currentMacOSModel(goos string, run commandRunner) string {
@@ -197,17 +198,18 @@ func currentMacOSModel(goos string, run commandRunner) string {
 }
 
 func probeOSRelease(s *Session) any {
-	if runtime.GOOS == "windows" {
+	goos := s.goos()
+	if goos == "windows" {
 		if release := currentWindowsOSRelease(s.cachedWindowsOSVersionInput()); len(release) > 0 {
 			return release
 		}
 		return nil
 	}
-	return currentOSRelease(s, runtime.GOOS, s.readFile, s.commandOutput)
+	return currentOSRelease(s, goos, s.readFile, s.commandOutput)
 }
 
 func probeWindowsOSVersionInput(s *Session) string {
-	if runtime.GOOS != "windows" {
+	if s.goos() != "windows" {
 		return ""
 	}
 	return windowsWMIOutput(s.commandOutput, "os", "OtherTypeDescription,ProductType,Version")
@@ -749,7 +751,7 @@ type macOSInfo struct {
 }
 
 func probeMacOSInfo(s *Session) macOSInfo {
-	return currentMacOSInfo(runtime.GOOS, s.commandOutput)
+	return currentMacOSInfo(s.goos(), s.commandOutput)
 }
 
 func currentMacOSInfo(goos string, run commandRunner) macOSInfo {
@@ -824,7 +826,7 @@ type macOSSystemProfilerEthernet struct {
 }
 
 func probeMacOSSystemProfilerHardware(s *Session) macOSSystemProfilerHardware {
-	if runtime.GOOS != "darwin" {
+	if s.goos() != "darwin" {
 		return macOSSystemProfilerHardware{}
 	}
 	out := s.commandOutput("system_profiler", "SPHardwareDataType")
@@ -835,7 +837,7 @@ func probeMacOSSystemProfilerHardware(s *Session) macOSSystemProfilerHardware {
 }
 
 func probeMacOSSystemProfilerSoftware(s *Session) macOSSystemProfilerSoftware {
-	if runtime.GOOS != "darwin" {
+	if s.goos() != "darwin" {
 		return macOSSystemProfilerSoftware{}
 	}
 	out := s.commandOutput("system_profiler", "SPSoftwareDataType")
@@ -846,7 +848,7 @@ func probeMacOSSystemProfilerSoftware(s *Session) macOSSystemProfilerSoftware {
 }
 
 func probeMacOSSystemProfilerEthernet(s *Session) macOSSystemProfilerEthernet {
-	return currentMacOSSystemProfilerEthernet(runtime.GOOS, s.commandOutput)
+	return currentMacOSSystemProfilerEthernet(s.goos(), s.commandOutput)
 }
 
 func currentMacOSSystemProfilerEthernet(goos string, run commandRunner) macOSSystemProfilerEthernet {

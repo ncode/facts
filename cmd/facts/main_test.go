@@ -45,6 +45,76 @@ func TestFactsCommand_version(t *testing.T) {
 	}
 }
 
+func TestMainFunctionVersion(t *testing.T) {
+	oldArgs, oldStdout, oldStderr := os.Args, os.Stdout, os.Stderr
+	stdoutR, stdoutW, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stderrR, stderrW, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		os.Args, os.Stdout, os.Stderr = oldArgs, oldStdout, oldStderr
+		_ = stdoutR.Close()
+		_ = stderrR.Close()
+	})
+	os.Args, os.Stdout, os.Stderr = []string{"facts", "--version"}, stdoutW, stderrW
+
+	main()
+	_ = stdoutW.Close()
+	_ = stderrW.Close()
+
+	stdout := new(bytes.Buffer)
+	stderr := new(bytes.Buffer)
+	if _, err := stdout.ReadFrom(stdoutR); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := stderr.ReadFrom(stderrR); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := stdout.String(), engine.Version+"\n"; got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}
+
+func TestRunMainReportsOptionErrors(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+
+	if code := runMain(&stdout, &stderr, []string{"-z"}); code != 1 {
+		t.Fatalf("runMain() code = %d, want 1", code)
+	}
+	if !strings.Contains(stdout.String(), "facts [options] [query]") {
+		t.Fatalf("stdout = %q, want usage text", stdout.String())
+	}
+	if got, want := stderr.String(), "ERROR Facts::OptionsValidator - unrecognised option '-z'\n"; got != want {
+		t.Fatalf("stderr = %q, want %q", got, want)
+	}
+}
+
+func TestRunMainReportsGenericErrors(t *testing.T) {
+	dir := t.TempDir()
+	externalDir := filepath.Join(dir, "not-a-dir")
+	if err := os.WriteFile(externalDir, []byte("site=lab\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+
+	if code := runMain(&stdout, &stderr, []string{"--external-dir", externalDir, "--list-cache-groups"}); code != 1 {
+		t.Fatalf("runMain() code = %d, want 1", code)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty", stdout.String())
+	}
+	if got := stderr.String(); got == "" || strings.Contains(got, "Facts::OptionsValidator") {
+		t.Fatalf("stderr = %q, want generic config error", got)
+	}
+}
+
 func TestFactsCommand_noQueryPrintsStructuredFacts(t *testing.T) {
 	bin := buildFactsCommand(t)
 

@@ -1,6 +1,9 @@
 package schema
 
 import (
+	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -142,6 +145,32 @@ func TestFlattenTreeEscapesDottedKeys(t *testing.T) {
 	}
 	if got := s.UndocumentedPaths(paths, "linux"); len(got) != 0 {
 		t.Fatalf("UndocumentedPaths() = %#v, want none", got)
+	}
+}
+
+func TestSchemaPathHelpersPreserveEscapedSegments(t *testing.T) {
+	t.Parallel()
+
+	if got, want := joinPath("", "eth0.100"), `eth0\.100`; got != want {
+		t.Fatalf("joinPath(empty) = %q, want %q", got, want)
+	}
+	if got, want := joinPath("networking.interfaces", `bond\0`), `networking.interfaces.bond\\0`; got != want {
+		t.Fatalf("joinPath(prefix) = %q, want %q", got, want)
+	}
+	if got := splitPath(`networking.interfaces.eth0\.100.mtu`); !reflect.DeepEqual(got, []string{"networking", "interfaces", "eth0.100", "mtu"}) {
+		t.Fatalf("splitPath(escaped dot) = %#v", got)
+	}
+}
+
+func TestLastSegmentIndexFindsLastWildcard(t *testing.T) {
+	t.Parallel()
+
+	segments := []string{"mountpoints", "*", "options", "*", "name"}
+	if got := lastSegmentIndex(segments, "*"); got != 3 {
+		t.Fatalf("lastSegmentIndex() = %d, want 3", got)
+	}
+	if got := lastSegmentIndex(segments, "missing"); got != -1 {
+		t.Fatalf("lastSegmentIndex(missing) = %d, want -1", got)
 	}
 }
 
@@ -333,5 +362,133 @@ func TestPlatformsUseTargetProfileVocabulary(t *testing.T) {
 
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("Platforms() IDs = %#v, want target profile schema IDs %#v", got, want)
+	}
+}
+
+func TestLoadFileReadsAndValidatesSchema(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "facts.yaml")
+	data := []byte(`
+kernel.name:
+  type: string
+  description: Kernel name.
+  platforms: [linux]
+`)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := LoadFile(path)
+	if err != nil {
+		t.Fatalf("LoadFile() err = %v, want nil", err)
+	}
+	want := Schema{"kernel.name": {
+		Type:        "string",
+		Description: "Kernel name.",
+		Platforms:   []string{"linux"},
+	}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("LoadFile() = %#v, want %#v", got, want)
+	}
+}
+
+func TestLoadFileWrapsReadAndParseErrors(t *testing.T) {
+	if _, err := LoadFile(filepath.Join(t.TempDir(), "missing.yaml")); err == nil || !errors.Is(err, os.ErrNotExist) || !strings.Contains(err.Error(), "read schema") {
+		t.Fatalf("LoadFile(missing) err = %v, want read schema wrapper around os.ErrNotExist", err)
+	}
+
+	path := filepath.Join(t.TempDir(), "invalid.yaml")
+	if err := os.WriteFile(path, []byte("[]"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadFile(path); err == nil || !strings.Contains(err.Error(), "parse schema") {
+		t.Fatalf("LoadFile(invalid) err = %v, want parse schema wrapper", err)
+	}
+
+	semanticPath := filepath.Join(t.TempDir(), "semantic-invalid.yaml")
+	data := []byte(`
+kernel.name:
+  type: scalar
+  description: Kernel name.
+  platforms: [linux]
+`)
+	if err := os.WriteFile(semanticPath, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadFile(semanticPath); err == nil || !strings.Contains(err.Error(), "parse schema") || !strings.Contains(err.Error(), "invalid type") {
+		t.Fatalf("LoadFile(semantic invalid) err = %v, want parse schema validation wrapper", err)
+	}
+}
+
+func TestParseRejectsUnknownEntryFields(t *testing.T) {
+	data := []byte(`
+kernel.name:
+  type: string
+  description: Kernel name.
+  platforms: [linux]
+  typo: true
+`)
+
+	_, err := Parse(data)
+	if err == nil || !strings.Contains(err.Error(), "typo") {
+		t.Fatalf("Parse() err = %v, want unknown field error mentioning typo", err)
+	}
+}
+
+func TestValidateReportsEntryShapeErrors(t *testing.T) {
+	s := Schema{
+		"": {
+			Type:        "scalar",
+			Description: " ",
+			Platforms:   []string{"linux", "linux"},
+		},
+		"missing.platforms": {
+			Type:        "string",
+			Description: "Missing platforms.",
+		},
+	}
+
+	err := s.Validate()
+	if err == nil {
+		t.Fatal("Validate() err = nil, want shape errors")
+	}
+	for _, want := range []string{
+		"entry has empty path",
+		`entry "" has invalid type "scalar"`,
+		`entry "" has no description`,
+		`entry "" lists platform "linux" twice`,
+		`entry "missing.platforms" lists no platforms`,
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("Validate() err = %v, want containing %q", err, want)
+		}
+	}
+}
+
+func TestEntriesForPlatformReturnsSortedPlatformItems(t *testing.T) {
+	s := Schema{
+		"z.fact": {
+			Type:        "string",
+			Description: "Z fact.",
+			Platforms:   []string{"linux"},
+		},
+		"a.fact": {
+			Type:        "string",
+			Description: "A fact.",
+			Platforms:   []string{"darwin", "linux"},
+		},
+		"darwin.only": {
+			Type:        "string",
+			Description: "Darwin fact.",
+			Platforms:   []string{"darwin"},
+		},
+	}
+
+	got := s.EntriesForPlatform("linux")
+	want := []Item{
+		{Path: "a.fact", Entry: s["a.fact"]},
+		{Path: "z.fact", Entry: s["z.fact"]},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("EntriesForPlatform(linux) = %#v, want %#v", got, want)
 	}
 }

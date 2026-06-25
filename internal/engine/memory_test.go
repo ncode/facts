@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"reflect"
 	"runtime"
 	"strings"
@@ -274,6 +275,30 @@ func TestParseDarwinSwapUsage(t *testing.T) {
 	}
 }
 
+func TestParseDarwinMemoryAmountBytes(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		input string
+		want  int
+	}{
+		{input: "", want: 0},
+		{input: "bad", want: 0},
+		{input: "512K", want: 524_288},
+		{input: "1.5M", want: 1_572_864},
+		{input: "1G", want: 1_073_741_824},
+		{input: "4096", want: 4096},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			if got := parseDarwinMemoryAmountBytes(tt.input); got != tt.want {
+				t.Fatalf("parseDarwinMemoryAmountBytes(%q) = %d, want %d", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestCurrentDarwinSwapUsageMatchesRubyResolver(t *testing.T) {
 	t.Parallel()
 
@@ -292,6 +317,32 @@ func TestCurrentDarwinSwapUsageMatchesRubyResolver(t *testing.T) {
 	}
 	if got != want {
 		t.Fatalf("currentDarwinSwapUsage() = %#v, want %#v", got, want)
+	}
+}
+
+func TestDarwinMemoryParsersHandleMalformedAndNonDarwinInputs(t *testing.T) {
+	t.Parallel()
+
+	called := false
+	got := currentDarwinSwapUsage("linux", func(string, ...string) string {
+		called = true
+		return "total = 1G"
+	})
+	if got != (darwinSwapUsage{}) {
+		t.Fatalf("currentDarwinSwapUsage(non-darwin) = %#v, want empty", got)
+	}
+	if called {
+		t.Fatal("currentDarwinSwapUsage(non-darwin) ran command")
+	}
+
+	if got := parseDarwinVMStatAvailableBytes("Pages free: 10.\n"); got != 0 {
+		t.Fatalf("parseDarwinVMStatAvailableBytes(missing page size) = %d, want 0", got)
+	}
+	if got := parseDarwinSwapUsage("total : 1G used = 256M unknown = 3G free = 768M"); got != (darwinSwapUsage{UsedBytes: 268_435_456, AvailableBytes: 805_306_368}) {
+		t.Fatalf("parseDarwinSwapUsage(noisy input) = %#v, want used/free only", got)
+	}
+	if got := parseDarwinMemoryAmountBytes("12B"); got != 0 {
+		t.Fatalf("parseDarwinMemoryAmountBytes(12B) = %d, want 0", got)
 	}
 }
 
@@ -375,6 +426,333 @@ func TestParseFreeBSDMemory_returnsRubyCompatibleSystemAndSwapFacts(t *testing.T
 	}
 }
 
+func TestMemorySysctlHelpersParseCommandOutput(t *testing.T) {
+	s := NewSessionContext(context.Background())
+	host := &fakeHostOS{runOutputs: map[string]string{
+		fakeRunKey("sysctl", "-n", "vm.stats.vm.v_page_size"): "4096\n",
+		fakeRunKey("sysctl", "-n", "bad"):                     "not-a-number\n",
+		fakeRunKey("sysctl", "-n", "hw.physmem"):              "1049231360\n",
+		fakeRunKey("sysctl", "-n", "hw.usermem"):              "2048\n",
+	}}
+	s.host = host
+
+	if got := freeBSDSysctlInt(s, "vm.stats.vm.v_page_size"); got != 4096 {
+		t.Fatalf("freeBSDSysctlInt() = %d, want 4096", got)
+	}
+	if got := freeBSDSysctlInt(s, "bad"); got != 0 {
+		t.Fatalf("freeBSDSysctlInt(bad) = %d, want 0", got)
+	}
+	host.runCalls = nil
+	if got := bsdSysctlInt(s, "bad", "hw.physmem"); got != 1_049_231_360 {
+		t.Fatalf("bsdSysctlInt() = %d, want first positive fallback", got)
+	}
+	wantFallbackCalls := []fakeHostRunCall{
+		{name: "sysctl", args: []string{"-n", "bad"}},
+		{name: "sysctl", args: []string{"-n", "hw.physmem"}},
+	}
+	if !reflect.DeepEqual(host.runCalls, wantFallbackCalls) {
+		t.Fatalf("fallback run calls = %#v, want %#v", host.runCalls, wantFallbackCalls)
+	}
+	if got := bsdSysctlInt(s, "hw.usermem", "hw.physmem"); got != 2048 {
+		t.Fatalf("bsdSysctlInt() = %d, want first positive value in order", got)
+	}
+	if got := bsdSysctlInt(s, "bad"); got != 0 {
+		t.Fatalf("bsdSysctlInt(all bad) = %d, want 0", got)
+	}
+
+	host.runCalls = nil
+	if got := bsdSysctlInt(s, "hw.usermem", "hw.physmem"); got != 2048 {
+		t.Fatalf("bsdSysctlInt() = %d, want first positive value in order", got)
+	}
+	wantCalls := []fakeHostRunCall{
+		{name: "sysctl", args: []string{"-n", "hw.usermem"}},
+	}
+	if !reflect.DeepEqual(host.runCalls, wantCalls) {
+		t.Fatalf("run calls = %#v, want %#v", host.runCalls, wantCalls)
+	}
+}
+
+func TestMemoryProbesUseSessionPlatformForFreeBSD(t *testing.T) {
+	s := NewSessionContext(context.Background())
+	s.host = &fakeHostOS{
+		platform: "freebsd",
+		runOutputs: map[string]string{
+			fakeRunKey("sysctl", "-n", "vm.stats.vm.v_page_size"):    "4096\n",
+			fakeRunKey("sysctl", "-n", "vm.stats.vm.v_page_count"):   "100\n",
+			fakeRunKey("sysctl", "-n", "vm.stats.vm.v_active_count"): "30\n",
+			fakeRunKey("sysctl", "-n", "vm.stats.vm.v_wire_count"):   "20\n",
+			fakeRunKey("swapinfo", "-k"): strings.Join([]string{
+				"Device          1K-blocks     Used    Avail Capacity",
+				"/dev/ada0p2.eli       200       50      150      25%",
+			}, "\n"),
+		},
+	}
+
+	if got := probeTotalPhysicalMemoryBytes(s); got != 409_600 {
+		t.Fatalf("probeTotalPhysicalMemoryBytes() = %d, want 409600", got)
+	}
+	if got := probeAvailablePhysicalMemoryBytes(s); got != 204_800 {
+		t.Fatalf("probeAvailablePhysicalMemoryBytes() = %d, want 204800", got)
+	}
+	if got := probeTotalSwapMemoryBytes(s); got != 204_800 {
+		t.Fatalf("probeTotalSwapMemoryBytes() = %d, want 204800", got)
+	}
+	if got := probeAvailableSwapMemoryBytes(s); got != 153_600 {
+		t.Fatalf("probeAvailableSwapMemoryBytes() = %d, want 153600", got)
+	}
+	if got := probeSwapEncrypted(s); !got {
+		t.Fatalf("probeSwapEncrypted() = false, want true")
+	}
+}
+
+func TestMemoryProbesUseSessionPlatformForBSDAndIllumos(t *testing.T) {
+	tests := []struct {
+		name       string
+		platform   string
+		runOutputs map[string]string
+	}{
+		{
+			name:     "openbsd",
+			platform: "openbsd",
+			runOutputs: map[string]string{
+				fakeRunKey("sysctl", "-n", "hw.physmem64"): "409600\n",
+				fakeRunKey("vmstat", "-s"): strings.Join([]string{
+					"4096 bytes per page",
+					"30 pages active",
+					"20 pages wired",
+				}, "\n"),
+				fakeRunKey("swapctl", "-sk"): "total: 200 1K-blocks allocated, 50 used, 150 available",
+			},
+		},
+		{
+			name:     "dragonfly",
+			platform: "dragonfly",
+			runOutputs: map[string]string{
+				fakeRunKey("sysctl", "-n", "hw.physmem"): "409600\n",
+				fakeRunKey("vmstat", "-s"): strings.Join([]string{
+					"4096 bytes per page",
+					"30 pages active",
+					"20 pages wired",
+				}, "\n"),
+				fakeRunKey("swapinfo", "-k"): strings.Join([]string{
+					"Device          1K-blocks     Used    Avail Capacity",
+					"/dev/da0s1b           200       50      150      25%",
+				}, "\n"),
+			},
+		},
+		{
+			name:     "illumos",
+			platform: "illumos",
+			runOutputs: map[string]string{
+				fakeRunKey("kstat", "-p", "unix:0:system_pages:physmem", "unix:0:system_pages:freemem"): strings.Join([]string{
+					"unix:0:system_pages:physmem\t100",
+					"unix:0:system_pages:freemem\t50",
+				}, "\n"),
+				fakeRunKey("pagesize"):   "4096\n",
+				fakeRunKey("swap", "-s"): "total: 50k used, 150k available",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := NewSessionContext(context.Background())
+			s.host = &fakeHostOS{platform: tt.platform, runOutputs: tt.runOutputs}
+
+			if got := probeTotalPhysicalMemoryBytes(s); got != 409_600 {
+				t.Fatalf("probeTotalPhysicalMemoryBytes() = %d, want 409600", got)
+			}
+			if got := probeAvailablePhysicalMemoryBytes(s); got != 204_800 {
+				t.Fatalf("probeAvailablePhysicalMemoryBytes() = %d, want 204800", got)
+			}
+			if got := probeTotalSwapMemoryBytes(s); got != 204_800 {
+				t.Fatalf("probeTotalSwapMemoryBytes() = %d, want 204800", got)
+			}
+			if got := probeAvailableSwapMemoryBytes(s); got != 153_600 {
+				t.Fatalf("probeAvailableSwapMemoryBytes() = %d, want 153600", got)
+			}
+		})
+	}
+}
+
+func TestMemoryProbesUseSessionPlatformForLinux(t *testing.T) {
+	s := NewSessionContext(context.Background())
+	s.host = &fakeHostOS{
+		platform: "linux",
+		files: map[string][]byte{
+			"/proc/meminfo": []byte("MemTotal: 400 kB\nMemAvailable: 200 kB\nSwapTotal: 100 kB\nSwapFree: 25 kB\n"),
+		},
+	}
+
+	if got := probeLinuxMeminfo(s); got != "MemTotal: 400 kB\nMemAvailable: 200 kB\nSwapTotal: 100 kB\nSwapFree: 25 kB\n" {
+		t.Fatalf("probeLinuxMeminfo() = %q", got)
+	}
+	if got := probeTotalPhysicalMemoryBytes(s); got != 409_600 {
+		t.Fatalf("probeTotalPhysicalMemoryBytes() = %d, want 409600", got)
+	}
+	if got := probeAvailablePhysicalMemoryBytes(s); got != 204_800 {
+		t.Fatalf("probeAvailablePhysicalMemoryBytes() = %d, want 204800", got)
+	}
+	if got := probeTotalSwapMemoryBytes(s); got != 102_400 {
+		t.Fatalf("probeTotalSwapMemoryBytes() = %d, want 102400", got)
+	}
+	if got := probeAvailableSwapMemoryBytes(s); got != 25_600 {
+		t.Fatalf("probeAvailableSwapMemoryBytes() = %d, want 25600", got)
+	}
+}
+
+func TestProbeLinuxMeminfoReturnsEmptyWhenMissing(t *testing.T) {
+	s := NewSessionContext(context.Background())
+	s.host = &fakeHostOS{platform: "linux"}
+
+	if got := probeLinuxMeminfo(s); got != "" {
+		t.Fatalf("probeLinuxMeminfo(missing) = %q, want empty", got)
+	}
+}
+
+func TestMemoryTotalProbeUsesSessionPlatformForPlan9(t *testing.T) {
+	s := NewSessionContext(context.Background())
+	s.host = &fakeHostOS{
+		platform: "plan9",
+		files: map[string][]byte{
+			"/dev/swap": []byte("1067843584 memory\n4096 pagesize\n"),
+		},
+	}
+
+	if got := probeTotalPhysicalMemoryBytes(s); got != 1_067_843_584 {
+		t.Fatalf("probeTotalPhysicalMemoryBytes(plan9) = %d, want 1067843584", got)
+	}
+}
+
+func TestMemoryProbesReturnZeroForUnsupportedSessionPlatform(t *testing.T) {
+	s := NewSessionContext(context.Background())
+	s.host = &fakeHostOS{platform: "hurd"}
+
+	if got := probeTotalPhysicalMemoryBytes(s); got != 0 {
+		t.Fatalf("probeTotalPhysicalMemoryBytes(unsupported) = %d, want 0", got)
+	}
+	if got := probeAvailablePhysicalMemoryBytes(s); got != 0 {
+		t.Fatalf("probeAvailablePhysicalMemoryBytes(unsupported) = %d, want 0", got)
+	}
+	if got := probeTotalSwapMemoryBytes(s); got != 0 {
+		t.Fatalf("probeTotalSwapMemoryBytes(unsupported) = %d, want 0", got)
+	}
+	if got := probeAvailableSwapMemoryBytes(s); got != 0 {
+		t.Fatalf("probeAvailableSwapMemoryBytes(unsupported) = %d, want 0", got)
+	}
+	if got := probeFreeBSDMemoryInfo(s); !reflect.DeepEqual(got, freeBSDMemoryInfo{}) {
+		t.Fatalf("probeFreeBSDMemoryInfo(unsupported) = %#v, want empty", got)
+	}
+}
+
+func TestMemoryProbesUseSessionPlatformForDarwinAndWindows(t *testing.T) {
+	t.Run("darwin", func(t *testing.T) {
+		s := NewSessionContext(context.Background())
+		s.host = &fakeHostOS{
+			platform: "darwin",
+			runOutputs: map[string]string{
+				fakeRunKey("sysctl", "-n", "hw.memsize"):   "409600\n",
+				fakeRunKey("vm_stat"):                      "Mach Virtual Memory Statistics: (page size of 4096 bytes)\nPages free: 50.\n",
+				fakeRunKey("sysctl", "-n", "vm.swapusage"): "total = 200K used = 50K free = 150K (encrypted)",
+			},
+		}
+
+		if got := probeTotalPhysicalMemoryBytes(s); got != 409_600 {
+			t.Fatalf("probeTotalPhysicalMemoryBytes() = %d, want 409600", got)
+		}
+		if got := probeAvailablePhysicalMemoryBytes(s); got != 204_800 {
+			t.Fatalf("probeAvailablePhysicalMemoryBytes() = %d, want 204800", got)
+		}
+		if got := probeTotalSwapMemoryBytes(s); got != 204_800 {
+			t.Fatalf("probeTotalSwapMemoryBytes() = %d, want 204800", got)
+		}
+		if got := probeAvailableSwapMemoryBytes(s); got != 153_600 {
+			t.Fatalf("probeAvailableSwapMemoryBytes() = %d, want 153600", got)
+		}
+		if got := probeSwapEncrypted(s); !got {
+			t.Fatalf("probeSwapEncrypted() = false, want true")
+		}
+	})
+
+	t.Run("windows", func(t *testing.T) {
+		s := NewSessionContext(context.Background())
+		s.host = &fakeHostOS{
+			platform: "windows",
+			runOutputs: map[string]string{
+				fakeRunKey("wmic", "os", "get", "FreePhysicalMemory,TotalVisibleMemorySize", "/value"): "FreePhysicalMemory=200\nTotalVisibleMemorySize=400\n",
+			},
+		}
+
+		if got := probeWindowsMemory(s); got != (windowsMemory{TotalBytes: 409_600, AvailableBytes: 204_800, UsedBytes: 204_800, Capacity: "50.00%"}) {
+			t.Fatalf("probeWindowsMemory() = %#v, want populated Windows memory", got)
+		}
+		if got := probeTotalPhysicalMemoryBytes(s); got != 409_600 {
+			t.Fatalf("probeTotalPhysicalMemoryBytes() = %d, want 409600", got)
+		}
+		if got := probeAvailablePhysicalMemoryBytes(s); got != 204_800 {
+			t.Fatalf("probeAvailablePhysicalMemoryBytes() = %d, want 204800", got)
+		}
+	})
+}
+
+func TestFreeBSDMemoryValueReturnsOnlyIntegerFields(t *testing.T) {
+	values := map[string]any{
+		"total_bytes": "1024",
+		"used_bytes":  512,
+	}
+
+	if got := freeBSDMemoryValue(values, "used_bytes"); got != 512 {
+		t.Fatalf("freeBSDMemoryValue(used_bytes) = %d, want 512", got)
+	}
+	if got := freeBSDMemoryValue(values, "total_bytes"); got != 0 {
+		t.Fatalf("freeBSDMemoryValue(non-int) = %d, want 0", got)
+	}
+	if got := freeBSDMemoryValue(values, "missing"); got != 0 {
+		t.Fatalf("freeBSDMemoryValue(missing) = %d, want 0", got)
+	}
+}
+
+func TestFreeBSDMemoryParsersRejectInvalidInputs(t *testing.T) {
+	t.Parallel()
+
+	if got := parseFreeBSDSystemMemory(map[string]int{"vm.stats.vm.v_page_size": 4096}); got != nil {
+		t.Fatalf("parseFreeBSDSystemMemory(missing page count) = %#v, want nil", got)
+	}
+	if got := parseFreeBSDSwapMemory(""); got != nil {
+		t.Fatalf("parseFreeBSDSwapMemory(empty) = %#v, want nil", got)
+	}
+	input := strings.Join([]string{
+		"Device 1K-blocks Used Avail Capacity",
+		"bad row",
+		"/dev/ada0p2 bad 0 0 0%",
+		"/dev/ada1p2 10 bad 0 0%",
+		"/dev/ada2p2 10 0 bad 0%",
+	}, "\n")
+	if got := parseFreeBSDSwapMemory(input); got != nil {
+		t.Fatalf("parseFreeBSDSwapMemory(invalid rows) = %#v, want nil", got)
+	}
+}
+
+func TestParseFreeBSDSwapMemoryAggregatesPlainAndEncryptedDevices(t *testing.T) {
+	t.Parallel()
+
+	input := `Device          1K-blocks     Used    Avail Capacity
+/dev/ada0p2.eli   1024        512      512     50%
+/dev/ada1p2       2048       1024     1024     50%`
+
+	got := parseFreeBSDSwapMemory(input)
+	want := map[string]any{
+		"available_bytes": 1_572_864,
+		"capacity":        "50.00%",
+		"encrypted":       false,
+		"total_bytes":     3_145_728,
+		"used_bytes":      1_572_864,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("parseFreeBSDSwapMemory() = %#v, want %#v", got, want)
+	}
+}
+
 func TestParseBSDMemory_returnsSystemAndSwapFacts(t *testing.T) {
 	sysctlValues := map[string]int{
 		"hw.physmem":            1_049_231_360,
@@ -451,8 +829,25 @@ func TestParseIllumosMemoryOmitsSystemWithoutFreePages(t *testing.T) {
 	}
 }
 
+func TestParseIllumosMemoryParsersRejectMalformedValues(t *testing.T) {
+	t.Parallel()
+
+	if got := parseIllumosMemory("unix:0:system_pages:physmem\tbad\n", "4096\n", ""); got.System != nil {
+		t.Fatalf("parseIllumosMemory(bad kstat).System = %#v, want nil", got.System)
+	}
+	if got := parseIllumosSwapMemory("total: bad used, also bad available"); got != nil {
+		t.Fatalf("parseIllumosSwapMemory(bad tokens) = %#v, want nil", got)
+	}
+	if got := parseIllumosKToken("badk"); got != 0 {
+		t.Fatalf("parseIllumosKToken(badk) = %d, want 0", got)
+	}
+}
+
 func TestParseBSDVMStatCounters(t *testing.T) {
 	input := `       4096 bytes per page
+not-a-number pages active
+garbage
+         10 files open
      241757 pages managed
       50327 pages free
        7715 pages active
@@ -480,5 +875,30 @@ func TestParseBSDMemory_omitsSwapWhenNoneConfigured(t *testing.T) {
 	}, "no swap devices configured")
 	if got.Swap != nil {
 		t.Fatalf("parseBSDMemory().Swap = %#v, want nil", got.Swap)
+	}
+}
+
+func TestBSDMemoryParsersRejectInvalidInputs(t *testing.T) {
+	t.Parallel()
+
+	invalidSystems := []map[string]int{
+		{"hw.physmem": 1024, "vmstat.pages_active": 1, "vmstat.pages_wired": 1},
+		{"hw.physmem": 1024, "vmstat.bytes_per_page": 0, "vmstat.pages_active": 1, "vmstat.pages_wired": 1},
+		{"hw.physmem": 1024, "vmstat.bytes_per_page": 1, "vmstat.pages_active": -1, "vmstat.pages_wired": 1},
+	}
+	for _, values := range invalidSystems {
+		if got := parseBSDSystemMemory(values); got != nil {
+			t.Fatalf("parseBSDSystemMemory(%#v) = %#v, want nil", values, got)
+		}
+	}
+
+	for _, input := range []string{
+		"total: bad 1K-blocks allocated, 1 used, 1 available",
+		"total: 100 1K-blocks allocated, bad used, 1 available",
+		"total: 100 1K-blocks allocated, 1 used, bad available",
+	} {
+		if got := parseBSDSwapMemory(input); got != nil {
+			t.Fatalf("parseBSDSwapMemory(%q) = %#v, want nil", input, got)
+		}
 	}
 }

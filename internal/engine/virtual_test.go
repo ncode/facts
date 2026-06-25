@@ -1,7 +1,11 @@
 package engine
 
 import (
+	"context"
+	"os"
+	"path/filepath"
 	"reflect"
+	"runtime"
 	"testing"
 )
 
@@ -114,6 +118,84 @@ func TestDetectLinuxVirtualization_detectsOpenVZ(t *testing.T) {
 			got := detectLinuxVirtualization(tt.input)
 			if got != tt.want {
 				t.Fatalf("detectLinuxVirtualization() = %#v, want %#v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestOpenVZEnvIDRequiresUsableStatusAndHostSignals(t *testing.T) {
+	tests := []struct {
+		name  string
+		input linuxVirtualizationInput
+		want  int
+		ok    bool
+	}{
+		{
+			name: "OpenVZ host envID",
+			input: linuxVirtualizationInput{
+				ProcVZ:        true,
+				ProcVZEntries: 3,
+				ProcStatus:    "Name:\tcat\nenvID:\t0\n",
+			},
+			ok: true,
+		},
+		{
+			name: "OpenVZ container envID",
+			input: linuxVirtualizationInput{
+				ProcVZ:        true,
+				ProcVZEntries: 3,
+				ProcStatus:    "envID: 101\n",
+			},
+			want: 101,
+			ok:   true,
+		},
+		{
+			name: "missing proc vz",
+			input: linuxVirtualizationInput{
+				ProcVZEntries: 3,
+				ProcStatus:    "envID: 101\n",
+			},
+		},
+		{
+			name: "CloudLinux LVE marker",
+			input: linuxVirtualizationInput{
+				ProcVZ:        true,
+				LVEList:       true,
+				ProcVZEntries: 3,
+				ProcStatus:    "envID: 101\n",
+			},
+		},
+		{
+			name: "not enough proc vz entries",
+			input: linuxVirtualizationInput{
+				ProcVZ:        true,
+				ProcVZEntries: 2,
+				ProcStatus:    "envID: 101\n",
+			},
+		},
+		{
+			name: "invalid envID",
+			input: linuxVirtualizationInput{
+				ProcVZ:        true,
+				ProcVZEntries: 3,
+				ProcStatus:    "envID: not-a-number\n",
+			},
+		},
+		{
+			name: "missing envID",
+			input: linuxVirtualizationInput{
+				ProcVZ:        true,
+				ProcVZEntries: 3,
+				ProcStatus:    "Name:\tcat\n",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := openVZEnvID(tt.input)
+			if got != tt.want || ok != tt.ok {
+				t.Fatalf("openVZEnvID() = %d, %v; want %d, %v", got, ok, tt.want, tt.ok)
 			}
 		})
 	}
@@ -311,6 +393,330 @@ func TestDetectFreeBSDVirtualization(t *testing.T) {
 				t.Fatalf("detectFreeBSDVirtualization() = %#v, want %#v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestDetectVirtualizationUsesSessionPlatform(t *testing.T) {
+	s := NewSessionContext(context.Background())
+	s.host = &fakeHostOS{
+		platform: "freebsd",
+		runOutputs: map[string]string{
+			fakeRunKey("sysctl", "-n", "security.jail.jailed"): "1\n",
+			fakeRunKey("sysctl", "-n", "kern.vm_guest"):        "xen\n",
+			fakeRunKey("uname", "-r"):                          "",
+			fakeRunKey("dmidecode"):                            "",
+			fakeRunKey("virt-what"):                            "",
+			fakeRunKey("vmware", "-v"):                         "",
+			fakeRunKey("lspci"):                                "",
+		},
+	}
+
+	got := detectVirtualization(s)
+	want := virtualization{Name: "jail", IsVirtual: true}
+	if got != want {
+		t.Fatalf("detectVirtualization() = %#v, want %#v", got, want)
+	}
+}
+
+func TestDetectVirtualizationDispatchesSessionPlatform(t *testing.T) {
+	tests := []struct {
+		name string
+		host *fakeHostOS
+		want virtualization
+	}{
+		{
+			name: "linux physical",
+			host: &fakeHostOS{platform: "linux", runOutputs: map[string]string{
+				fakeRunKey("uname", "-r"):  "",
+				fakeRunKey("dmidecode"):    "",
+				fakeRunKey("virt-what"):    "",
+				fakeRunKey("vmware", "-v"): "",
+				fakeRunKey("lspci"):        "",
+			}},
+			want: virtualization{Name: "physical"},
+		},
+		{
+			name: "freebsd jail",
+			host: &fakeHostOS{platform: "freebsd", runOutputs: map[string]string{
+				fakeRunKey("sysctl", "-n", "security.jail.jailed"): "1\n",
+				fakeRunKey("sysctl", "-n", "kern.vm_guest"):        "none\n",
+			}},
+			want: virtualization{Name: "jail", IsVirtual: true},
+		},
+		{
+			name: "openbsd vmm",
+			host: &fakeHostOS{platform: "openbsd", runOutputs: map[string]string{
+				fakeRunKey("sysctl", "-n", "hw.product"): "VMM\n",
+				fakeRunKey("sysctl", "-n", "hw.vendor"):  "OpenBSD\n",
+			}},
+			want: virtualization{Name: "vmm", IsVirtual: true},
+		},
+		{
+			name: "netbsd kvm",
+			host: &fakeHostOS{platform: "netbsd", runOutputs: map[string]string{
+				fakeRunKey("/sbin/sysctl", "-n", "machdep.dmi.system-vendor"):  "QEMU\n",
+				fakeRunKey("/sbin/sysctl", "-n", "machdep.dmi.system-product"): "Standard PC\n",
+			}},
+			want: virtualization{Name: "kvm", IsVirtual: true},
+		},
+		{
+			name: "dragonfly kvm",
+			host: &fakeHostOS{platform: "dragonfly", runOutputs: map[string]string{
+				fakeRunKey("/usr/local/sbin/dmidecode", "-t", "system"): "Manufacturer: QEMU\nProduct Name: Standard PC\n",
+				fakeRunKey("/usr/local/sbin/dmidecode", "-t", "bios"):   "Vendor: SeaBIOS\n",
+				fakeRunKey("kenv", "smbios.system.maker"):               "",
+				fakeRunKey("kenv", "smbios.system.product"):             "",
+				fakeRunKey("kenv", "smbios.bios.vendor"):                "",
+				fakeRunKey("pciconf", "-lv"):                            "",
+			}},
+			want: virtualization{Name: "kvm", IsVirtual: true},
+		},
+		{
+			name: "illumos vmware",
+			host: &fakeHostOS{platform: "illumos", runOutputs: map[string]string{
+				fakeRunKey("/usr/sbin/smbios", "-t", "SMB_TYPE_SYSTEM"): "Manufacturer: VMware, Inc.\nProduct: VMware Virtual Platform\n",
+				fakeRunKey("/usr/sbin/smbios", "-t", "SMB_TYPE_BIOS"):   "",
+				fakeRunKey("/usr/sbin/prtconf", "-pv"):                  "",
+			}},
+			want: virtualization{Name: "vmware", IsVirtual: true},
+		},
+		{
+			name: "windows unknown",
+			host: &fakeHostOS{platform: "windows", runOutputs: map[string]string{
+				fakeRunKey("wmic", "computersystem", "get", "Manufacturer,Model,OEMStringArray", "/value"): "",
+				fakeRunKey("wmic", "bios", "get", "Manufacturer", "/value"):                                "",
+				fakeRunKey("reg", "query", `HKLM\SYSTEM\CurrentControlSet\Services`):                       "",
+			}},
+			want: virtualization{Unknown: true},
+		},
+		{
+			name: "plan9 unknown",
+			host: &fakeHostOS{platform: "plan9"},
+			want: virtualization{Unknown: true},
+		},
+		{
+			name: "unsupported physical",
+			host: &fakeHostOS{platform: "hurd"},
+			want: virtualization{Name: "physical"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := NewSessionContext(context.Background())
+			s.host = tt.host
+			if got := detectVirtualization(s); got != tt.want {
+				t.Fatalf("detectVirtualization() = %#v, want %#v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCurrentBSDVirtualizationInputsQueryPlatformSources(t *testing.T) {
+	t.Parallel()
+
+	t.Run("freebsd", func(t *testing.T) {
+		t.Parallel()
+
+		got := currentFreeBSDVirtualizationInput(func(name string, args ...string) string {
+			switch fakeRunKey(name, args...) {
+			case fakeRunKey("sysctl", "-n", "security.jail.jailed"):
+				return "1\n"
+			case fakeRunKey("sysctl", "-n", "kern.vm_guest"):
+				return "bhyve\n"
+			default:
+				t.Fatalf("unexpected command %q %#v", name, args)
+				return ""
+			}
+		})
+		want := freeBSDVirtualizationInput{Jailed: true, VMGuest: "bhyve"}
+		if got != want {
+			t.Fatalf("currentFreeBSDVirtualizationInput() = %#v, want %#v", got, want)
+		}
+	})
+
+	t.Run("openbsd", func(t *testing.T) {
+		t.Parallel()
+
+		got := currentOpenBSDVirtualizationInput(func(name string, args ...string) string {
+			switch fakeRunKey(name, args...) {
+			case fakeRunKey("sysctl", "-n", "hw.product"):
+				return "VMM\n"
+			case fakeRunKey("sysctl", "-n", "hw.vendor"):
+				return "OpenBSD\n"
+			default:
+				t.Fatalf("unexpected command %q %#v", name, args)
+				return ""
+			}
+		})
+		want := openBSDVirtualizationInput{ProductName: "VMM", Vendor: "OpenBSD"}
+		if got != want {
+			t.Fatalf("currentOpenBSDVirtualizationInput() = %#v, want %#v", got, want)
+		}
+	})
+
+	t.Run("netbsd", func(t *testing.T) {
+		t.Parallel()
+
+		got := currentNetBSDVirtualizationInput(func(name string, args ...string) string {
+			switch fakeRunKey(name, args...) {
+			case fakeRunKey("/sbin/sysctl", "-n", "machdep.dmi.system-vendor"):
+				return "QEMU\n"
+			case fakeRunKey("/sbin/sysctl", "-n", "machdep.dmi.system-product"):
+				return "Standard PC\n"
+			default:
+				t.Fatalf("unexpected command %q %#v", name, args)
+				return ""
+			}
+		})
+		want := dmiVirtualizationInput{Manufacturer: "QEMU", ProductName: "Standard PC"}
+		if got != want {
+			t.Fatalf("currentNetBSDVirtualizationInput() = %#v, want %#v", got, want)
+		}
+	})
+}
+
+func TestCurrentDMIPlatformVirtualizationInputsParseCommandOutput(t *testing.T) {
+	t.Parallel()
+
+	t.Run("dragonfly", func(t *testing.T) {
+		t.Parallel()
+
+		calls := map[string]bool{}
+		got := currentDragonFlyVirtualizationInput(func(name string, args ...string) string {
+			key := fakeRunKey(name, args...)
+			calls[key] = true
+			switch key {
+			case fakeRunKey("/usr/local/sbin/dmidecode", "-t", "system"):
+				return "Manufacturer: QEMU\nProduct Name: Standard PC\n"
+			case fakeRunKey("/usr/local/sbin/dmidecode", "-t", "bios"):
+				return "Vendor: SeaBIOS\n"
+			case fakeRunKey("kenv", "smbios.system.maker"), fakeRunKey("kenv", "smbios.system.product"), fakeRunKey("kenv", "smbios.bios.vendor"):
+				return ""
+			case fakeRunKey("pciconf", "-lv"):
+				return "virtio_pci0@pci0:0:4:0\n"
+			default:
+				t.Fatalf("unexpected command %q %#v", name, args)
+				return ""
+			}
+		})
+		want := dmiVirtualizationInput{
+			Manufacturer: "QEMU",
+			ProductName:  "Standard PC",
+			BIOSVendor:   "SeaBIOS",
+			PCIOutput:    "virtio_pci0@pci0:0:4:0\n",
+		}
+		if got != want {
+			t.Fatalf("currentDragonFlyVirtualizationInput() = %#v, want %#v", got, want)
+		}
+		for _, key := range []string{
+			fakeRunKey("kenv", "smbios.system.maker"),
+			fakeRunKey("kenv", "smbios.system.product"),
+			fakeRunKey("kenv", "smbios.bios.vendor"),
+		} {
+			if !calls[key] {
+				t.Fatalf("currentDragonFlyVirtualizationInput() did not call %q", key)
+			}
+		}
+	})
+
+	t.Run("illumos", func(t *testing.T) {
+		t.Parallel()
+
+		got := currentIllumosVirtualizationInput(func(name string, args ...string) string {
+			switch fakeRunKey(name, args...) {
+			case fakeRunKey("/usr/sbin/smbios", "-t", "SMB_TYPE_SYSTEM"):
+				return "Manufacturer: QEMU\nProduct: Standard PC\n"
+			case fakeRunKey("/usr/sbin/smbios", "-t", "SMB_TYPE_BIOS"):
+				return "Vendor: SeaBIOS\n"
+			case fakeRunKey("/usr/sbin/prtconf", "-pv"):
+				return "pci15ad,1976\n"
+			default:
+				t.Fatalf("unexpected command %q %#v", name, args)
+				return ""
+			}
+		})
+		want := dmiVirtualizationInput{
+			Manufacturer: "QEMU",
+			ProductName:  "Standard PC",
+			BIOSVendor:   "SeaBIOS",
+			PCIOutput:    "pci15ad,1976\n",
+		}
+		if got != want {
+			t.Fatalf("currentIllumosVirtualizationInput() = %#v, want %#v", got, want)
+		}
+	})
+}
+
+func TestCurrentLinuxVirtualizationInputReadsHostSignals(t *testing.T) {
+	host := &fakeHostOS{
+		runOutputs: map[string]string{
+			fakeRunKey("uname", "-r"):  "6.10.0-test\n",
+			fakeRunKey("dmidecode"):    "vboxVer_7.0.14\nvboxRev_161095\nAddress: 0xea580\n",
+			fakeRunKey("virt-what"):    "kvm\n",
+			fakeRunKey("vmware", "-v"): "VMware Fusion\n",
+			fakeRunKey("lspci"):        "00:03.0 Ethernet controller: Red Hat, Inc. Virtio network device\n",
+		},
+		files: map[string][]byte{
+			"/proc/1/cgroup":                 []byte("0::/docker/abcdef\n"),
+			"/proc/self/status":              []byte("Name:\tcat\n"),
+			"/proc/1/environ":                []byte("container=systemd-nspawn\x00PATH=/usr/bin"),
+			"/etc/machine-id":                []byte("machine-id\n"),
+			"/sys/class/dmi/id/bios_vendor":  []byte("SeaBIOS\n"),
+			"/sys/class/dmi/id/product_name": []byte("Standard PC\n"),
+			"/sys/class/dmi/id/sys_vendor":   []byte("QEMU\n"),
+		},
+		stats: map[string]os.FileInfo{
+			"/.dockerenv":        fakeFileInfo{name: ".dockerenv"},
+			"/run/.containerenv": fakeFileInfo{name: ".containerenv"},
+			"/proc/vz":           fakeFileInfo{name: "vz", isDir: true},
+			"/proc/lve/list":     fakeFileInfo{name: "list"},
+		},
+	}
+	s := NewSessionContext(context.Background())
+	s.host = host
+
+	got := currentLinuxVirtualizationInput(s)
+	// ProcVZEntries is covered through procVZEntryCount below; this collector
+	// currently probes that fixed path directly rather than through host IO.
+	if got.CGroup != "0::/docker/abcdef\n" || !got.DockerEnv || !got.ContainerEnv || !got.ProcVZ || !got.LVEList {
+		t.Fatalf("currentLinuxVirtualizationInput() host markers = %#v", got)
+	}
+	if got.ProcStatus != "Name:\tcat\n" || got.ContainerRuntime != "systemd-nspawn" || got.MachineID != "machine-id" {
+		t.Fatalf("currentLinuxVirtualizationInput() process fields = %#v", got)
+	}
+	if runtime.GOOS != "plan9" && got.KernelVersion != "6.10.0-test" {
+		t.Fatalf("currentLinuxVirtualizationInput() kernel version = %q, want 6.10.0-test", got.KernelVersion)
+	}
+	if got.DMIBIOSVendor != "SeaBIOS" || got.DMIProductName != "Standard PC" || got.DMISysVendor != "QEMU" {
+		t.Fatalf("currentLinuxVirtualizationInput() DMI fields = %#v", got)
+	}
+	if got.DMIDecodeInfo.VirtualBoxVersion != "7.0.14" || got.DMIDecodeInfo.VirtualBoxRevision != "161095" || got.DMIDecodeInfo.VMwareVersion != "ESXi 6.5" {
+		t.Fatalf("currentLinuxVirtualizationInput() dmidecode info = %#v", got.DMIDecodeInfo)
+	}
+	if got.VirtWhatOutput != "kvm\n" || got.VMwareCommand != "VMware Fusion\n" || got.LspciOutput != "00:03.0 Ethernet controller: Red Hat, Inc. Virtio network device\n" {
+		t.Fatalf("currentLinuxVirtualizationInput() command fields = %#v", got)
+	}
+}
+
+func TestProcVZEntryCountMatchesRubyResolverOffset(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "veinfo"), []byte(""), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "vestat"), []byte(""), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := procVZEntryCount(dir); got != 4 {
+		t.Fatalf("procVZEntryCount() = %d, want entries plus resolver offset 4", got)
+	}
+	emptyDir := t.TempDir()
+	if got := procVZEntryCount(emptyDir); got != 2 {
+		t.Fatalf("procVZEntryCount(empty) = %d, want resolver offset 2", got)
+	}
+	if got := procVZEntryCount(filepath.Join(dir, "missing")); got != 0 {
+		t.Fatalf("procVZEntryCount(missing) = %d, want 0", got)
 	}
 }
 
@@ -548,6 +954,15 @@ func TestWindowsHypervisorFactsMatchRubyFacts(t *testing.T) {
 			},
 		},
 		{
+			name:  "Xen paravirtualized context by default",
+			input: windowsVirtualizationInput{Manufacturer: "Xen", Model: "PV domU"},
+			want: map[string]any{
+				"hypervisors": map[string]any{
+					"xen": map[string]any{"context": "pv"},
+				},
+			},
+		},
+		{
 			name:  "physical host",
 			input: windowsVirtualizationInput{},
 			want:  map[string]any{},
@@ -561,6 +976,26 @@ func TestWindowsHypervisorFactsMatchRubyFacts(t *testing.T) {
 				t.Fatalf("windowsHypervisorFacts() = %#v, want %#v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestCurrentWindowsHypervisorFactsUsesSessionHost(t *testing.T) {
+	host := &fakeHostOS{
+		platform: "windows",
+		runOutputs: map[string]string{
+			fakeRunKey("wmic", "computersystem", "get", "Manufacturer,Model,OEMStringArray", "/value"):                            "Manufacturer=Microsoft Corporation\r\nModel=Virtual Machine\r\n",
+			fakeRunKey("wmic", "bios", "get", "Manufacturer", "/value"):                                                           "",
+			fakeRunKey("powershell", "-NoProfile", "-NonInteractive", "-Command", windowsCIMScript("Win32_BIOS", "Manufacturer")): "",
+			fakeRunKey("reg", "query", `HKLM\SYSTEM\CurrentControlSet\Services`):                                                  "",
+		},
+	}
+	s := NewSessionContext(context.Background())
+	s.host = host
+
+	got := Collection(currentWindowsHypervisorFacts(s))
+	want := map[string]any{"hypervisors": map[string]any{"hyperv": map[string]any{}}}
+	if !mapsEqual(got, want) {
+		t.Fatalf("currentWindowsHypervisorFacts() = %#v, want %#v", got, want)
 	}
 }
 
@@ -945,6 +1380,34 @@ func TestLinuxHypervisorFactsReturnsNilOpenVZFactWhenAbsent(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("linuxHypervisorFacts() = %#v, want %#v", got, want)
+	}
+}
+
+func TestCurrentLinuxHypervisorFactsUsesSessionHost(t *testing.T) {
+	host := &fakeHostOS{
+		platform: "linux",
+		stats: map[string]os.FileInfo{
+			"/.dockerenv": fakeFileInfo{name: ".dockerenv"},
+		},
+		runOutputs: map[string]string{
+			fakeRunKey("uname", "-r"):  "",
+			fakeRunKey("dmidecode"):    "",
+			fakeRunKey("virt-what"):    "",
+			fakeRunKey("vmware", "-v"): "",
+			fakeRunKey("lspci"):        "",
+		},
+	}
+	s := NewSessionContext(context.Background())
+	s.host = host
+
+	got := currentLinuxHypervisorFacts(s)
+	want := []ResolvedFact{
+		{Name: "hypervisors.docker", Value: map[string]any{}},
+		{Name: "hypervisors.lxc", Value: nil},
+		{Name: "hypervisors.systemd_nspawn", Value: nil},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("currentLinuxHypervisorFacts() = %#v, want %#v", got, want)
 	}
 }
 

@@ -1,6 +1,8 @@
 package engine
 
 import (
+	"context"
+	"os"
 	"reflect"
 	"testing"
 )
@@ -74,5 +76,56 @@ func TestSelectXenCommandMatchesRubyResolver(t *testing.T) {
 				t.Fatalf("selectXenCommand() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestDetectXenDomainsWithCommandRunsSelectedToolstack(t *testing.T) {
+	exists := map[string]bool{
+		"/usr/sbin/xl": true,
+	}
+	got := detectXenDomainsWithCommand(func(path string) bool { return exists[path] }, func(name string, args ...string) string {
+		if name != "/usr/sbin/xl" || !reflect.DeepEqual(args, []string{"list"}) {
+			t.Fatalf("run(%q, %#v), want xl list", name, args)
+		}
+		return "Name ID Mem VCPUs State Time(s)\nDomain-0 0 4096 4 r----- 100.0\nguest-web 1 2048 2 -b---- 10.0\n"
+	})
+	want := []string{"guest-web"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("detectXenDomainsWithCommand() = %#v, want %#v", got, want)
+	}
+
+	if got := detectXenDomainsWithCommand(func(string) bool { return false }, func(string, ...string) string {
+		t.Fatal("detectXenDomainsWithCommand ran command without Xen toolstack")
+		return ""
+	}); got != nil {
+		t.Fatalf("detectXenDomainsWithCommand(no command) = %#v, want nil", got)
+	}
+
+	if got := detectXenDomainsWithCommand(func(path string) bool { return path == "/usr/sbin/xl" }, func(string, ...string) string {
+		return ""
+	}); got != nil {
+		t.Fatalf("detectXenDomainsWithCommand(no output) = %#v, want nil", got)
+	}
+}
+
+func TestCurrentXenFactsUsesSessionPlatformAndHostToolstack(t *testing.T) {
+	s := NewSessionContext(context.Background())
+	s.host = &fakeHostOS{
+		platform: "linux",
+		files: map[string][]byte{
+			"/proc/xen/capabilities": []byte("control_d\n"),
+		},
+		stats: map[string]os.FileInfo{
+			"/usr/sbin/xl": fakeFileInfo{name: "xl"},
+		},
+		runOutputs: map[string]string{
+			fakeRunKey("/usr/sbin/xl", "list"): "Name ID Mem VCPUs State Time(s)\nDomain-0 0 4096 4 r----- 100.0\nguest-web 1 2048 2 -b---- 10.0\n",
+		},
+	}
+
+	got := Collection(currentXenFacts(s))
+	want := map[string]any{"xen": map[string]any{"domains": []string{"guest-web"}}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("currentXenFacts() = %#v, want %#v", got, want)
 	}
 }

@@ -31,7 +31,7 @@ func uptimeString(uptime uptimeInfo) string {
 }
 
 func probeUptime(s *Session) uptimeInfo {
-	return currentUptimeInfo(s, runtime.GOOS, s.readFile, s.commandOutput, time.Now)
+	return currentUptimeInfo(s, s.goos(), s.readFile, s.commandOutput, time.Now)
 }
 
 func currentUptime(s *Session, goos string, readFile fileReader, run commandRunner, now func() time.Time) time.Duration {
@@ -362,7 +362,7 @@ func emptyLoadAverages() map[string]any {
 // uptimeCoreFacts assembles the uptime category facts (the system_uptime fields
 // and the load_averages fact) for the current host.
 func uptimeCoreFacts(s *Session) []ResolvedFact {
-	if runtime.GOOS == "plan9" {
+	if s.goos() == "plan9" {
 		return plan9UptimeCoreFacts(s.cachedUptime())
 	}
 	return uptimeFacts(s.cachedUptime(), s.cachedLoadAverages())

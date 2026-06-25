@@ -4,7 +4,10 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"reflect"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -220,6 +223,62 @@ func TestCloudProviderFact_skipsEmptyEC2Metadata(t *testing.T) {
 	}
 }
 
+func TestCloudProviderFactForPlatformRequiresVirtWhatAWSOnLinuxRootKVM(t *testing.T) {
+	metadata := map[string]any{"instance_type": "c1.medium"}
+	executable := func(path string) bool {
+		if path != "/opt/puppetlabs/puppet/bin/virt-what" {
+			t.Fatalf("executable path = %q, want virt-what path", path)
+		}
+		return true
+	}
+
+	got := cloudProviderFactForPlatform("linux", virtualization{Name: "kvm", IsVirtual: true}, metadata, 0, executable, func(string, ...string) string {
+		return "kvm\n"
+	})
+	if got != nil {
+		t.Fatalf("cloudProviderFactForPlatform(linux root kvm) = %#v, want nil", got)
+	}
+
+	got = cloudProviderFactForPlatform("linux", virtualization{Name: "kvm", IsVirtual: true}, metadata, 0, executable, func(string, ...string) string {
+		return "kvm\naws\n"
+	})
+	if got == nil || got.Name != "cloud.provider" || got.Value != "aws" {
+		t.Fatalf("cloudProviderFactForPlatform(linux root aws) = %#v, want aws provider fact", got)
+	}
+}
+
+func TestCloudProviderFactForPlatformUsesMetadataOnNonLinuxAWSHypervisor(t *testing.T) {
+	got := cloudProviderFactForPlatform("darwin", virtualization{Name: "xen", IsVirtual: true}, map[string]any{"instance_type": "c1.medium"}, 0, func(string) bool {
+		t.Fatal("non-linux provider detection must not inspect virt-what")
+		return false
+	}, func(string, ...string) string {
+		t.Fatal("non-linux provider detection must not run virt-what")
+		return ""
+	})
+	if got == nil || got.Name != "cloud.provider" || got.Value != "aws" {
+		t.Fatalf("cloudProviderFactForPlatform(non-linux) = %#v, want aws provider fact", got)
+	}
+}
+
+func TestLinuxAWSCloudProviderRequiresAWSHypervisorAndMetadata(t *testing.T) {
+	metadata := map[string]any{"instance_type": "c1.medium"}
+	executable := func(string) bool {
+		t.Fatal("linuxAWSCloudProvider() checked virt-what before basic guards")
+		return false
+	}
+	run := func(string, ...string) string {
+		t.Fatal("linuxAWSCloudProvider() ran virt-what before basic guards")
+		return ""
+	}
+
+	if linuxAWSCloudProvider("docker", metadata, 0, executable, run) {
+		t.Fatal("linuxAWSCloudProvider(non-AWS hypervisor) = true, want false")
+	}
+	if linuxAWSCloudProvider("kvm", nil, 0, executable, run) {
+		t.Fatal("linuxAWSCloudProvider(empty metadata) = true, want false")
+	}
+}
+
 func TestLinuxAWSCloudProviderRequiresVirtWhatAWSForRootKVM(t *testing.T) {
 	metadata := map[string]any{"instance_type": "c1.medium"}
 	executable := func(string) bool { return true }
@@ -241,6 +300,38 @@ func TestLinuxAWSCloudProviderRequiresVirtWhatAWSForRootKVM(t *testing.T) {
 
 	if !linuxAWSCloudProvider("kvm", metadata, 512, executable, func(string, ...string) string { return "kvm" }) {
 		t.Fatal("linuxAWSCloudProvider(kvm non-root) = false, want true")
+	}
+}
+
+func TestFileExecutableRequiresRegularExecutableFile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX executable mode bits are not portable on Windows")
+	}
+
+	dir := t.TempDir()
+	executable := filepath.Join(dir, "virt-what")
+	if err := os.WriteFile(executable, []byte("#!/bin/sh\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(executable, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if !fileExecutable(executable) {
+		t.Fatal("fileExecutable(executable) = false, want true")
+	}
+
+	notExecutable := filepath.Join(dir, "not-executable")
+	if err := os.WriteFile(notExecutable, []byte("data"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if fileExecutable(notExecutable) {
+		t.Fatal("fileExecutable(non-executable) = true, want false")
+	}
+	if fileExecutable(dir) {
+		t.Fatal("fileExecutable(directory) = true, want false")
+	}
+	if fileExecutable(filepath.Join(dir, "missing")) {
+		t.Fatal("fileExecutable(missing) = true, want false")
 	}
 }
 

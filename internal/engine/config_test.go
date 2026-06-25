@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -53,6 +54,82 @@ fact-groups : {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("ParseConfig() = %#v, want %#v", got, want)
+	}
+}
+
+func TestCurrentDefaultExternalFactDirsUsesCurrentEnvironment(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	programData := filepath.Join(t.TempDir(), "ProgramData")
+
+	got := currentDefaultExternalFactDirs("linux", 501, testConfigEnv(map[string]string{
+		"HOME":        home,
+		"ProgramData": programData,
+	}))
+	want := []string{
+		home + "/.facts/facts.d",
+		home + "/.facter/facts.d",
+		home + "/.puppetlabs/opt/facter/facts.d",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("currentDefaultExternalFactDirs() = %#v, want %#v", got, want)
+	}
+}
+
+func TestCurrentDefaultExternalFactDirsUsesRootDefaultsForRoot(t *testing.T) {
+	got := currentDefaultExternalFactDirs("linux", 0, testConfigEnv(map[string]string{
+		"HOME": filepath.Join(t.TempDir(), "home"),
+	}))
+	want := []string{
+		"/etc/facts/facts.d",
+		"/etc/puppetlabs/facter/facts.d",
+		"/etc/facter/facts.d/",
+		"/opt/puppetlabs/facter/facts.d",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("currentDefaultExternalFactDirs(root) = %#v, want %#v", got, want)
+	}
+}
+
+func TestCurrentDefaultExternalFactDirsUsesProgramDataOnWindows(t *testing.T) {
+	programData := filepath.Join(t.TempDir(), "ProgramData")
+
+	got := currentDefaultExternalFactDirs("windows", -1, testConfigEnv(map[string]string{
+		"HOME":        filepath.Join(t.TempDir(), "home"),
+		"ProgramData": programData,
+	}))
+	want := []string{
+		programData + "/facts/facts.d",
+		programData + "/PuppetLabs/facter/facts.d",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("currentDefaultExternalFactDirs(windows) = %#v, want %#v", got, want)
+	}
+}
+
+func TestCurrentDefaultExternalFactDirsMatchesRuntimeInputs(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	programData := filepath.Join(t.TempDir(), "ProgramData")
+	t.Setenv("HOME", home)
+	t.Setenv("ProgramData", programData)
+
+	got := CurrentDefaultExternalFactDirs()
+	var want []string
+	switch {
+	case runtime.GOOS == "windows":
+		want = []string{programData + "/facts/facts.d", programData + "/PuppetLabs/facter/facts.d"}
+	case os.Geteuid() == 0:
+		want = []string{"/etc/facts/facts.d", "/etc/puppetlabs/facter/facts.d", "/etc/facter/facts.d/", "/opt/puppetlabs/facter/facts.d"}
+	default:
+		want = []string{home + "/.facts/facts.d", home + "/.facter/facts.d", home + "/.puppetlabs/opt/facter/facts.d"}
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("CurrentDefaultExternalFactDirs() = %#v, want %#v", got, want)
+	}
+}
+
+func testConfigEnv(values map[string]string) func(string) string {
+	return func(key string) string {
+		return values[key]
 	}
 }
 
@@ -713,6 +790,50 @@ func TestGroupTTLSeconds_convertsRubyCompatibleUnits(t *testing.T) {
 	}
 }
 
+func TestTTLUnitScaleSupportsRubyCompatibleAliases(t *testing.T) {
+	tests := []struct {
+		unit       string
+		multiplier int64
+		divisor    int64
+	}{
+		{unit: "ns", multiplier: 1, divisor: 1_000_000_000},
+		{unit: "nanosecond", multiplier: 1, divisor: 1_000_000_000},
+		{unit: "nanoseconds", multiplier: 1, divisor: 1_000_000_000},
+		{unit: "us", multiplier: 1, divisor: 1_000_000},
+		{unit: "microsecond", multiplier: 1, divisor: 1_000_000},
+		{unit: "microseconds", multiplier: 1, divisor: 1_000_000},
+		{unit: "ms", multiplier: 1, divisor: 1_000},
+		{unit: "millisecond", multiplier: 1, divisor: 1_000},
+		{unit: "milliseconds", multiplier: 1, divisor: 1_000},
+		{unit: "s", multiplier: 1, divisor: 1},
+		{unit: "second", multiplier: 1, divisor: 1},
+		{unit: "seconds", multiplier: 1, divisor: 1},
+		{unit: "m", multiplier: 60, divisor: 1},
+		{unit: "minute", multiplier: 60, divisor: 1},
+		{unit: "h", multiplier: 3600, divisor: 1},
+		{unit: "hours", multiplier: 3600, divisor: 1},
+		{unit: "d", multiplier: 86400, divisor: 1},
+		{unit: "days", multiplier: 86400, divisor: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.unit, func(t *testing.T) {
+			multiplier, divisor, ok := ttlUnitScale(tt.unit)
+			if !ok || multiplier != tt.multiplier || divisor != tt.divisor {
+				t.Fatalf("ttlUnitScale(%q) = %d, %d, %v; want %d, %d, true", tt.unit, multiplier, divisor, ok, tt.multiplier, tt.divisor)
+			}
+		})
+	}
+	if _, _, ok := ttlUnitScale("fortnight"); ok {
+		t.Fatal("ttlUnitScale(fortnight) ok = true, want false")
+	}
+	if got := rubyTTLLogUnit("fortnight"); got != "fortnights" {
+		t.Fatalf("rubyTTLLogUnit(fortnight) = %q, want fortnights", got)
+	}
+	if got := rubyTTLLogUnit("ms"); got != "ms" {
+		t.Fatalf("rubyTTLLogUnit(ms) = %q, want ms", got)
+	}
+}
+
 func TestFactGroupName_returnsGroupContainingFact(t *testing.T) {
 	groups := []FactGroup{{Name: "operating system", Facts: []string{"os", "os.name"}}}
 
@@ -729,6 +850,30 @@ func TestFactGroupName_returnsGroupContainingFact(t *testing.T) {
 	}
 }
 
+func TestMergeFactGroupsReplacesDefaultsAndAppendsNewGroups(t *testing.T) {
+	defaults := []FactGroup{
+		{Name: "operating system", Facts: []string{"os"}},
+		{Name: "memory", Facts: []string{"memory"}},
+	}
+	configured := []FactGroup{
+		{Name: "operating system", Facts: []string{"kernel"}},
+		{Name: "site", Facts: []string{"site_role"}},
+	}
+
+	got := MergeFactGroups(defaults, configured)
+	want := []FactGroup{
+		{Name: "operating system", Facts: []string{"kernel"}},
+		{Name: "memory", Facts: []string{"memory"}},
+		{Name: "site", Facts: []string{"site_role"}},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("MergeFactGroups() = %#v, want %#v", got, want)
+	}
+	if got := MergeFactGroups(defaults, nil); !reflect.DeepEqual(got, defaults) {
+		t.Fatalf("MergeFactGroups(defaults, nil) = %#v, want %#v", got, defaults)
+	}
+}
+
 func TestFactGroupName_returnsGroupContainingDescendantFact(t *testing.T) {
 	groups := []FactGroup{{Name: "operating system", Facts: []string{"os", "os.name"}}}
 
@@ -738,6 +883,19 @@ func TestFactGroupName_returnsGroupContainingDescendantFact(t *testing.T) {
 	}
 	if got != "operating system" {
 		t.Fatalf("FactGroupName(os.name.full) = %q, want %q", got, "operating system")
+	}
+}
+
+func TestFormatFactGroupsRendersRubyCompatibleRows(t *testing.T) {
+	groups := []FactGroup{
+		{Name: "hardware", Facts: []string{"dmi", "processors"}},
+		{Name: "path"},
+	}
+
+	got := FormatFactGroups(groups)
+	want := "hardware\n- dmi\n- processors\npath"
+	if got != want {
+		t.Fatalf("FormatFactGroups() = %q, want %q", got, want)
 	}
 }
 
@@ -774,6 +932,40 @@ func TestGroupTTLSeconds_logsRubyCompatibleInvalidUnitError(t *testing.T) {
 	want := "Could not parse time unit invalid_units (try ns, nanos, nanoseconds, us, micros, microseconds, ms, milis, milliseconds, s, seconds, m, minutes, h, hours, d, days)"
 	if errors[0] != want {
 		t.Fatalf("error = %q, want %q", errors[0], want)
+	}
+}
+
+func TestGroupTTLSecondsAcceptsCaseInsensitiveUnits(t *testing.T) {
+	tests := []struct {
+		ttl  string
+		want int64
+	}{
+		{ttl: "1000000000 NANOSECOND", want: 1},
+		{ttl: "1000000 MICROSECOND", want: 1},
+		{ttl: "1000 MILLISECOND", want: 1},
+		{ttl: "2 SECOND", want: 2},
+		{ttl: "2 MINUTE", want: 120},
+		{ttl: "2 HOUR", want: 7200},
+		{ttl: "2 DAY", want: 172800},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.ttl, func(t *testing.T) {
+			got, ok := GroupTTLSeconds([]FactTTL{{Fact: "os", TTL: tt.ttl}}, "os", nil)
+			if !ok || got != tt.want {
+				t.Fatalf("GroupTTLSeconds(%q) = %d, %v; want %d, true", tt.ttl, got, ok, tt.want)
+			}
+		})
+	}
+}
+
+func TestGroupTTLSecondsRejectsMalformedTTLTokens(t *testing.T) {
+	for _, ttl := range []string{"", "+", "-", "999999999999999999999999999999999999 seconds", "1 hour extra"} {
+		t.Run(ttl, func(t *testing.T) {
+			if got, ok := GroupTTLSeconds([]FactTTL{{Fact: "os", TTL: ttl}}, "os", discardLog()); ok {
+				t.Fatalf("GroupTTLSeconds(%q) = %d, true; want false", ttl, got)
+			}
+		})
 	}
 }
 
@@ -848,6 +1040,33 @@ func TestFilterBlockedFacts_prunesBlockedDescendantsFromStructuredParents(t *tes
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("FilterBlockedFacts(os.release.major) = %#v, want %#v", got, want)
+	}
+}
+
+func TestFilterBlockedFactsPrunesEmptyMapsAndKeepsOriginalValue(t *testing.T) {
+	original := map[string]any{
+		"name": "Ubuntu",
+		"release": map[string]any{
+			"full":  "24.04",
+			"major": "24",
+		},
+	}
+	facts := []ResolvedFact{{Name: "os", Value: original, Type: "core"}}
+
+	got := FilterBlockedFacts(facts, map[string]bool{
+		"os.release.full":    true,
+		"os.release.major":   true,
+		"os.missing.nothing": true,
+	})
+	want := []ResolvedFact{{Name: "os", Value: map[string]any{"name": "Ubuntu"}, Type: "core"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("FilterBlockedFacts() = %#v, want %#v", got, want)
+	}
+	if _, ok := original["release"]; !ok {
+		t.Fatalf("original value = %#v, want unpruned source map", original)
+	}
+	if got := pruneDottedValue(map[string]any{"name": "Ubuntu"}, nil); !reflect.DeepEqual(got, map[string]any{"name": "Ubuntu"}) {
+		t.Fatalf("pruneDottedValue(empty path) = %#v, want unchanged value", got)
 	}
 }
 
@@ -1045,4 +1264,27 @@ global : {
 			t.Fatal("NoExternalFacts = false, want true")
 		}
 	})
+
+	t.Run("comment at end of file is ignored", func(t *testing.T) {
+		path := writeConfig(t, `global : {
+  external-dir : [ "/kept" ],
+}
+# no newline`)
+		got, err := ParseConfig(path, discardLog())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := []string{"/kept"}; !reflect.DeepEqual(got.ExternalDirs, want) {
+			t.Fatalf("ExternalDirs = %#v, want %#v", got.ExternalDirs, want)
+		}
+	})
+}
+
+func TestFirstConfigValueReturnsFirstNonEmptyValue(t *testing.T) {
+	if got, want := firstConfigValue("", "", "kept", "ignored"), "kept"; got != want {
+		t.Fatalf("firstConfigValue() = %q, want %q", got, want)
+	}
+	if got := firstConfigValue("", ""); got != "" {
+		t.Fatalf("firstConfigValue(all empty) = %q, want empty", got)
+	}
 }

@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -75,6 +76,41 @@ func (h *fakeExternalFactLoaderHost) readDir(dir string) ([]os.DirEntry, error) 
 		return h.readDirFunc(dir)
 	}
 	return h.externalFactOSHost.readDir(dir)
+}
+
+type errorInfoDirEntry struct {
+	name string
+	err  error
+}
+
+func (de errorInfoDirEntry) Name() string               { return de.name }
+func (de errorInfoDirEntry) IsDir() bool                { return false }
+func (de errorInfoDirEntry) Type() os.FileMode          { return 0 }
+func (de errorInfoDirEntry) Info() (os.FileInfo, error) { return nil, de.err }
+
+func TestExternalFactFileReadableRequiresRegularFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "site.txt")
+	if err := os.WriteFile(path, []byte("site=lab\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	host := externalFactOSHost{}
+	if !host.fileReadable(path) {
+		t.Fatalf("externalFactOSHost.fileReadable(%q) = false, want true", path)
+	}
+	if !fileReadable(path) {
+		t.Fatalf("fileReadable(%q) = false, want true", path)
+	}
+	if host.fileReadable(dir) {
+		t.Fatalf("externalFactOSHost.fileReadable(%q) = true, want false for directory", dir)
+	}
+	if fileReadable(dir) {
+		t.Fatalf("fileReadable(%q) = true, want false for directory", dir)
+	}
+	if fileReadable(filepath.Join(dir, "missing.txt")) {
+		t.Fatal("fileReadable(missing) = true, want false")
+	}
 }
 
 func TestExternalFactLoader_cliModeIncludesEnvironmentAndSkipsExecutableFailures(t *testing.T) {
@@ -159,6 +195,155 @@ func TestExternalFactLoader_libraryModeReturnsPartialFailuresAndControlsEnvironm
 	want = []ResolvedFact{{Name: "from_env", Value: "yes", Type: "external"}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("externalFactLoader.load() env-only = %#v, want %#v", got, want)
+	}
+}
+
+func TestExternalFactLoader_libraryModeCollectsDirectoryAndStatFailures(t *testing.T) {
+	host := &fakeExternalFactLoaderHost{
+		readDirFunc: func(dir string) ([]os.DirEntry, error) {
+			switch dir {
+			case "missing":
+				return nil, os.ErrNotExist
+			case "bad":
+				return nil, os.ErrPermission
+			case "stat":
+				return []os.DirEntry{errorInfoDirEntry{name: "site.txt", err: os.ErrPermission}}, nil
+			default:
+				t.Fatalf("readDir(%q) called, want only configured directories", dir)
+				return nil, nil
+			}
+		},
+	}
+
+	got, err := externalFactLoader{
+		s:    testSession,
+		mode: externalFactLoaderLibrary,
+		dirs: []string{"missing", "bad", "stat"},
+		host: host,
+	}.load()
+	if err == nil {
+		t.Fatal("externalFactLoader.load() err = nil, want joined library-mode failures")
+	}
+	if len(got) != 0 {
+		t.Fatalf("externalFactLoader.load() = %#v, want no facts", got)
+	}
+	for _, want := range []string{"read external dir bad", filepath.Join("stat", "site.txt")} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("externalFactLoader.load() err = %v, want message containing %q", err, want)
+		}
+	}
+	if !errors.Is(err, os.ErrPermission) {
+		t.Fatalf("externalFactLoader.load() err = %v, want os.ErrPermission", err)
+	}
+}
+
+func TestExternalFactLoader_cliModeReturnsDirectoryReadFailure(t *testing.T) {
+	host := &fakeExternalFactLoaderHost{
+		readDirFunc: func(dir string) ([]os.DirEntry, error) {
+			if dir != "bad" {
+				t.Fatalf("readDir(%q), want bad", dir)
+			}
+			return nil, os.ErrPermission
+		},
+	}
+
+	got, err := externalFactLoader{
+		s:    testSession,
+		mode: externalFactLoaderCLI,
+		dirs: []string{"bad"},
+		host: host,
+	}.load()
+	if err == nil || !errors.Is(err, os.ErrPermission) {
+		t.Fatalf("externalFactLoader.load() err = %v, want os.ErrPermission", err)
+	}
+	if got != nil {
+		t.Fatalf("externalFactLoader.load() = %#v, want nil facts", got)
+	}
+}
+
+func TestExternalFactLoader_handlesInvalidEnvironmentFactsByMode(t *testing.T) {
+	host := &fakeExternalFactLoaderHost{env: []string{"FACTS_bad=bad\x00value"}}
+
+	got, err := externalFactLoader{
+		s:          testSession,
+		mode:       externalFactLoaderCLI,
+		host:       host,
+		includeEnv: true,
+	}.load()
+	if err == nil || !errors.Is(err, ErrNullByte) {
+		t.Fatalf("CLI load err = %v, want ErrNullByte", err)
+	}
+	if got != nil {
+		t.Fatalf("CLI load facts = %#v, want nil", got)
+	}
+
+	got, err = externalFactLoader{
+		s:          testSession,
+		mode:       externalFactLoaderLibrary,
+		host:       host,
+		includeEnv: true,
+	}.load()
+	if err == nil || !errors.Is(err, ErrNullByte) {
+		t.Fatalf("library load err = %v, want ErrNullByte", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("library load facts = %#v, want none", got)
+	}
+}
+
+func TestExternalFactLoader_skipsBlockedDirsHiddenAndBackupFilesBeforeOpen(t *testing.T) {
+	var debugMessages []string
+	s := NewSession()
+	s.logger = captureLogger(&debugMessages, nil, nil)
+
+	var opened []string
+	sitePath := filepath.Join("facts.d", "site.txt")
+	host := &fakeExternalFactLoaderHost{
+		readDirFunc: func(dir string) ([]os.DirEntry, error) {
+			if dir != "facts.d" {
+				t.Fatalf("readDir(%q) called, want facts.d", dir)
+			}
+			return []os.DirEntry{
+				fakeDirEntry{name: "site.txt"},
+				fakeDirEntry{name: "old.bak"},
+				fakeDirEntry{name: ".hidden.txt"},
+				fakeDirEntry{name: "subdir", mode: os.ModeDir, isDir: true},
+				fakeDirEntry{name: "blocked.txt"},
+			}, nil
+		},
+		openFunc: func(path string) (io.ReadCloser, error) {
+			opened = append(opened, path)
+			if path != sitePath {
+				return nil, fmt.Errorf("unexpected open %s", path)
+			}
+			return io.NopCloser(strings.NewReader("site=lab\n")), nil
+		},
+	}
+
+	got, err := externalFactLoader{
+		s:       s,
+		mode:    externalFactLoaderCLI,
+		dirs:    []string{"facts.d"},
+		blocked: map[string]bool{"blocked.txt": true},
+		host:    host,
+	}.load()
+	if err != nil {
+		t.Fatalf("externalFactLoader.load() err = %v, want nil", err)
+	}
+	wantFacts := []ResolvedFact{{Name: "site", Value: "lab", Type: "external"}}
+	if !reflect.DeepEqual(got, wantFacts) {
+		t.Fatalf("externalFactLoader.load() = %#v, want %#v", got, wantFacts)
+	}
+	if !reflect.DeepEqual(opened, []string{sitePath}) {
+		t.Fatalf("opened paths = %#v, want only %#v", opened, []string{sitePath})
+	}
+	for _, want := range []string{
+		"External fact file blocked.txt blocked.",
+		"External fact file old.bak ignored: .bak extension.",
+	} {
+		if !slices.Contains(debugMessages, want) {
+			t.Fatalf("debug messages = %#v, want %q", debugMessages, want)
+		}
 	}
 }
 
@@ -1438,6 +1623,48 @@ func TestLimitedBuffer_marksOverflowAndRetainsPrefix(t *testing.T) {
 	}
 }
 
+func TestLimitedBuffer_enforcesLimitAndCancelsOnce(t *testing.T) {
+	cancelled := 0
+	buf := limitedBuffer{
+		limit:  5,
+		cancel: func() { cancelled++ },
+	}
+
+	n, err := buf.Write([]byte("hello!"))
+	if !errors.Is(err, ErrExternalFactTooLarge) {
+		t.Fatalf("Write() err = %v, want ErrExternalFactTooLarge", err)
+	}
+	if n != 5 {
+		t.Fatalf("Write() n = %d, want retained byte count", n)
+	}
+	if got := string(buf.Bytes()); got != "hello" {
+		t.Fatalf("limitedBuffer bytes = %q, want retained prefix", got)
+	}
+	if cancelled != 1 {
+		t.Fatalf("cancel count = %d, want 1", cancelled)
+	}
+
+	n, err = buf.Write([]byte("again"))
+	if !errors.Is(err, ErrExternalFactTooLarge) {
+		t.Fatalf("second Write() err = %v, want ErrExternalFactTooLarge", err)
+	}
+	if n != 0 {
+		t.Fatalf("second Write() n = %d, want 0", n)
+	}
+	if cancelled != 1 {
+		t.Fatalf("cancel count after second Write = %d, want still 1", cancelled)
+	}
+
+	var empty limitedBuffer
+	n, err = empty.Write([]byte("x"))
+	if !errors.Is(err, ErrExternalFactTooLarge) {
+		t.Fatalf("zero-limit Write() err = %v, want ErrExternalFactTooLarge", err)
+	}
+	if n != 0 {
+		t.Fatalf("zero-limit Write() n = %d, want 0", n)
+	}
+}
+
 func TestLoadExternalFacts_executableYAMLFacts(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("extensionless shell-script external facts are a POSIX mechanism; Windows executables use .bat/.cmd/.exe/.ps1")
@@ -1501,6 +1728,51 @@ func TestLoadExternalFacts_executableYAMLTimestampNormalizesLikeRubyParser(t *te
 	want := []ResolvedFact{{Name: "first", Value: "2020-07-15T05:38:12Z", Type: "external"}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("LoadExternalFacts(testSession) = %#v, want %#v", got, want)
+	}
+}
+
+func TestNormalizeExecutableYAMLValueNormalizesNestedTimestamps(t *testing.T) {
+	t.Parallel()
+
+	input := map[string]any{
+		"timestamps": []any{
+			"2020-07-15 05:38:12.427678398 +00:00",
+			map[string]any{"plain": "not a timestamp"},
+		},
+		"count": 2,
+	}
+	got := normalizeExecutableYAMLValue(input)
+	want := map[string]any{
+		"timestamps": []any{
+			"2020-07-15T05:38:12Z",
+			map[string]any{"plain": "not a timestamp"},
+		},
+		"count": 2,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("normalizeExecutableYAMLValue() = %#v, want %#v", got, want)
+	}
+}
+
+func TestNormalizeStructuredValueConvertsJSONNumbersRecursively(t *testing.T) {
+	t.Parallel()
+
+	input := map[string]any{
+		"small": json.Number("42"),
+		"big":   json.Number("2147483648"),
+		"float": []any{json.Number("3.5"), json.Number("not-a-number")},
+	}
+	got, err := normalizeStructuredValue(input)
+	if err != nil {
+		t.Fatalf("normalizeStructuredValue() err = %v, want nil", err)
+	}
+	want := map[string]any{
+		"small": 42,
+		"big":   int64(2147483648),
+		"float": []any{3.5, "not-a-number"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("normalizeStructuredValue() = %#v, want %#v", got, want)
 	}
 }
 
@@ -1584,6 +1856,31 @@ func TestLoadExternalFacts_rejectsNullBytes(t *testing.T) {
 	}
 }
 
+func TestYAMLErrorIsNullByteRecognizesParserMessages(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "nil", err: nil, want: false},
+		{name: "yaml control character", err: errors.New("yaml: control characters are not allowed"), want: true},
+		{name: "yaml null codepoint", err: errors.New("yaml: did not find expected key near #x0000"), want: true},
+		{name: "ordinary parse error", err: errors.New("yaml: did not find expected key"), want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := yamlErrorIsNullByte(tt.err); got != tt.want {
+				t.Fatalf("yamlErrorIsNullByte(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestExternalFactGroups_includesEveryExternalDirectoryEntry(t *testing.T) {
 	dir := t.TempDir()
 	entries := map[string]os.FileMode{
@@ -1610,6 +1907,22 @@ func TestExternalFactGroups_includesEveryExternalDirectoryEntry(t *testing.T) {
 		{Name: "ignored.bak"},
 		{Name: "nested"},
 	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("ExternalFactGroups() = %#v, want %#v", got, want)
+	}
+}
+
+func TestExternalFactGroupsSkipsMissingDirectories(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "site.txt"), []byte("site=lab\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := ExternalFactGroups([]string{filepath.Join(t.TempDir(), "missing"), dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []FactGroup{{Name: "site.txt"}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("ExternalFactGroups() = %#v, want %#v", got, want)
 	}

@@ -34,6 +34,18 @@ func TestSafeRead_returnsDefaultForUnreadablePath(t *testing.T) {
 	}
 }
 
+func TestSafeReadAcceptsNilLoggerForUnreadablePath(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "missing.txt")
+
+	got, ok := safeRead(path, "default", nil)
+	if ok {
+		t.Fatal("safeRead() ok = true, want false")
+	}
+	if got != "default" {
+		t.Fatalf("safeRead() = %q, want default", got)
+	}
+}
+
 func TestSafeRead_logsDebugForUnreadablePathLikeRubyFileHelper(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "missing.txt")
 	var messages []string

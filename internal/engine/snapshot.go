@@ -18,6 +18,11 @@ var ErrFactNotFound = errors.New("fact not found")
 
 // Snapshot is the immutable result of one discovery run: the canonical tree
 // plus pure query operations over it. Safe for concurrent use.
+//
+// Returned values are defensive copies of the public fact graph: maps, slices,
+// arrays, pointers, and exported struct fields are cloned. Unexported struct
+// fields in custom fact values are preserved by shallow value copy and are
+// outside the deep-clone guarantee.
 type Snapshot struct {
 	facts      []ResolvedFact
 	tree       map[string]any
@@ -49,7 +54,7 @@ func newSnapshot(facts []ResolvedFact, log *slog.Logger) *Snapshot {
 // rebuild the tree per call.
 func (sn *Snapshot) Value(query string) (any, error) {
 	if value, found := sn.projection.LookupValue(query); found {
-		return value, nil
+		return deepCopyValue(value), nil
 	}
 	return nil, fmt.Errorf("fact %q: %w", query, ErrFactNotFound)
 }
@@ -93,90 +98,168 @@ func cloneFacts(facts []ResolvedFact) []ResolvedFact {
 }
 
 func deepCopyValue(value any) any {
-	switch v := value.(type) {
-	case map[string]any:
-		out := make(map[string]any, len(v))
-		for key, item := range v {
-			out[key] = deepCopyValue(item)
-		}
-		return out
-	case map[string]string:
-		out := make(map[string]string, len(v))
-		for key, item := range v {
-			out[key] = item
-		}
-		return out
-	case map[string][]string:
-		out := make(map[string][]string, len(v))
-		for key, item := range v {
-			out[key] = slices.Clone(item)
-		}
-		return out
-	case map[any]any:
-		out := make(map[any]any, len(v))
-		for key, item := range v {
-			out[key] = deepCopyValue(item)
-		}
-		return out
-	case []any:
-		out := make([]any, len(v))
-		for i, item := range v {
-			out[i] = deepCopyValue(item)
-		}
-		return out
-	case []string:
-		return slices.Clone(v)
-	case []int:
-		return slices.Clone(v)
-	default:
-		return deepCopyReflect(value)
-	}
+	return deepCopyValueSeen(value, map[deepCopyVisit]reflect.Value{})
 }
 
-func deepCopyReflect(value any) any {
+type deepCopyVisit struct {
+	typ    reflect.Type
+	ptr    uintptr
+	length int
+}
+
+func deepCopyValueSeen(value any, seen map[deepCopyVisit]reflect.Value) any {
+	return deepCopyReflect(value, seen)
+}
+
+func deepCopyReflect(value any, seen map[deepCopyVisit]reflect.Value) any {
 	rv := reflect.ValueOf(value)
 	if !rv.IsValid() {
 		return value
 	}
 	switch rv.Kind() {
+	case reflect.Interface:
+		if rv.IsNil() {
+			return value
+		}
+		return deepCopyValueSeen(rv.Elem().Interface(), seen)
 	case reflect.Slice:
 		if rv.IsNil() {
 			return value
 		}
+		if copied, ok := deepCopySeenValue(rv, seen); ok {
+			return copied.Interface()
+		}
 		out := reflect.MakeSlice(rv.Type(), rv.Len(), rv.Len())
+		rememberDeepCopy(rv, out, seen)
 		for i := range rv.Len() {
-			setReflectValue(out.Index(i), deepCopyValue(rv.Index(i).Interface()))
+			setReflectValue(out.Index(i), deepCopyValueSeen(rv.Index(i).Interface(), seen))
 		}
 		return out.Interface()
 	case reflect.Array:
 		out := reflect.New(rv.Type()).Elem()
 		for i := range rv.Len() {
-			setReflectValue(out.Index(i), deepCopyValue(rv.Index(i).Interface()))
+			setReflectValue(out.Index(i), deepCopyValueSeen(rv.Index(i).Interface(), seen))
 		}
 		return out.Interface()
 	case reflect.Map:
 		if rv.IsNil() {
 			return value
 		}
+		if copied, ok := deepCopySeenValue(rv, seen); ok {
+			return copied.Interface()
+		}
 		out := reflect.MakeMapWithSize(rv.Type(), rv.Len())
+		rememberDeepCopy(rv, out, seen)
 		for _, key := range rv.MapKeys() {
-			item := deepCopyValue(rv.MapIndex(key).Interface())
+			copiedKey := deepCopyMapKey(key, rv.Type().Key(), seen)
+			item := deepCopyValueSeen(rv.MapIndex(key).Interface(), seen)
 			itemValue := reflect.ValueOf(item)
 			if item == nil {
 				itemValue = reflect.Zero(rv.Type().Elem())
 			}
 			if itemValue.IsValid() && itemValue.Type().AssignableTo(rv.Type().Elem()) {
-				out.SetMapIndex(key, itemValue)
+				out.SetMapIndex(copiedKey, itemValue)
 			} else if itemValue.IsValid() && itemValue.Type().ConvertibleTo(rv.Type().Elem()) {
-				out.SetMapIndex(key, itemValue.Convert(rv.Type().Elem()))
+				out.SetMapIndex(copiedKey, itemValue.Convert(rv.Type().Elem()))
 			} else {
-				out.SetMapIndex(key, rv.MapIndex(key))
+				out.SetMapIndex(copiedKey, rv.MapIndex(key))
 			}
 		}
+		return out.Interface()
+	case reflect.Struct:
+		out := reflect.New(rv.Type()).Elem()
+		// Preserve unexported fields by value. Deep-copying private reference
+		// fields without unsafe is not possible; exported fields are copied below.
+		// Pointer-rooted struct cycles are memoized by the pointer case; a top-level
+		// value struct has no stable source pointer to register here.
+		out.Set(rv)
+		for i := range rv.NumField() {
+			dst := out.Field(i)
+			if !dst.CanSet() {
+				continue
+			}
+			src := rv.Field(i)
+			if src.CanInterface() {
+				setReflectValue(dst, deepCopyValueSeen(src.Interface(), seen))
+				continue
+			}
+			dst.Set(src)
+		}
+		return out.Interface()
+	case reflect.Pointer:
+		if rv.IsNil() {
+			return value
+		}
+		if copied, ok := deepCopySeenValue(rv, seen); ok {
+			return copied.Interface()
+		}
+		out := reflect.New(rv.Type().Elem())
+		rememberDeepCopy(rv, out, seen)
+		setReflectValue(out.Elem(), deepCopyValueSeen(rv.Elem().Interface(), seen))
 		return out.Interface()
 	default:
 		return value
 	}
+}
+
+func deepCopyMapKey(key reflect.Value, keyType reflect.Type, seen map[deepCopyVisit]reflect.Value) reflect.Value {
+	item := deepCopyValueSeen(key.Interface(), seen)
+	if item == nil {
+		return reflect.Zero(keyType)
+	}
+	itemValue := reflect.ValueOf(item)
+	if !itemValue.IsValid() || !itemValue.Type().Comparable() {
+		return key
+	}
+	if itemValue.Type().AssignableTo(keyType) {
+		return itemValue
+	}
+	if itemValue.Type().ConvertibleTo(keyType) {
+		converted := itemValue.Convert(keyType)
+		if converted.Type().Comparable() {
+			return converted
+		}
+	}
+	return key
+}
+
+func deepCopySeenValue(rv reflect.Value, seen map[deepCopyVisit]reflect.Value) (reflect.Value, bool) {
+	visit, ok := deepCopyVisitFor(rv)
+	if !ok {
+		return reflect.Value{}, false
+	}
+	copied, ok := seen[visit]
+	return copied, ok
+}
+
+func rememberDeepCopy(source, copied reflect.Value, seen map[deepCopyVisit]reflect.Value) {
+	visit, ok := deepCopyVisitFor(source)
+	if ok {
+		seen[visit] = copied
+	}
+}
+
+func deepCopyVisitFor(rv reflect.Value) (deepCopyVisit, bool) {
+	var ptr uintptr
+	switch rv.Kind() {
+	case reflect.Map, reflect.Pointer:
+		ptr = rv.Pointer()
+	case reflect.Slice:
+		if rv.Len() == 0 {
+			return deepCopyVisit{}, false
+		}
+		ptr = uintptr(rv.UnsafePointer())
+	default:
+		return deepCopyVisit{}, false
+	}
+	if ptr == 0 {
+		return deepCopyVisit{}, false
+	}
+	visit := deepCopyVisit{typ: rv.Type(), ptr: ptr}
+	if rv.Kind() == reflect.Slice {
+		visit.length = rv.Len()
+	}
+	return visit, true
 }
 
 func setReflectValue(dst reflect.Value, value any) {
