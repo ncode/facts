@@ -474,11 +474,13 @@ func TestCoreCommandFileExecutableChecksRegularExecutableFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if !coreCommandFileExecutable(executable, "linux") {
-		t.Fatalf("coreCommandFileExecutable(%q, linux) = false, want true", executable)
-	}
-	if coreCommandFileExecutable(plain, "linux") {
-		t.Fatalf("coreCommandFileExecutable(%q, linux) = true, want false", plain)
+	if runtime.GOOS != "windows" {
+		if !coreCommandFileExecutable(executable, "linux") {
+			t.Fatalf("coreCommandFileExecutable(%q, linux) = false, want true", executable)
+		}
+		if coreCommandFileExecutable(plain, "linux") {
+			t.Fatalf("coreCommandFileExecutable(%q, linux) = true, want false", plain)
+		}
 	}
 	if !coreCommandFileExecutable(plain, "windows") {
 		t.Fatalf("coreCommandFileExecutable(%q, windows) = false, want regular files accepted", plain)

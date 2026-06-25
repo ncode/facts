@@ -97,21 +97,17 @@ func TestRunMainReportsOptionErrors(t *testing.T) {
 }
 
 func TestRunMainReportsGenericErrors(t *testing.T) {
-	dir := t.TempDir()
-	externalDir := filepath.Join(dir, "not-a-dir")
-	if err := os.WriteFile(externalDir, []byte("site=lab\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	var stdout, stderr bytes.Buffer
+	writeErr := errors.New("stdout closed")
+	var stderr bytes.Buffer
 
-	if code := runMain(&stdout, &stderr, []string{"--external-dir", externalDir, "--list-cache-groups"}); code != 1 {
+	if code := runMain(errorWriter{err: writeErr}, &stderr, []string{"--version"}); code != 1 {
 		t.Fatalf("runMain() code = %d, want 1", code)
 	}
-	if stdout.Len() != 0 {
-		t.Fatalf("stdout = %q, want empty", stdout.String())
-	}
 	if got := stderr.String(); got == "" || strings.Contains(got, "Facts::OptionsValidator") {
-		t.Fatalf("stderr = %q, want generic config error", got)
+		t.Fatalf("stderr = %q, want generic app error", got)
+	}
+	if got := stderr.String(); !strings.Contains(got, writeErr.Error()) {
+		t.Fatalf("stderr = %q, want %q", got, writeErr)
 	}
 }
 
@@ -242,6 +238,14 @@ func TestFactsCommand_invalidConcatenatedShortFlagReportsOptionsValidatorError(t
 	if got, want := stderr.String(), "ERROR Facts::OptionsValidator - unrecognised option '-z'\n"; got != want {
 		t.Fatalf("stderr = %q, want %q", got, want)
 	}
+}
+
+type errorWriter struct {
+	err error
+}
+
+func (w errorWriter) Write([]byte) (int, error) {
+	return 0, w.err
 }
 
 func buildFactsCommand(t *testing.T) string {

@@ -82,7 +82,7 @@ func TestRunMainReportsCreateErrors(t *testing.T) {
 	if code := runMain(&stderr); code != 1 {
 		t.Fatalf("runMain() code = %d, want 1", code)
 	}
-	if got := stderr.String(); !strings.Contains(got, "create docs/supported-facts:") {
+	if got := filepath.ToSlash(stderr.String()); !strings.Contains(got, "create docs/supported-facts:") {
 		t.Fatalf("stderr = %q, want create error", got)
 	}
 }
@@ -114,7 +114,7 @@ func TestRunMainReportsWriteErrors(t *testing.T) {
 	if code := runMain(&stderr); code != 1 {
 		t.Fatalf("runMain() code = %d, want 1", code)
 	}
-	if got := stderr.String(); !strings.Contains(got, "write docs/supported-facts/") {
+	if got := filepath.ToSlash(stderr.String()); !strings.Contains(got, "write docs/supported-facts/") {
 		t.Fatalf("stderr = %q, want write error", got)
 	}
 }
