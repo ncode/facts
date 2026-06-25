@@ -183,7 +183,7 @@ func yamlSequenceLines(values []any, depth int) []string {
 	lines := make([]string, 0, len(values))
 	for _, value := range values {
 		if childMap, ok := value.(map[string]any); ok {
-			lines = append(lines, indent+"- "+yamlInlineMap(childMap))
+			lines = append(lines, indent+"- "+yamlSequenceMap(childMap))
 			continue
 		}
 		lines = append(lines, indent+"- "+yamlScalar(value))
@@ -259,10 +259,7 @@ func isPlainYAMLKey(value string) bool {
 }
 
 func quoteOutputString(value string) string {
-	encoded, err := json.Marshal(value)
-	if err != nil {
-		return strconv.Quote(value)
-	}
+	encoded, _ := json.Marshal(value) // json.Marshal cannot fail for a concrete string.
 	return string(encoded)
 }
 
@@ -382,6 +379,17 @@ func isPlainHOCONString(value string) bool {
 }
 
 func yamlInlineMap(value map[string]any) string {
+	return "{" + yamlInlineMapContents(value) + "}"
+}
+
+func yamlSequenceMap(value map[string]any) string {
+	if len(value) == 1 {
+		return yamlInlineMapContents(value)
+	}
+	return yamlInlineMap(value)
+}
+
+func yamlInlineMapContents(value map[string]any) string {
 	parts := make([]string, 0, len(value))
 	for _, key := range sortedKeys(value) {
 		parts = append(parts, yamlKey(key)+": "+yamlScalar(value[key]))

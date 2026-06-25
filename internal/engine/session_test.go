@@ -148,11 +148,59 @@ func fakeDirEntries(names ...string) []os.DirEntry {
 	return entries
 }
 
+func TestNewSessionContextDefaultsNilContext(t *testing.T) {
+	s := NewSessionContext(nil)
+	if s.Context() == nil {
+		t.Fatal("Context() = nil, want background context")
+	}
+	select {
+	case <-s.Context().Done():
+		t.Fatal("nil context default is already canceled")
+	default:
+	}
+}
+
+func TestSessionLogrDefaultsNilLogger(t *testing.T) {
+	s := &Session{}
+	if s.logr() == nil {
+		t.Fatal("logr() = nil, want discard logger")
+	}
+	s.warn("ignored")
+	s.debug("ignored")
+}
+
+func TestOSHostLstatAndGlobUseFilesystem(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "one.fact")
+	if err := os.WriteFile(path, []byte("fact=value\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	host := osHost{}
+	info, err := host.lstat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Name() != "one.fact" {
+		t.Fatalf("lstat().Name() = %q, want one.fact", info.Name())
+	}
+
+	matches, err := host.glob(filepath.Join(dir, "*.fact"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{path}; !reflect.DeepEqual(matches, want) {
+		t.Fatalf("glob() = %#v, want %#v", matches, want)
+	}
+}
+
 func TestSessionRoutesHostIOThroughHost(t *testing.T) {
 	host := &fakeHostOS{
 		files:  map[string][]byte{"/proc/data": []byte("file-data")},
+		dirs:   map[string][]os.DirEntry{"/dir": fakeDirEntries("one", "two")},
 		stats:  map[string]os.FileInfo{"/stat": fakeFileInfo{name: "stat"}},
 		lstats: map[string]os.FileInfo{"/lstat": fakeFileInfo{name: "lstat"}},
+		globs:  map[string][]string{"/tmp/*.fact": {"/tmp/one.fact", "/tmp/two.fact"}},
 	}
 	s := NewSessionContext(context.Background())
 	s.host = host
@@ -185,6 +233,30 @@ func TestSessionRoutesHostIOThroughHost(t *testing.T) {
 	if info.Name() != "lstat" {
 		t.Fatalf("lstat().Name() = %q, want lstat", info.Name())
 	}
+	entries, err := s.readDir("/dir")
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotNames := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		gotNames = append(gotNames, entry.Name())
+	}
+	if want := []string{"one", "two"}; !reflect.DeepEqual(gotNames, want) {
+		t.Fatalf("readDir() names = %#v, want %#v", gotNames, want)
+	}
+	matches, err := s.glob("/tmp/*.fact")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"/tmp/one.fact", "/tmp/two.fact"}; !reflect.DeepEqual(matches, want) {
+		t.Fatalf("glob() = %#v, want %#v", matches, want)
+	}
+	if want := []string{"/dir"}; !reflect.DeepEqual(host.readDirCalls, want) {
+		t.Fatalf("readDir calls = %#v, want %#v", host.readDirCalls, want)
+	}
+	if want := []string{"/tmp/*.fact"}; !reflect.DeepEqual(host.globCalls, want) {
+		t.Fatalf("glob calls = %#v, want %#v", host.globCalls, want)
+	}
 }
 
 func TestSessionBackedProbesUseFakeHost(t *testing.T) {
@@ -206,6 +278,73 @@ func TestSessionBackedProbesUseFakeHost(t *testing.T) {
 	wantCalls := []fakeHostRunCall{{name: "augparse", args: []string{"--version"}}}
 	if !reflect.DeepEqual(host.runCalls, wantCalls) {
 		t.Fatalf("run calls = %#v, want %#v", host.runCalls, wantCalls)
+	}
+}
+
+func TestSessionCachedLinuxMeminfoMemoizesFirstRead(t *testing.T) {
+	host := &fakeHostOS{
+		files: map[string][]byte{
+			"/proc/meminfo": []byte("MemTotal:       1024 kB\n"),
+		},
+	}
+	s := NewSessionContext(context.Background())
+	s.host = host
+
+	if got := s.cachedLinuxMeminfo(); got != "MemTotal:       1024 kB\n" {
+		t.Fatalf("cachedLinuxMeminfo() = %q, want first fake meminfo", got)
+	}
+	host.files["/proc/meminfo"] = []byte("MemTotal:       2048 kB\n")
+	if got := s.cachedLinuxMeminfo(); got != "MemTotal:       1024 kB\n" {
+		t.Fatalf("cachedLinuxMeminfo() after host mutation = %q, want cached first read", got)
+	}
+}
+
+func TestSessionCachedWindowsOSVersionInputUsesSessionPlatform(t *testing.T) {
+	host := &fakeHostOS{
+		platform: "windows",
+		runOutputs: map[string]string{
+			fakeRunKey("wmic", "os", "get", "OtherTypeDescription,ProductType,Version", "/value"):                                                                        "",
+			fakeRunKey("powershell", "-NoProfile", "-NonInteractive", "-Command", windowsCIMScript("Win32_OperatingSystem", "OtherTypeDescription,ProductType,Version")): "OtherTypeDescription=\r\nProductType=1\r\nVersion=10.0.22631\r\n",
+		},
+	}
+	s := NewSessionContext(context.Background())
+	s.host = host
+
+	if got := s.cachedWindowsOSVersionInput(); !strings.Contains(got, "Version=10.0.22631") {
+		t.Fatalf("cachedWindowsOSVersionInput() = %q, want Windows version input", got)
+	}
+	host.runOutputs[fakeRunKey("powershell", "-NoProfile", "-NonInteractive", "-Command", windowsCIMScript("Win32_OperatingSystem", "OtherTypeDescription,ProductType,Version"))] = "Version=changed\r\n"
+	if got := s.cachedWindowsOSVersionInput(); !strings.Contains(got, "Version=10.0.22631") {
+		t.Fatalf("cachedWindowsOSVersionInput() after host mutation = %q, want cached first read", got)
+	}
+	if len(host.runCalls) != 2 {
+		t.Fatalf("run calls = %#v, want wmic and PowerShell fallback", host.runCalls)
+	}
+}
+
+func TestSessionCachedSwapEncryptedMemoizesFreeBSDProbe(t *testing.T) {
+	host := &fakeHostOS{
+		platform: "freebsd",
+		runOutputs: map[string]string{
+			fakeRunKey("sysctl", "-n", "vm.stats.vm.v_page_size"):    "4096\n",
+			fakeRunKey("sysctl", "-n", "vm.stats.vm.v_page_count"):   "100\n",
+			fakeRunKey("sysctl", "-n", "vm.stats.vm.v_active_count"): "20\n",
+			fakeRunKey("sysctl", "-n", "vm.stats.vm.v_wire_count"):   "10\n",
+			fakeRunKey("swapinfo", "-k"): strings.Join([]string{
+				"Device          1K-blocks     Used    Avail Capacity",
+				"/dev/gpt/swap.eli     200       50      150    25%",
+			}, "\n"),
+		},
+	}
+	s := NewSessionContext(context.Background())
+	s.host = host
+
+	if !s.cachedSwapEncrypted() {
+		t.Fatal("cachedSwapEncrypted() = false, want true")
+	}
+	host.runOutputs[fakeRunKey("swapinfo", "-k")] = ""
+	if !s.cachedSwapEncrypted() {
+		t.Fatal("cachedSwapEncrypted() after host mutation = false, want cached true")
 	}
 }
 
@@ -282,6 +421,72 @@ func TestCoreCommandSearchPathIgnoresCallerSystemRoot(t *testing.T) {
 
 	if strings.Contains(strings.ToLower(path), `c:\attacker`) {
 		t.Fatalf("windows core command path = %q, want trusted Windows root", path)
+	}
+}
+
+func TestCoreCommandPathHelpersArePlatformAware(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		cmd  string
+		goos string
+		want bool
+	}{
+		{name: "slash", cmd: "bin/tool", goos: "linux", want: true},
+		{name: "backslash", cmd: `bin\tool`, goos: "linux", want: true},
+		{name: "windows drive", cmd: `C:tool`, goos: "windows", want: true},
+		{name: "posix colon", cmd: "C:tool", goos: "linux"},
+		{name: "bare", cmd: "tool", goos: "windows"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := commandHasPathSeparator(tt.cmd, tt.goos); got != tt.want {
+				t.Fatalf("commandHasPathSeparator(%q, %q) = %v, want %v", tt.cmd, tt.goos, got, tt.want)
+			}
+		})
+	}
+
+	if got := coreCommandCandidates("tool", "windows"); !reflect.DeepEqual(got, []string{"tool.exe", "tool.com", "tool.bat", "tool.cmd"}) {
+		t.Fatalf("coreCommandCandidates(windows bare) = %#v", got)
+	}
+	if got := coreCommandCandidates("tool.exe", "windows"); !reflect.DeepEqual(got, []string{"tool.exe"}) {
+		t.Fatalf("coreCommandCandidates(windows extension) = %#v", got)
+	}
+	if got := coreCommandCandidates("tool", "linux"); !reflect.DeepEqual(got, []string{"tool"}) {
+		t.Fatalf("coreCommandCandidates(linux) = %#v", got)
+	}
+	if got, ok := coreCommandExecutable("bin/tool", "linux"); !ok || got != "bin/tool" {
+		t.Fatalf("coreCommandExecutable(path) = %q, %v; want bin/tool, true", got, ok)
+	}
+}
+
+func TestCoreCommandFileExecutableChecksRegularExecutableFiles(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	executable := filepath.Join(dir, "tool")
+	plain := filepath.Join(dir, "plain")
+	if err := os.WriteFile(executable, []byte("#!/bin/sh\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(plain, []byte("not executable\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if runtime.GOOS != "windows" {
+		if !coreCommandFileExecutable(executable, "linux") {
+			t.Fatalf("coreCommandFileExecutable(%q, linux) = false, want true", executable)
+		}
+		if coreCommandFileExecutable(plain, "linux") {
+			t.Fatalf("coreCommandFileExecutable(%q, linux) = true, want false", plain)
+		}
+	}
+	if !coreCommandFileExecutable(plain, "windows") {
+		t.Fatalf("coreCommandFileExecutable(%q, windows) = false, want regular files accepted", plain)
+	}
+	if coreCommandFileExecutable(dir, "windows") {
+		t.Fatalf("coreCommandFileExecutable(%q, windows) = true, want directory rejected", dir)
 	}
 }
 

@@ -3,7 +3,6 @@ package engine
 import (
 	"os"
 	"regexp"
-	"runtime"
 	"strconv"
 	"strings"
 )
@@ -117,7 +116,7 @@ type windowsVirtualizationInput struct {
 }
 
 func detectVirtualization(s *Session) virtualization {
-	switch runtime.GOOS {
+	switch s.goos() {
 	case "linux":
 		return detectLinuxVirtualization(currentLinuxVirtualizationInput(s))
 	case "darwin":
@@ -133,7 +132,7 @@ func detectVirtualization(s *Session) virtualization {
 	case "illumos":
 		return detectDMIHostVirtualization(currentIllumosVirtualizationInput(s.commandOutput))
 	case "windows":
-		return detectWindowsVirtualization(currentWindowsVirtualizationInput(runtime.GOOS, s.commandOutput))
+		return detectWindowsVirtualization(currentWindowsVirtualizationInput(s.goos(), s.commandOutput))
 	case "plan9":
 		return virtualization{Unknown: true}
 	default:
@@ -333,10 +332,10 @@ func parseWindowsOEMStrings(records []map[string]string) []string {
 }
 
 func currentWindowsHypervisorFacts(s *Session) []ResolvedFact {
-	if runtime.GOOS != "windows" {
+	if s.goos() != "windows" {
 		return nil
 	}
-	return windowsHypervisorFacts(currentWindowsVirtualizationInput(runtime.GOOS, s.commandOutput))
+	return windowsHypervisorFacts(currentWindowsVirtualizationInput(s.goos(), s.commandOutput))
 }
 
 func windowsHypervisorFacts(input windowsVirtualizationInput) []ResolvedFact {
@@ -611,7 +610,7 @@ func procVZEntryCount(path string) int {
 }
 
 func currentLinuxHypervisorFacts(s *Session) []ResolvedFact {
-	if runtime.GOOS != "linux" {
+	if s.goos() != "linux" {
 		return nil
 	}
 	return linuxHypervisorFacts(currentLinuxVirtualizationInput(s))

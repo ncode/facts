@@ -83,6 +83,28 @@ func TestUptimeFactsUseInt64DurationFields(t *testing.T) {
 	}
 }
 
+func TestUptimeCoreFactsUsesSessionPlatform(t *testing.T) {
+	s := NewSessionContext(t.Context())
+	s.host = &fakeHostOS{
+		platform: "plan9",
+		runOutputs: map[string]string{
+			fakeRunKey("uptime"): "10:00AM up 1 day, 2:03, 1 user\n",
+		},
+	}
+
+	got := Collection(uptimeCoreFacts(s))
+	systemUptime, ok := got["system_uptime"].(map[string]any)
+	if !ok {
+		t.Fatalf("system_uptime = %#v, want map", got["system_uptime"])
+	}
+	if got := systemUptime["seconds"]; got != int64(93_780) {
+		t.Fatalf("system_uptime.seconds = %#v, want 93780", got)
+	}
+	if _, ok := got["load_averages"]; ok {
+		t.Fatalf("load_averages present for Plan 9 uptime facts: %#v", got)
+	}
+}
+
 func TestCurrentUptimeInfoUsesPID1ElapsedTimeForKubernetes(t *testing.T) {
 	s := NewSession()
 	s.host = &fakeHostOS{
@@ -300,6 +322,18 @@ func TestCurrentUptimeUsesWindowsWMITimes(t *testing.T) {
 	}
 }
 
+func TestCurrentWindowsUptimeSkipsNonWindows(t *testing.T) {
+	t.Parallel()
+
+	got := currentWindowsUptime("linux", func(string, ...string) string {
+		t.Fatal("currentWindowsUptime(non-windows) ran command")
+		return ""
+	}, discardLog())
+	if got != (uptimeInfo{}) {
+		t.Fatalf("currentWindowsUptime(non-windows) = %#v, want empty", got)
+	}
+}
+
 func TestCurrentUptimeReturnsZeroForInvalidWindowsWMITimes(t *testing.T) {
 	t.Parallel()
 
@@ -354,6 +388,35 @@ func TestCurrentWindowsUptimeInfoLogsNoResultDiagnosticsLikeRubyResolver(t *test
 	}
 }
 
+func TestCurrentWindowsUptimeInfoLogsUnparseableWMITimes(t *testing.T) {
+	tests := []struct {
+		name   string
+		output string
+	}{
+		{name: "invalid local time", output: "LocalDateTime=bad\r\nLastBootUpTime=20010201120506+0700\r\n"},
+		{name: "invalid boot time", output: "LocalDateTime=20010201130506+0700\r\nLastBootUpTime=bad\r\n"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var debugMessages []string
+			s := NewSession()
+			s.logger = captureLogger(&debugMessages, nil, nil)
+
+			got := currentWindowsUptime("windows", func(string, ...string) string {
+				return tt.output
+			}, s.logr())
+			if got.Known || got.Duration != 0 {
+				t.Fatalf("currentWindowsUptime() = %#v, want unknown zero duration", got)
+			}
+			want := []string{"Unable to determine system uptime!"}
+			if !reflect.DeepEqual(debugMessages, want) {
+				t.Fatalf("debug messages = %#v, want %#v", debugMessages, want)
+			}
+		})
+	}
+}
+
 func TestCurrentWindowsUptimeInfoLogsInvalidDurationLikeRubyResolver(t *testing.T) {
 	debugMessages := []string{}
 	s := NewSession()
@@ -385,6 +448,40 @@ func TestParseWindowsWMITimeAcceptsCIMDatetimeOffsetMinutes(t *testing.T) {
 	want := time.Date(2001, 2, 3, 4, 5, 6, 0, time.FixedZone("", 60*60))
 	if !got.Equal(want) {
 		t.Fatalf("parseWindowsWMITime() = %s, want %s", got, want)
+	}
+}
+
+func TestParseWindowsWMITimeRejectsMalformedValues(t *testing.T) {
+	t.Parallel()
+
+	for _, input := range []string{
+		"200102030405",
+		"20010203040506.123456",
+		"20010203040506+",
+		"20010203040506+bad",
+		"bad-date-time!!+0700",
+	} {
+		if got, ok := parseWindowsWMITime(input); ok || !got.IsZero() {
+			t.Fatalf("parseWindowsWMITime(%q) = %s, %v, want zero false", input, got, ok)
+		}
+	}
+}
+
+func TestUptimeSourceParsersRejectMalformedInputs(t *testing.T) {
+	t.Parallel()
+
+	if got := uptimeFromProc(func(string) ([]byte, error) { return []byte(""), nil }); got != 0 {
+		t.Fatalf("uptimeFromProc(empty) = %s, want 0", got)
+	}
+	if got := uptimeFromProc(func(string) ([]byte, error) { return []byte("not-a-number"), nil }); got != 0 {
+		t.Fatalf("uptimeFromProc(invalid) = %s, want 0", got)
+	}
+
+	now := func() time.Time { return time.Unix(120, 0) }
+	for _, input := range []string{"", "{ sec = 60 }", "{ sec = bad, usec = 0 }"} {
+		if got := uptimeFromKernelBoottime(input, now); got != 0 {
+			t.Fatalf("uptimeFromKernelBoottime(%q) = %s, want 0", input, got)
+		}
 	}
 }
 
@@ -491,5 +588,59 @@ func TestParseLoadAveragesInvalidInput(t *testing.T) {
 
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("parseLoadAverages() = %#v, want %#v", got, want)
+	}
+}
+
+func TestUptimeCommandParsersRejectMalformedDurations(t *testing.T) {
+	t.Parallel()
+
+	for _, input := range []string{
+		"10:00AM up users",
+		"10:00AM up trailing",
+		"10:00AM up about days",
+	} {
+		if got := parseUptimeCommandSeconds(input); got != 0 {
+			t.Fatalf("parseUptimeCommandSeconds(%q) = %d, want 0", input, got)
+		}
+	}
+
+	for _, input := range []string{"bad-01:02:03", "bad:02", "01:bad", "bad:02:03", "01:bad:03", "01:02:bad", "01:02:03:04"} {
+		if got := parseDockerElapsedTimeSeconds(input); got != 0 {
+			t.Fatalf("parseDockerElapsedTimeSeconds(%q) = %d, want 0", input, got)
+		}
+	}
+
+	for _, input := range []string{"bad:02", "01:bad"} {
+		if hours, minutes, ok := parseUptimeHoursMinutes(input); ok || hours != 0 || minutes != 0 {
+			t.Fatalf("parseUptimeHoursMinutes(%q) = %d, %d, %v, want zero false", input, hours, minutes, ok)
+		}
+	}
+}
+
+func TestLoadAverageParsersUseEmptyFallbacks(t *testing.T) {
+	t.Parallel()
+
+	want := emptyLoadAverages()
+	cases := []struct {
+		name string
+		got  map[string]any
+	}{
+		{name: "bsd empty sysctl", got: currentLoadAverages("freebsd", nil, func(string, ...string) string { return "" })},
+		{name: "illumos empty uptime", got: currentLoadAverages("illumos", nil, func(string, ...string) string { return "" })},
+		{name: "unknown goos", got: currentLoadAverages("aix", nil, nil)},
+		{name: "bad float", got: parseLoadAverages("0.01 bad 0.03")},
+		{name: "illumos no marker", got: parseIllumosLoadAverages("22:09:38 up 3:04")},
+	}
+
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			if !reflect.DeepEqual(tt.got, want) {
+				t.Fatalf("%s = %#v, want %#v", tt.name, tt.got, want)
+			}
+		})
+	}
+
+	if got := currentLoadAverages("plan9", nil, nil); got != nil {
+		t.Fatalf("currentLoadAverages(plan9) = %#v, want nil", got)
 	}
 }

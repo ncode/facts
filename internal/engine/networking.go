@@ -6,15 +6,12 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"slices"
 	"strconv"
 	"strings"
 )
 
 var linuxSystemdDHCPServerPattern = regexp.MustCompile(`(?m)^SERVER_ADDRESS=(\S+)`)
-
-var linuxDHClientServerPattern = regexp.MustCompile(`dhcp-server-identifier\s+([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)`)
 
 var linuxDHCPCDServerPattern = regexp.MustCompile(`(?m)^dhcp_server_identifier='([^']+)'`)
 
@@ -164,12 +161,12 @@ func currentNetworkInterfaceSnapshots() ([]networkInterfaceSnapshot, error) {
 }
 
 func networkingInterfaces(s *Session) map[string]any {
-	return networkingInterfacesForPlatform(s, runtime.GOOS, currentNetworkInterfaceSnapshots)
+	return networkingInterfacesForPlatform(s, s.goos(), currentNetworkInterfaceSnapshots)
 }
 
 func networkingInterfacesForPlatform(s *Session, goos string, snapshotProvider func() ([]networkInterfaceSnapshot, error)) map[string]any {
 	if goos == "plan9" {
-		return currentPlan9Interfaces(s.readFile, filepath.Glob)
+		return currentPlan9Interfaces(s.readFile, s.glob)
 	}
 	snapshots, err := snapshotProvider()
 	if err != nil {
@@ -1180,7 +1177,13 @@ func linuxDHCPServerFromLeaseDirWithReader(dir, interfaceName string, readFile f
 			continue
 		}
 		content := readText(filepath.Join(dir, name), readFile)
-		if !leaseMatchesInterface(name, content, interfaceName) {
+		if server, matched, explicit := linuxDHClientDHCPServerForInterfaceState(content, interfaceName); explicit {
+			if matched {
+				return server
+			}
+			continue
+		}
+		if !leaseFilenameMatchesInterface(name, interfaceName) {
 			continue
 		}
 		if server := linuxDHClientDHCPServer(content); server != "" {
@@ -1193,10 +1196,259 @@ func linuxDHCPServerFromLeaseDirWithReader(dir, interfaceName string, readFile f
 	return ""
 }
 
-func leaseMatchesInterface(name, content, interfaceName string) bool {
-	if strings.Contains(content, "interface") && strings.Contains(content, interfaceName) {
-		return true
+func linuxDHClientDHCPServerForInterface(content, interfaceName string) (string, bool) {
+	server, _, explicit := linuxDHClientDHCPServerForInterfaceState(content, interfaceName)
+	return server, explicit
+}
+
+func linuxDHClientDHCPServerForInterfaceState(content, interfaceName string) (string, bool, bool) {
+	if !dhclientContentHasInterface(content) {
+		return "", false, false
 	}
+	server := ""
+	blocks := linuxDHClientLeaseBlocks(content)
+	if len(blocks) == 0 {
+		if dhclientContentMatchesInterface(content, interfaceName) {
+			return linuxDHClientDHCPServer(content), true, true
+		}
+		return "", false, true
+	}
+	matched := false
+	sawInterfaceBlock := false
+	for _, block := range blocks {
+		if !dhclientContentHasInterface(block) {
+			continue
+		}
+		sawInterfaceBlock = true
+		if !dhclientContentMatchesInterface(block, interfaceName) {
+			continue
+		}
+		matched = true
+		server = linuxDHClientDHCPServer(block)
+	}
+	if matched {
+		return server, true, true
+	}
+	if sawInterfaceBlock {
+		return server, dhclientContentMatchesInterface(content, interfaceName), true
+	}
+	if !sawInterfaceBlock && dhclientContentMatchesInterface(content, interfaceName) {
+		return linuxDHClientDHCPServer(content), true, true
+	}
+	return server, false, true
+}
+
+func linuxDHClientLeaseBlocks(content string) []string {
+	var blocks []string
+	for i := 0; i < len(content); {
+		switch content[i] {
+		case '#':
+			i = skipDHClientComment(content, i)
+			continue
+		case '"':
+			i = skipDHClientQuotedString(content, i)
+			continue
+		}
+		if !dhclientKeywordAt(content, i, "lease") {
+			i++
+			continue
+		}
+		open := skipDHClientSpaceAndComments(content, i+len("lease"))
+		if open == len(content) || content[open] != '{' {
+			i++
+			continue
+		}
+		end, next := dhclientBlockEnd(content, open)
+		if end < 0 {
+			if next <= i {
+				i++
+			} else {
+				i = next
+			}
+			continue
+		}
+		blocks = append(blocks, content[i:end])
+		i = end
+	}
+	return blocks
+}
+
+func dhclientBlockEnd(content string, open int) (int, int) {
+	depth := 0
+	for i := open; i < len(content); {
+		switch content[i] {
+		case '#':
+			i = skipDHClientComment(content, i)
+		case '"':
+			i = skipDHClientQuotedString(content, i)
+		case '{':
+			depth++
+			i++
+		case '}':
+			depth--
+			i++
+			if depth == 0 {
+				return i, i
+			}
+		default:
+			if depth == 1 && i != open && dhclientLeaseBlockStart(content, i) {
+				return -1, i
+			}
+			i++
+		}
+	}
+	return -1, len(content)
+}
+
+func dhclientLeaseBlockStart(content string, i int) bool {
+	if !dhclientKeywordAt(content, i, "lease") {
+		return false
+	}
+	open := skipDHClientSpaceAndComments(content, i+len("lease"))
+	return open < len(content) && content[open] == '{'
+}
+
+func skipDHClientComment(content string, i int) int {
+	for i < len(content) && content[i] != '\n' {
+		i++
+	}
+	return i
+}
+
+func skipDHClientSpaceAndComments(content string, i int) int {
+	for i < len(content) {
+		if isDHClientSpace(content[i]) {
+			i++
+			continue
+		}
+		if content[i] == '#' {
+			i = skipDHClientComment(content, i)
+			continue
+		}
+		return i
+	}
+	return i
+}
+
+func skipDHClientQuotedString(content string, i int) int {
+	i++
+	for i < len(content) {
+		if content[i] == '\n' || content[i] == '\r' {
+			return i
+		}
+		if content[i] == '\\' {
+			if i+1 < len(content) && (content[i+1] == '\n' || content[i+1] == '\r') {
+				return i + 1
+			}
+			i += 2
+			continue
+		}
+		if content[i] == '"' {
+			return i + 1
+		}
+		i++
+	}
+	return i
+}
+
+func dhclientKeywordAt(content string, i int, keyword string) bool {
+	if i > 0 && isDHClientWordByte(content[i-1]) {
+		return false
+	}
+	if !strings.HasPrefix(content[i:], keyword) {
+		return false
+	}
+	end := i + len(keyword)
+	return end == len(content) || !isDHClientWordByte(content[end])
+}
+
+func isDHClientSpace(b byte) bool {
+	return b == ' ' || b == '\t' || b == '\n' || b == '\r'
+}
+
+func isDHClientWordByte(b byte) bool {
+	return b == '_' || b == '-' || b == '.' || (b >= '0' && b <= '9') || (b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z')
+}
+
+func dhclientContentHasInterface(content string) bool {
+	return len(dhclientInterfaceNames(content)) > 0
+}
+
+func dhclientContentMatchesInterface(content, interfaceName string) bool {
+	for _, name := range dhclientInterfaceNames(content) {
+		if name == interfaceName {
+			return true
+		}
+	}
+	return false
+}
+
+func dhclientInterfaceNames(content string) []string {
+	var names []string
+	for i := 0; i < len(content); {
+		switch content[i] {
+		case '#':
+			i = skipDHClientComment(content, i)
+			continue
+		case '"':
+			i = skipDHClientQuotedString(content, i)
+			continue
+		}
+		if !dhclientKeywordAt(content, i, "interface") {
+			i++
+			continue
+		}
+		valueStart := skipDHClientSpaceAndComments(content, i+len("interface"))
+		value, next, ok := dhclientQuotedStringValue(content, valueStart)
+		if ok {
+			names = append(names, value)
+			i = next
+			continue
+		}
+		i++
+	}
+	return names
+}
+
+func dhclientQuotedStringValue(content string, i int) (string, int, bool) {
+	if i == len(content) || content[i] != '"' {
+		return "", i, false
+	}
+	start := i + 1
+	i = start
+	var out strings.Builder
+	escaped := false
+	for i < len(content) {
+		switch content[i] {
+		case '\n', '\r':
+			return "", i, false
+		case '\\':
+			if i+1 < len(content) && (content[i+1] == '\n' || content[i+1] == '\r') {
+				return "", i + 1, false
+			}
+			if !escaped {
+				out.WriteString(content[start:i])
+				escaped = true
+			}
+			if i+1 < len(content) {
+				out.WriteByte(content[i+1])
+			}
+			i += 2
+			start = i
+		case '"':
+			if escaped {
+				out.WriteString(content[start:i])
+				return out.String(), i + 1, true
+			}
+			return content[start:i], i + 1, true
+		default:
+			i++
+		}
+	}
+	return "", i, false
+}
+
+func leaseFilenameMatchesInterface(name, interfaceName string) bool {
 	return strings.HasSuffix(name, "-"+interfaceName+".lease") ||
 		strings.HasSuffix(name, "."+interfaceName+".lease") ||
 		strings.HasSuffix(name, "."+interfaceName+".leases")
@@ -1211,11 +1463,37 @@ func linuxSystemdDHCPServer(content string) string {
 }
 
 func linuxDHClientDHCPServer(content string) string {
-	matches := linuxDHClientServerPattern.FindAllStringSubmatch(content, -1)
-	if len(matches) == 0 {
-		return ""
+	server := ""
+	for i := 0; i < len(content); {
+		switch content[i] {
+		case '#':
+			i = skipDHClientComment(content, i)
+			continue
+		case '"':
+			i = skipDHClientQuotedString(content, i)
+			continue
+		}
+		if !dhclientKeywordAt(content, i, "option") {
+			i++
+			continue
+		}
+		valueStart := skipDHClientSpaceAndComments(content, i+len("option"))
+		if !dhclientKeywordAt(content, valueStart, "dhcp-server-identifier") {
+			i++
+			continue
+		}
+		valueStart = skipDHClientSpaceAndComments(content, valueStart+len("dhcp-server-identifier"))
+		valueEnd := valueStart
+		for valueEnd < len(content) && !isDHClientSpace(content[valueEnd]) && content[valueEnd] != ';' {
+			valueEnd++
+		}
+		value := content[valueStart:valueEnd]
+		if ip := net.ParseIP(value).To4(); ip != nil {
+			server = ip.String()
+		}
+		i = valueEnd
 	}
-	return matches[len(matches)-1][1]
+	return server
 }
 
 func linuxDHCPCDDHCPServer(content string) string {
@@ -1351,7 +1629,7 @@ func firstInterfaceBinding(iface map[string]any, key string) map[string]any {
 }
 
 func hostName(s *Session) (string, any) {
-	return hostNameForPlatform(runtime.GOOS, os.Hostname, func() string {
+	return hostNameForPlatform(s.goos(), os.Hostname, func() string {
 		return readLinuxKernelHostname(s.readFile)
 	}, s.logr())
 }
@@ -1404,10 +1682,14 @@ func hostNameFromLookup(lookup func() (string, error), log *slog.Logger) (string
 }
 
 func fqdn(hostname string) string {
+	return fqdnWithLookup(hostname, net.LookupAddr)
+}
+
+func fqdnWithLookup(hostname string, lookup func(string) ([]string, error)) string {
 	if hostname == "" || strings.Contains(hostname, ".") {
 		return hostname
 	}
-	addrs, err := net.LookupAddr(hostname)
+	addrs, err := lookup(hostname)
 	if err != nil || len(addrs) == 0 {
 		return hostname
 	}
@@ -1538,6 +1820,10 @@ func primaryIPv6() string {
 	if err != nil {
 		return ""
 	}
+	return primaryIPv6FromAddrs(addrs)
+}
+
+func primaryIPv6FromAddrs(addrs []net.Addr) string {
 	best := ""
 	bestRank := 0
 	for _, addr := range addrs {
@@ -1640,12 +1926,13 @@ func ipFromAddr(addr net.Addr) (net.IP, bool) {
 // domain, interfaces, primary interface and address selection, DHCP, and the
 // IPv4/IPv6 binding facts) for the current host.
 func networkingCoreFacts(s *Session) []ResolvedFact {
-	if runtime.GOOS == "plan9" {
+	goos := s.goos()
+	if goos == "plan9" {
 		return plan9NetworkingCoreFacts(s)
 	}
 	nodeName, nodeNameValue := hostName(s)
 	resolvedFQDN := fqdn(nodeName)
-	hostname, fqdn, domain := currentHostnameFacts(runtime.GOOS, nodeName, resolvedFQDN, "/etc/resolv.conf", s.readFile)
+	hostname, fqdn, domain := currentHostnameFacts(goos, nodeName, resolvedFQDN, "/etc/resolv.conf", s.readFile)
 	var hostnameValue any
 	if nodeNameValue != nil {
 		hostnameValue = hostname
@@ -1653,8 +1940,8 @@ func networkingCoreFacts(s *Session) []ResolvedFact {
 	fqdnValue, domainValue := hostnameFactValues(hostnameValue, fqdn, domain)
 	ipv4 := primaryIPv4()
 	interfaces := networkingInterfaces(s)
-	configuredPrimary, interfaces := currentNetworkingData(runtime.GOOS, interfaces, s.commandOutput, s.readFile)
-	if runtime.GOOS == "windows" {
+	configuredPrimary, interfaces := currentNetworkingData(goos, interfaces, s.commandOutput, s.readFile)
+	if goos == "windows" {
 		domain = currentWindowsNetworkingDomain(interfaces, s.commandOutput)
 		fqdn = windowsFQDN(hostname, domain)
 		fqdnValue, domainValue = hostnameFactValues(hostnameValue, fqdn, domain)
@@ -1679,7 +1966,7 @@ func networkingCoreFacts(s *Session) []ResolvedFact {
 	primaryScope6 := primaryIPv6Scope(interfaces, ipv6)
 	primaryMAC, _ := primaryInterfaceFact(interfaces, primaryInterfaceName, "mac").(string)
 	primaryMTU := primaryInterfaceFact(interfaces, primaryInterfaceName, "mtu")
-	primaryDHCP := networkingDHCPValue(runtime.GOOS, interfaces, ipv4)
+	primaryDHCP := networkingDHCPValue(goos, interfaces, ipv4)
 	return []ResolvedFact{
 		{Name: "networking.hostname", Value: hostnameValue},
 		{Name: "networking.fqdn", Value: fqdnValue},

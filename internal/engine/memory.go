@@ -2,7 +2,6 @@ package engine
 
 import (
 	"log/slog"
-	"runtime"
 	"strconv"
 	"strings"
 )
@@ -59,7 +58,7 @@ func parseWindowsMemory(input string, log *slog.Logger) windowsMemory {
 }
 
 func probeTotalPhysicalMemoryBytes(s *Session) int {
-	switch runtime.GOOS {
+	switch s.goos() {
 	case "darwin":
 		out := s.commandOutput("sysctl", "-n", "hw.memsize")
 		if out == "" {
@@ -85,7 +84,7 @@ func probeTotalPhysicalMemoryBytes(s *Session) int {
 }
 
 func probeAvailablePhysicalMemoryBytes(s *Session) int {
-	switch runtime.GOOS {
+	switch s.goos() {
 	case "darwin":
 		out := s.commandOutput("vm_stat")
 		if out == "" {
@@ -106,7 +105,7 @@ func probeAvailablePhysicalMemoryBytes(s *Session) int {
 }
 
 func probeTotalSwapMemoryBytes(s *Session) int {
-	switch runtime.GOOS {
+	switch s.goos() {
 	case "darwin":
 		return s.cachedDarwinSwapUsage().TotalBytes
 	case "freebsd":
@@ -121,7 +120,7 @@ func probeTotalSwapMemoryBytes(s *Session) int {
 }
 
 func probeAvailableSwapMemoryBytes(s *Session) int {
-	switch runtime.GOOS {
+	switch s.goos() {
 	case "darwin":
 		return s.cachedDarwinSwapUsage().AvailableBytes
 	case "freebsd":
@@ -136,10 +135,10 @@ func probeAvailableSwapMemoryBytes(s *Session) int {
 }
 
 func probeSwapEncrypted(s *Session) bool {
-	if runtime.GOOS == "darwin" {
+	if s.goos() == "darwin" {
 		return s.cachedDarwinSwapUsage().Encrypted
 	}
-	if runtime.GOOS == "freebsd" {
+	if s.goos() == "freebsd" {
 		value, _ := s.cachedFreeBSDMemoryInfo().Swap["encrypted"].(bool)
 		return value
 	}
@@ -147,7 +146,7 @@ func probeSwapEncrypted(s *Session) bool {
 }
 
 func probeWindowsMemory(s *Session) windowsMemory {
-	return currentWindowsMemory(runtime.GOOS, s.commandOutput, s.logr())
+	return currentWindowsMemory(s.goos(), s.commandOutput, s.logr())
 }
 
 type darwinSwapUsage struct {
@@ -158,7 +157,7 @@ type darwinSwapUsage struct {
 }
 
 func probeFreeBSDMemoryInfo(s *Session) freeBSDMemoryInfo {
-	if runtime.GOOS != "freebsd" {
+	if s.goos() != "freebsd" {
 		return freeBSDMemoryInfo{}
 	}
 	return parseFreeBSDMemory(map[string]int{
@@ -170,7 +169,7 @@ func probeFreeBSDMemoryInfo(s *Session) freeBSDMemoryInfo {
 }
 
 func probeBSDMemoryInfo(s *Session) bsdMemoryInfo {
-	switch runtime.GOOS {
+	switch s.goos() {
 	case "netbsd", "openbsd":
 		values := map[string]int{
 			"hw.physmem": bsdSysctlInt(s, "hw.physmem64", "hw.physmem"),
@@ -466,7 +465,7 @@ func parseIllumosKToken(value string) int {
 }
 
 func probeDarwinSwapUsage(s *Session) darwinSwapUsage {
-	return currentDarwinSwapUsage(runtime.GOOS, s.commandOutput)
+	return currentDarwinSwapUsage(s.goos(), s.commandOutput)
 }
 
 func currentDarwinSwapUsage(goos string, run commandRunner) darwinSwapUsage {
@@ -588,7 +587,7 @@ func parseDarwinMemoryAmountBytes(input string) int {
 // current host.
 func memoryCoreFacts(s *Session) []ResolvedFact {
 	memoryTotalBytes := s.cachedTotalPhysicalMemoryBytes()
-	if runtime.GOOS == "plan9" {
+	if s.goos() == "plan9" {
 		return plan9MemoryCoreFacts(memoryTotalBytes)
 	}
 	memoryAvailableBytes := s.cachedAvailablePhysicalMemoryBytes()

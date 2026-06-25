@@ -45,6 +45,72 @@ func TestFactsCommand_version(t *testing.T) {
 	}
 }
 
+func TestMainFunctionVersion(t *testing.T) {
+	oldArgs, oldStdout, oldStderr := os.Args, os.Stdout, os.Stderr
+	stdoutR, stdoutW, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stderrR, stderrW, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		os.Args, os.Stdout, os.Stderr = oldArgs, oldStdout, oldStderr
+		_ = stdoutR.Close()
+		_ = stderrR.Close()
+	})
+	os.Args, os.Stdout, os.Stderr = []string{"facts", "--version"}, stdoutW, stderrW
+
+	main()
+	_ = stdoutW.Close()
+	_ = stderrW.Close()
+
+	stdout := new(bytes.Buffer)
+	stderr := new(bytes.Buffer)
+	if _, err := stdout.ReadFrom(stdoutR); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := stderr.ReadFrom(stderrR); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := stdout.String(), engine.Version+"\n"; got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}
+
+func TestRunMainReportsOptionErrors(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+
+	if code := runMain(&stdout, &stderr, []string{"-z"}); code != 1 {
+		t.Fatalf("runMain() code = %d, want 1", code)
+	}
+	if !strings.Contains(stdout.String(), "facts [options] [query]") {
+		t.Fatalf("stdout = %q, want usage text", stdout.String())
+	}
+	if got, want := stderr.String(), "ERROR Facts::OptionsValidator - unrecognised option '-z'\n"; got != want {
+		t.Fatalf("stderr = %q, want %q", got, want)
+	}
+}
+
+func TestRunMainReportsGenericErrors(t *testing.T) {
+	writeErr := errors.New("stdout closed")
+	var stderr bytes.Buffer
+
+	if code := runMain(errorWriter{err: writeErr}, &stderr, []string{"--version"}); code != 1 {
+		t.Fatalf("runMain() code = %d, want 1", code)
+	}
+	if got := stderr.String(); got == "" || strings.Contains(got, "Facts::OptionsValidator") {
+		t.Fatalf("stderr = %q, want generic app error", got)
+	}
+	if got := stderr.String(); !strings.Contains(got, writeErr.Error()) {
+		t.Fatalf("stderr = %q, want %q", got, writeErr)
+	}
+}
+
 func TestFactsCommand_noQueryPrintsStructuredFacts(t *testing.T) {
 	bin := buildFactsCommand(t)
 
@@ -172,6 +238,14 @@ func TestFactsCommand_invalidConcatenatedShortFlagReportsOptionsValidatorError(t
 	if got, want := stderr.String(), "ERROR Facts::OptionsValidator - unrecognised option '-z'\n"; got != want {
 		t.Fatalf("stderr = %q, want %q", got, want)
 	}
+}
+
+type errorWriter struct {
+	err error
+}
+
+func (w errorWriter) Write([]byte) (int, error) {
+	return 0, w.err
 }
 
 func buildFactsCommand(t *testing.T) string {

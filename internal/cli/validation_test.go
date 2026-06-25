@@ -2,8 +2,37 @@ package cli
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 )
+
+func TestOptionErrorAccessors(t *testing.T) {
+	var nilErr *OptionError
+	if got := nilErr.Error(); got != "" {
+		t.Fatalf("nil OptionError Error() = %q, want empty", got)
+	}
+	if got := nilErr.Unwrap(); got != nil {
+		t.Fatalf("nil OptionError Unwrap() = %v, want nil", got)
+	}
+
+	cause := errors.New("bad option")
+	err := &OptionError{Err: cause}
+	if got := err.Error(); got != "bad option" {
+		t.Fatalf("OptionError.Error() = %q, want bad option", got)
+	}
+	if got := err.Unwrap(); got != cause {
+		t.Fatalf("OptionError.Unwrap() = %v, want cause", got)
+	}
+	if !IsOptionError(err) {
+		t.Fatal("IsOptionError(*OptionError) = false, want true")
+	}
+	if !IsOptionError(fmt.Errorf("wrapped: %w", err)) {
+		t.Fatal("IsOptionError(wrapped *OptionError) = false, want true")
+	}
+	if IsOptionError(cause) {
+		t.Fatal("IsOptionError(non-option error) = true, want false")
+	}
+}
 
 func TestValidateOptions_rejectsInvalidPairs(t *testing.T) {
 	tests := []struct {

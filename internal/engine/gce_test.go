@@ -2,20 +2,32 @@ package engine
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"sync/atomic"
 	"testing"
 )
 
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
 func TestGCEFactsFetchRecursiveMetadataAndNormalizeInstance(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.String() != "/?recursive=true&alt=json" {
-			t.Fatalf("request URL = %q, want recursive JSON metadata endpoint", r.URL.String())
+			t.Errorf("request URL = %q, want recursive JSON metadata endpoint", r.URL.String())
+			http.Error(w, "unexpected metadata endpoint", http.StatusBadRequest)
+			return
 		}
 		if got := r.Header.Get("Metadata-Flavor"); got != "Google" {
-			t.Fatalf("Metadata-Flavor = %q, want Google", got)
+			t.Errorf("Metadata-Flavor = %q, want Google", got)
+			http.Error(w, "missing metadata header", http.StatusBadRequest)
+			return
 		}
 		w.Header().Set("Metadata-Flavor", "Google")
 		_, _ = w.Write([]byte(`{
@@ -107,6 +119,12 @@ func TestGCEFactsRequireGoogleMetadataFlavor(t *testing.T) {
 	}
 }
 
+func TestGCEFactsSkipNilClient(t *testing.T) {
+	if got := gceFacts(context.Background(), nil); got != nil {
+		t.Fatalf("gceFacts(nil client) = %#v, want nil", got)
+	}
+}
+
 func TestLinuxGCEFactsSkipsMetadataWhenBIOSVendorIsNotGoogleLikeRuby(t *testing.T) {
 	var requested atomic.Bool
 	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
@@ -121,6 +139,43 @@ func TestLinuxGCEFactsSkipsMetadataWhenBIOSVendorIsNotGoogleLikeRuby(t *testing.
 	}
 	if requested.Load() {
 		t.Fatal("metadata endpoint was queried for non-Google BIOS vendor")
+	}
+}
+
+func TestLinuxGCEFactsFetchesMetadataForGoogleBIOSVendor(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.String() != "/?recursive=true&alt=json" {
+			t.Errorf("request URL = %q, want recursive JSON metadata endpoint", r.URL.String())
+			http.Error(w, "unexpected metadata endpoint", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Metadata-Flavor", "Google")
+		_, _ = w.Write([]byte(`{"instance":{"machineType":"projects/123/machineTypes/e2-medium"}}`))
+	}))
+	t.Cleanup(server.Close)
+
+	got := factValues(linuxGCEFacts(context.Background(), "linux", "Google", newGCEClient(server.URL, server.Client())))
+	gce, ok := got["gce"].(map[string]any)
+	if !ok {
+		t.Fatalf("gce fact = %#v, want metadata map", got["gce"])
+	}
+	instance := gce["instance"].(map[string]any)
+	if instance["machineType"] != "e2-medium" || got["cloud.provider"] != "gce" {
+		t.Fatalf("linuxGCEFacts() = %#v, want normalized metadata and cloud provider", got)
+	}
+}
+
+func TestLinuxGCEFactsEmitsNilWhenGoogleBIOSHasNoClient(t *testing.T) {
+	got := linuxGCEFacts(context.Background(), "linux", "Google", nil)
+	want := []ResolvedFact{{Name: "gce", Value: nil}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("linuxGCEFacts(nil client) = %#v, want %#v", got, want)
+	}
+}
+
+func TestLinuxGCEFactsSkipNonLinuxPlatform(t *testing.T) {
+	if got := linuxGCEFacts(context.Background(), "freebsd", "Google", nil); got != nil {
+		t.Fatalf("linuxGCEFacts(non-linux) = %#v, want nil", got)
 	}
 }
 
@@ -140,6 +195,47 @@ func TestPlatformGCEFactsFetchesWindowsMetadataWhenVirtualizationIsGCELikeRuby(t
 	}
 	if got["cloud.provider"] != "gce" {
 		t.Fatalf("cloud.provider = %#v, want gce", got["cloud.provider"])
+	}
+}
+
+func TestPlatformGCEFactsEmitsNilForWindowsWithEmptyMetadata(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.URL.String() != "http://metadata.test/?recursive=true&alt=json" {
+			t.Fatalf("request URL = %q, want recursive JSON metadata endpoint", req.URL.String())
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Metadata-Flavor": []string{"Google"}},
+			Body:       io.NopCloser(strings.NewReader(`{}`)),
+		}, nil
+	})}
+
+	got := platformGCEFacts(context.Background(), "windows", virtualization{Name: "gce", IsVirtual: true}, "", newGCEClient("http://metadata.test", client))
+	want := []ResolvedFact{{Name: "gce", Value: nil}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("platformGCEFacts(windows empty metadata) = %#v, want %#v", got, want)
+	}
+}
+
+func TestPlatformGCEFactsDispatchesLinux(t *testing.T) {
+	got := platformGCEFacts(context.Background(), "linux", virtualization{}, "not google", nil)
+	want := []ResolvedFact{{Name: "gce", Value: nil}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("platformGCEFacts(linux non-GCE) = %#v, want %#v", got, want)
+	}
+}
+
+func TestPlatformGCEFactsEmitsNilForWindowsWithoutGCESignal(t *testing.T) {
+	got := platformGCEFacts(context.Background(), "windows", virtualization{Name: "kvm", IsVirtual: true}, "", nil)
+	want := []ResolvedFact{{Name: "gce", Value: nil}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("platformGCEFacts(windows non-gce) = %#v, want %#v", got, want)
+	}
+}
+
+func TestPlatformGCEFactsSkipUnsupportedPlatform(t *testing.T) {
+	if got := platformGCEFacts(context.Background(), "freebsd", virtualization{Name: "gce", IsVirtual: true}, "Google", nil); got != nil {
+		t.Fatalf("platformGCEFacts(unsupported) = %#v, want nil", got)
 	}
 }
 

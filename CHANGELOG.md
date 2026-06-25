@@ -14,6 +14,26 @@
 
 ### Fixed
 
+- Linux DHCP lease discovery now matches explicit dhclient interface names
+  exactly, so a lease for a similarly named interface such as `eth0-backup`
+  is not attributed to `eth0`, and parses lease blocks without being confused
+  by braces inside comments or quoted strings. Malformed lease blocks,
+  unterminated quoted strings, and malformed interface values no longer stop
+  later valid blocks from being scanned or suppress lease filename fallback,
+  and file-level interface declarations with multiple unqualified historical
+  lease blocks now use the latest DHCP server identifier. Multiple exact
+  matching lease blocks now let the latest matching block control the server
+  value, preventing stale servers from older leases when the newest lease has
+  no `dhcp-server-identifier`, and commented DHCP server option text is no
+  longer treated as a real DHCP server.
+- YAML output now renders map values inside sequences with flow-map braces,
+  preserving each key when a nested sequence item has more than one map key.
+- Plan 9 `system_uptime.days`, `system_uptime.hours`, and
+  `system_uptime.seconds` now use the same 64-bit numeric value types as other
+  supported platforms.
+- Snapshot lookups and defensive copies now clone mutable values, including
+  pointer targets, pointer-bearing map keys, and cyclic graph references,
+  instead of returning shared Snapshot state for the public fact graph.
 - QEMU/KVM lab guests on OpenBSD, NetBSD, DragonFly BSD, illumos, and Windows
   now report `virtual: "kvm"` and `is_virtual: true` when native DMI/SMBIOS,
   PCI, or WMI indicators expose the VM.

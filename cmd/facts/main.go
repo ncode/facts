@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/ncode/facts/internal/app"
@@ -9,15 +10,22 @@ import (
 )
 
 func main() {
-	if err := app.Run(os.Stdout, os.Stderr, os.Args[1:]); err != nil {
+	if code := runMain(os.Stdout, os.Stderr, os.Args[1:]); code != 0 {
+		os.Exit(code)
+	}
+}
+
+func runMain(stdout, stderr io.Writer, args []string) int {
+	if err := app.Run(stdout, stderr, args); err != nil {
 		if status, ok := err.(app.ExitStatus); ok {
-			os.Exit(status.Code())
+			return status.Code()
 		}
 		if cli.IsOptionError(err) {
-			fmt.Fprintf(os.Stderr, "ERROR Facts::OptionsValidator - %v\n", err)
+			fmt.Fprintf(stderr, "ERROR Facts::OptionsValidator - %v\n", err)
 		} else {
-			fmt.Fprintln(os.Stderr, err)
+			fmt.Fprintln(stderr, err)
 		}
-		os.Exit(1)
+		return 1
 	}
+	return 0
 }

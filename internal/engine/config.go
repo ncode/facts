@@ -80,11 +80,15 @@ func DefaultExternalFactDirs(windows, root bool, home, windowsDataDir string) []
 // directories (facts-native first, facter-compatible after) for the current
 // process environment.
 func CurrentDefaultExternalFactDirs() []string {
+	return currentDefaultExternalFactDirs(runtime.GOOS, os.Geteuid(), os.Getenv)
+}
+
+func currentDefaultExternalFactDirs(goos string, euid int, getenv func(string) string) []string {
 	return DefaultExternalFactDirs(
-		runtime.GOOS == "windows",
-		runtime.GOOS != "windows" && os.Geteuid() == 0,
-		os.Getenv("HOME"),
-		os.Getenv("ProgramData"),
+		goos == "windows",
+		goos != "windows" && euid == 0,
+		getenv("HOME"),
+		getenv("ProgramData"),
 	)
 }
 

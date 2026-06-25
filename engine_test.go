@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"sync"
@@ -59,6 +60,15 @@ func TestNew_defaultEngineIsHermetic(t *testing.T) {
 	}
 	if _, err := snap.Value("hermetic_probe"); !errors.Is(err, ErrFactNotFound) {
 		t.Fatalf("Value(hermetic_probe) err = %v, want ErrFactNotFound from hermetic engine", err)
+	}
+}
+
+func TestNewIgnoresNilOptionsAndReturnsOptionErrors(t *testing.T) {
+	if eng, err := New(nil); err != nil || eng == nil {
+		t.Fatalf("New(nil) = %#v, %v; want engine, nil", eng, err)
+	}
+	if eng, err := New(WithConfigFile("")); err == nil || eng != nil {
+		t.Fatalf("New(WithConfigFile(empty)) = %#v, %v; want nil engine and error", eng, err)
 	}
 }
 
@@ -622,6 +632,39 @@ func TestAs_rejectsMapAnyKeyStringCollisions(t *testing.T) {
 	_, err = As[map[string]string](snap, "ambiguous")
 	if err == nil || !strings.Contains(err.Error(), `duplicate map key after string normalization: "1"`) {
 		t.Fatalf("As ambiguous err = %v, want duplicate normalized key error", err)
+	}
+}
+
+func TestAs_normalizesNestedMapAnyValues(t *testing.T) {
+	eng, err := New(WithFact("nested", func(context.Context) (any, error) {
+		return map[any]any{
+			"items": []any{
+				map[any]any{"name": "web", "port": 443},
+			},
+		}, nil
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap, err := eng.Discover(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	type item struct {
+		Name string `json:"name"`
+		Port int    `json:"port"`
+	}
+	type nestedFact struct {
+		Items []item `json:"items"`
+	}
+	got, err := As[nestedFact](snap, "nested")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := nestedFact{Items: []item{{Name: "web", Port: 443}}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("As[nestedFact](nested) = %#v, want %#v", got, want)
 	}
 }
 

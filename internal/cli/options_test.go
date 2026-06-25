@@ -1,6 +1,170 @@
 package cli
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
+
+func TestOptionsReturnDefensiveCopies(t *testing.T) {
+	options := Options()
+	if len(options) == 0 {
+		t.Fatal("Options() returned no options")
+	}
+	originals := make([]Option, len(options))
+	for i := range options {
+		originals[i] = options[i]
+		originals[i].Aliases = append([]string(nil), options[i].Aliases...)
+		originals[i].Conflicts = append([]string(nil), options[i].Conflicts...)
+	}
+	t.Cleanup(func() {
+		current := Options()
+		for i := range originals {
+			if i >= len(current) {
+				continue
+			}
+			for j, alias := range originals[i].Aliases {
+				if j < len(current[i].Aliases) {
+					current[i].Aliases[j] = alias
+				}
+			}
+			for j, conflict := range originals[i].Conflicts {
+				if j < len(current[i].Conflicts) {
+					current[i].Conflicts[j] = conflict
+				}
+			}
+			options[i] = originals[i]
+			options[i].Aliases = append([]string(nil), originals[i].Aliases...)
+			options[i].Conflicts = append([]string(nil), originals[i].Conflicts...)
+		}
+	})
+	for i := range options {
+		options[i].Canonical = "--mutated-canonical"
+		if len(options[i].Aliases) > 0 {
+			options[i].Aliases[0] = "--mutated-alias"
+		}
+		if len(options[i].Conflicts) > 0 {
+			options[i].Conflicts[0] = "--mutated-conflict"
+		}
+	}
+
+	fresh := Options()
+	if len(fresh) != len(originals) {
+		t.Fatalf("len(Options()) = %d, want %d", len(fresh), len(originals))
+	}
+	for i := range fresh {
+		if fresh[i].Canonical != originals[i].Canonical {
+			t.Fatalf("Options()[%d].Canonical = %q, want %q", i, fresh[i].Canonical, originals[i].Canonical)
+		}
+		if !slices.Equal(fresh[i].Aliases, originals[i].Aliases) {
+			t.Fatalf("Options()[%d].Aliases = %#v, want %#v", i, fresh[i].Aliases, originals[i].Aliases)
+		}
+		if !slices.Equal(fresh[i].Conflicts, originals[i].Conflicts) {
+			t.Fatalf("Options()[%d].Conflicts = %#v, want %#v", i, fresh[i].Conflicts, originals[i].Conflicts)
+		}
+	}
+}
+
+func TestDocumentedOptionsReturnDefensiveCopies(t *testing.T) {
+	options := DocumentedOptions()
+	if len(options) == 0 {
+		t.Fatal("DocumentedOptions() returned no options")
+	}
+	originals := make([]Option, len(options))
+	for i := range options {
+		originals[i] = options[i]
+		originals[i].Aliases = slices.Clone(options[i].Aliases)
+		originals[i].Conflicts = slices.Clone(options[i].Conflicts)
+	}
+	t.Cleanup(func() {
+		current := DocumentedOptions()
+		for i := range originals {
+			if i >= len(current) {
+				continue
+			}
+			for j, alias := range originals[i].Aliases {
+				if j < len(current[i].Aliases) {
+					current[i].Aliases[j] = alias
+				}
+			}
+			for j, conflict := range originals[i].Conflicts {
+				if j < len(current[i].Conflicts) {
+					current[i].Conflicts[j] = conflict
+				}
+			}
+			options[i] = originals[i]
+			options[i].Aliases = slices.Clone(originals[i].Aliases)
+			options[i].Conflicts = slices.Clone(originals[i].Conflicts)
+		}
+	})
+	for i := range options {
+		options[i].Canonical = "--mutated-canonical"
+		if len(options[i].Aliases) > 0 {
+			options[i].Aliases[0] = "--mutated-alias"
+		}
+		if len(options[i].Conflicts) > 0 {
+			options[i].Conflicts[0] = "--mutated-conflict"
+		}
+	}
+
+	fresh := DocumentedOptions()
+	if len(fresh) != len(originals) {
+		t.Fatalf("len(DocumentedOptions()) = %d, want %d", len(fresh), len(originals))
+	}
+	for i := range fresh {
+		if fresh[i].Canonical != originals[i].Canonical {
+			t.Fatalf("DocumentedOptions()[%d].Canonical = %q, want %q", i, fresh[i].Canonical, originals[i].Canonical)
+		}
+		if !slices.Equal(fresh[i].Aliases, originals[i].Aliases) {
+			t.Fatalf("DocumentedOptions()[%d].Aliases = %#v, want %#v", i, fresh[i].Aliases, originals[i].Aliases)
+		}
+		if !slices.Equal(fresh[i].Conflicts, originals[i].Conflicts) {
+			t.Fatalf("DocumentedOptions()[%d].Conflicts = %#v, want %#v", i, fresh[i].Conflicts, originals[i].Conflicts)
+		}
+	}
+}
+
+func TestOptionsExposeVisibleAndFixedHiddenContract(t *testing.T) {
+	expectedHidden := map[string]bool{
+		"--no-hocon": true,
+		"--no-json":  true,
+		"--no-yaml":  true,
+	}
+	seenHidden := map[string]bool{}
+
+	for _, option := range DocumentedOptions() {
+		if option.Hidden {
+			t.Fatalf("DocumentedOptions() included hidden option %#v", option)
+		}
+	}
+	documented := map[string]bool{}
+	for _, option := range DocumentedOptions() {
+		documented[option.Canonical] = true
+	}
+
+	for _, option := range Options() {
+		if option.Hidden {
+			if !expectedHidden[option.Canonical] {
+				t.Fatalf("Options() marked unexpected option %q as hidden", option.Canonical)
+			}
+			seenHidden[option.Canonical] = true
+			if !KnownOption(option.Canonical) {
+				t.Fatalf("KnownOption(%q) = false, want hidden option still accepted", option.Canonical)
+			}
+			if documented[option.Canonical] {
+				t.Fatalf("DocumentedOptions() included hidden option %q", option.Canonical)
+			}
+			continue
+		}
+		if !documented[option.Canonical] {
+			t.Fatalf("DocumentedOptions() omitted visible option %q", option.Canonical)
+		}
+	}
+	for canonical := range expectedHidden {
+		if !seenHidden[canonical] {
+			t.Fatalf("Options() did not mark expected hidden option %q as hidden", canonical)
+		}
+	}
+}
 
 func TestOptions_describeAcceptedOptionMetadata(t *testing.T) {
 	tests := []struct {
@@ -121,6 +285,21 @@ func TestOptionValueHelpersUseSharedMetadata(t *testing.T) {
 func TestLookupOptionRejectsInlineValueForNoValueOption(t *testing.T) {
 	if _, ok := LookupOption("--json=false"); ok {
 		t.Fatal("LookupOption(\"--json=false\") ok = true, want false")
+	}
+}
+
+func TestOptionLookupHelpersHandleUnknownAndRawNames(t *testing.T) {
+	if got := CanonicalOption("--missing"); got != "--missing" {
+		t.Fatalf("CanonicalOption(--missing) = %q, want original", got)
+	}
+	if KnownOption("--missing") {
+		t.Fatal("KnownOption(--missing) = true, want false")
+	}
+	if got := rawOptionName("--config=/tmp/facts.conf"); got != "--config" {
+		t.Fatalf("rawOptionName() = %q, want --config", got)
+	}
+	if got := rawOptionName("--json"); got != "--json" {
+		t.Fatalf("rawOptionName() = %q, want --json", got)
 	}
 }
 

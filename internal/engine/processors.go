@@ -118,7 +118,7 @@ func processorSpeedFacts(speed string) []ResolvedFact {
 }
 
 func probeProcessorSpeed(s *Session) string {
-	switch runtime.GOOS {
+	switch s.goos() {
 	case "darwin":
 		if speed := s.cachedPlatformProcessorInfo().SpeedHz; speed > 0 {
 			return hertzToHumanReadable(int64(speed))
@@ -138,8 +138,9 @@ func probeProcessorSpeed(s *Session) string {
 }
 
 func probeProcessorModels(s *Session) []string {
-	architecture := architectureName(runtime.GOOS, s.cachedHardwareModel())
-	switch runtime.GOOS {
+	goos := s.goos()
+	architecture := architectureName(goos, s.cachedHardwareModel())
+	switch goos {
 	case "darwin":
 		models := s.cachedPlatformProcessorInfo().Models
 		if len(models) > 0 {
@@ -167,7 +168,7 @@ func probeProcessorTopology(s *Session) (int, int) {
 	if logical <= 0 {
 		logical = 1
 	}
-	switch runtime.GOOS {
+	switch s.goos() {
 	case "darwin":
 		processors := s.cachedPlatformProcessorInfo()
 		if processors.CoresPerSocket > 0 && processors.ThreadsPerCore > 0 {
@@ -191,10 +192,10 @@ func probeProcessorTopology(s *Session) (int, int) {
 }
 
 func probePlatformProcessorInfo(s *Session) processorInfo {
-	if runtime.GOOS == "plan9" {
+	if s.goos() == "plan9" {
 		return currentPlan9ProcessorInfo(s.readFile)
 	}
-	return currentProcessorInfo(runtime.GOOS, s.commandOutput, s.logr())
+	return currentProcessorInfo(s.goos(), s.commandOutput, s.logr())
 }
 
 func currentProcessorInfo(goos string, run func(string, ...string) string, log *slog.Logger) processorInfo {
@@ -397,8 +398,9 @@ func illumosClockMHz(line string) int {
 }
 
 func probeProcessorExtensions(s *Session) []string {
-	architecture := architectureName(runtime.GOOS, s.cachedHardwareModel())
-	if runtime.GOOS != "linux" {
+	goos := s.goos()
+	architecture := architectureName(goos, s.cachedHardwareModel())
+	if goos != "linux" {
 		return sortedProcessorExtensions(map[string]bool{architecture: true})
 	}
 	data, err := s.readFile("/proc/cpuinfo")
@@ -613,15 +615,16 @@ func hertzToHumanReadable(hz any) string {
 // physical counts, cores, threads, models, ISA, speed, and extensions) for the
 // current host.
 func processorsCoreFacts(s *Session) []ResolvedFact {
-	architecture := s.cachedArchitectureName()
-	if runtime.GOOS == "plan9" {
-		return plan9ProcessorsCoreFacts(s.cachedPlatformProcessorInfo(), currentProcessorISA(s, runtime.GOOS, architecture, s.commandOutput))
+	goos := s.goos()
+	architecture := architectureName(goos, s.cachedHardwareModel())
+	if goos == "plan9" {
+		return plan9ProcessorsCoreFacts(s.cachedPlatformProcessorInfo(), currentProcessorISA(s, goos, architecture, s.commandOutput))
 	}
 	platformProcessors := processorInfo{}
-	if runtime.GOOS == "darwin" || runtime.GOOS == "freebsd" || runtime.GOOS == "netbsd" || runtime.GOOS == "openbsd" || runtime.GOOS == "dragonfly" || runtime.GOOS == "illumos" || runtime.GOOS == "windows" {
+	if goos == "darwin" || goos == "freebsd" || goos == "netbsd" || goos == "openbsd" || goos == "dragonfly" || goos == "illumos" || goos == "windows" {
 		platformProcessors = s.cachedPlatformProcessorInfo()
 	}
-	if runtime.GOOS == "linux" {
+	if goos == "linux" {
 		platformProcessors.PhysicalCount = currentLinuxProcessorPhysicalCount("/proc/cpuinfo", "/sys/devices/system/cpu", s.host)
 	}
 	processorCount := runtime.NumCPU()
@@ -632,7 +635,7 @@ func processorsCoreFacts(s *Session) []ResolvedFact {
 	if platformProcessors.PhysicalCount > 0 {
 		physicalProcessorCount = platformProcessors.PhysicalCount
 	}
-	processorISA := currentProcessorISA(s, runtime.GOOS, architecture, s.commandOutput)
+	processorISA := currentProcessorISA(s, goos, architecture, s.commandOutput)
 	processorModels := s.cachedProcessorModels()
 	processorSpeed := s.cachedProcessorSpeed()
 	processorCores, processorThreads := s.cachedProcessorTopology()

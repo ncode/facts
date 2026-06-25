@@ -89,6 +89,18 @@ func TestReleaseHashFromString_emptyVersionReturnsNil(t *testing.T) {
 	}
 }
 
+func TestFirstNonEmptyReturnsFirstValueInOrder(t *testing.T) {
+	if got := firstNonEmpty("first", "second"); got != "first" {
+		t.Fatalf("firstNonEmpty() = %q, want first", got)
+	}
+	if got := firstNonEmpty("", "first", "second"); got != "first" {
+		t.Fatalf("firstNonEmpty() = %q, want first", got)
+	}
+	if got := firstNonEmpty("", ""); got != "" {
+		t.Fatalf("firstNonEmpty(empty) = %q, want empty", got)
+	}
+}
+
 func TestReleaseHashFromMatchData_matchesRubyFactsUtils(t *testing.T) {
 	releasePattern := regexp.MustCompile(`^RELEASE=(\d+.\d+.*)`)
 	majorPattern := regexp.MustCompile(`^RELEASE=(\d+)`)
@@ -186,5 +198,33 @@ func TestDeepStringifyKeys_matchesRubyUtils(t *testing.T) {
 
 	if got := deepStringifyKeys(input); !reflect.DeepEqual(got, want) {
 		t.Fatalf("deepStringifyKeys() = %#v, want %#v", got, want)
+	}
+}
+
+func TestDeepStringifyKeysHandlesStringMapsSlicesAndScalars(t *testing.T) {
+	t.Parallel()
+
+	input := map[string]any{
+		"nested": map[any]any{
+			1: []any{
+				map[string]any{"leaf": "value"},
+				"scalar",
+			},
+		},
+	}
+	want := map[string]any{
+		"nested": map[string]any{
+			"1": []any{
+				map[string]any{"leaf": "value"},
+				"scalar",
+			},
+		},
+	}
+
+	if got := deepStringifyKeys(input); !reflect.DeepEqual(got, want) {
+		t.Fatalf("deepStringifyKeys() = %#v, want %#v", got, want)
+	}
+	if got := deepStringifyKeys("scalar"); got != "scalar" {
+		t.Fatalf("deepStringifyKeys(scalar) = %#v, want scalar", got)
 	}
 }

@@ -1,9 +1,6 @@
 package engine
 
-import (
-	"runtime"
-	"strings"
-)
+import "strings"
 
 func currentXenFacts(s *Session) []ResolvedFact {
 	vm := detectXenVM(s)
@@ -27,7 +24,7 @@ func xenFacts(vm string, domains []string) []ResolvedFact {
 }
 
 func detectXenVM(s *Session) string {
-	if runtime.GOOS != "linux" {
+	if s.goos() != "linux" {
 		return ""
 	}
 	if strings.Contains(readFileString("/proc/xen/capabilities", s.readFile), "control_d") {
@@ -47,11 +44,17 @@ func detectXenVMFromSignals(evtchn, procXen, xvda1, xvda1Symlink bool) string {
 }
 
 func detectXenDomains(s *Session) []string {
-	bin := selectXenCommand(fileExists)
+	return detectXenDomainsWithCommand(func(path string) bool {
+		return fileExistsWithHost(s.host, path)
+	}, s.commandOutput)
+}
+
+func detectXenDomainsWithCommand(exists func(string) bool, run commandRunner) []string {
+	bin := selectXenCommand(exists)
 	if bin == "" {
 		return nil
 	}
-	out := s.commandOutput(bin, "list")
+	out := run(bin, "list")
 	if out == "" {
 		return nil
 	}

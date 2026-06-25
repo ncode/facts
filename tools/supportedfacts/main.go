@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,21 +15,28 @@ import (
 const schemaPath = factschema.DefaultPath
 
 func main() {
+	if code := runMain(os.Stderr); code != 0 {
+		os.Exit(code)
+	}
+}
+
+func runMain(stderr io.Writer) int {
 	docs, err := renderDocs(schemaPath)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		fmt.Fprintln(stderr, err)
+		return 1
 	}
 	for path, content := range docs {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			fmt.Fprintf(os.Stderr, "create %s: %v\n", filepath.Dir(path), err)
-			os.Exit(1)
+			fmt.Fprintf(stderr, "create %s: %v\n", filepath.Dir(path), err)
+			return 1
 		}
 		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-			fmt.Fprintf(os.Stderr, "write %s: %v\n", path, err)
-			os.Exit(1)
+			fmt.Fprintf(stderr, "write %s: %v\n", path, err)
+			return 1
 		}
 	}
+	return 0
 }
 
 func renderDocs(schemaFile string) (map[string]string, error) {

@@ -152,6 +152,215 @@ func TestCurrentOSReleaseWindowsUsesKernelAndDescriptionData(t *testing.T) {
 	}
 }
 
+func TestCurrentOSReleaseSkipsUnsupportedAndPlan9Platforms(t *testing.T) {
+	readFile := func(string) ([]byte, error) {
+		t.Fatal("currentOSRelease read file for unsupported platform")
+		return nil, os.ErrNotExist
+	}
+	run := func(string, ...string) string {
+		t.Fatal("currentOSRelease ran command for unsupported platform")
+		return ""
+	}
+
+	for _, goos := range []string{"hurd", "plan9"} {
+		if got := currentOSRelease(testSession, goos, readFile, run); got != nil {
+			t.Fatalf("currentOSRelease(%s) = %#v, want nil", goos, got)
+		}
+	}
+}
+
+func TestCurrentOSReleaseFallsBackToKernelRelease(t *testing.T) {
+	tests := []struct {
+		name     string
+		platform string
+		readFile fileReader
+		run      commandRunner
+		want     string
+	}{
+		{
+			name:     "linux missing os release",
+			platform: "linux",
+			readFile: func(string) ([]byte, error) { return nil, os.ErrNotExist },
+			run:      func(string, ...string) string { return "" },
+			want:     "6.1.0-test",
+		},
+		{
+			name:     "freebsd missing userland release",
+			platform: "freebsd",
+			readFile: func(string) ([]byte, error) { return nil, os.ErrNotExist },
+			run:      func(string, ...string) string { return "" },
+			want:     "14.0-RELEASE",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := NewSessionContext(t.Context())
+			s.host = &fakeHostOS{
+				platform: tt.platform,
+				runOutputs: map[string]string{
+					fakeRunKey("uname", "-r"): tt.want + "\n",
+				},
+			}
+
+			if got := currentOSRelease(s, tt.platform, tt.readFile, tt.run); got != tt.want {
+				t.Fatalf("currentOSRelease(%s) = %#v, want %q", tt.platform, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCurrentOSReleaseFreeBSDUsesInstalledUserlandVersion(t *testing.T) {
+	t.Parallel()
+
+	run := func(name string, args ...string) string {
+		if name != "/bin/freebsd-version" {
+			t.Fatalf("run(%q, %#v), want freebsd-version", name, args)
+		}
+		if !reflect.DeepEqual(args, []string{"-k"}) && !reflect.DeepEqual(args, []string{"-ru"}) {
+			t.Fatalf("run(%q, %#v), want -k or -ru", name, args)
+		}
+		if args[0] == "-k" {
+			return "13.0-CURRENT\n"
+		}
+		return "12.1-RELEASE-p3\n12.0-STABLE\n"
+	}
+
+	got := currentOSRelease(testSession, "freebsd", nil, run)
+	want := map[string]any{
+		"full":   "12.0-STABLE",
+		"major":  "12",
+		"minor":  "0",
+		"branch": "STABLE",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("currentOSRelease(freebsd) = %#v, want %#v", got, want)
+	}
+}
+
+func TestCurrentOSReleaseWindowsReturnsNilWithoutVersion(t *testing.T) {
+	calls := 0
+	got := currentOSRelease(testSession, "windows", nil, func(name string, args ...string) string {
+		calls++
+		return ""
+	})
+	if got != nil {
+		t.Fatalf("currentOSRelease(windows empty version) = %#v, want nil", got)
+	}
+	if calls == 0 {
+		t.Fatal("currentOSRelease(windows empty version) did not query version data")
+	}
+}
+
+func TestProbeOSReleaseUsesSessionPlatform(t *testing.T) {
+	host := &fakeHostOS{
+		platform: "windows",
+		runOutputs: map[string]string{
+			fakeRunKey("wmic", "os", "get", "OtherTypeDescription,ProductType,Version", "/value"): "OtherTypeDescription=\r\nProductType=1\r\nVersion=10.0.22631\r\n",
+		},
+	}
+	s := NewSessionContext(t.Context())
+	s.host = host
+
+	got := probeOSRelease(s)
+	want := map[string]any{"full": "11", "major": "11"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("probeOSRelease() = %#v, want %#v", got, want)
+	}
+}
+
+func TestOSProbesUseSessionPlatformForPlan9(t *testing.T) {
+	s := NewSessionContext(t.Context())
+	s.host = &fakeHostOS{
+		platform: "plan9",
+		files: map[string][]byte{
+			"/env/objtype": []byte("amd64\x00"),
+		},
+		runOutputs: map[string]string{
+			fakeRunKey("uname", "-r"): "host-kernel\n",
+			fakeRunKey("uname", "-m"): "host-machine\n",
+		},
+	}
+
+	if got := probeKernelRelease(s); got != "" {
+		t.Fatalf("probeKernelRelease() = %q, want empty on Plan 9", got)
+	}
+	if got := probeHardwareModel(s); got != "amd64" {
+		t.Fatalf("probeHardwareModel() = %q, want Plan 9 objtype", got)
+	}
+	if got := probeArchitectureName(s); got != "amd64" {
+		t.Fatalf("probeArchitectureName() = %q, want Plan 9 architecture", got)
+	}
+	if got := probeWindowsOSVersionInput(s); got != "" {
+		t.Fatalf("probeWindowsOSVersionInput() = %q, want empty on Plan 9", got)
+	}
+}
+
+func TestMacOSProbesUseSessionPlatform(t *testing.T) {
+	s := NewSessionContext(t.Context())
+	s.host = &fakeHostOS{
+		platform: "darwin",
+		runOutputs: map[string]string{
+			fakeRunKey("sysctl", "-n", "hw.model"):              "MacBookPro11,4\n",
+			fakeRunKey("sw_vers"):                               "ProductName:\tmacOS\nProductVersion:\t14.5\nBuildVersion:\t23F79\n",
+			fakeRunKey("system_profiler", "SPHardwareDataType"): "Hardware:\n\n    Hardware Overview:\n\n      Model Name: MacBook Pro\n      Model Identifier: MacBookPro11,4\n",
+			fakeRunKey("system_profiler", "SPSoftwareDataType"): "Software:\n\n    System Software Overview:\n\n      System Version: macOS 14.5 (23F79)\n",
+			fakeRunKey("system_profiler", "SPEthernetDataType"): "Ethernet Cards:\n\n    Ethernet:\n\n      BSD name: en0\n",
+		},
+	}
+
+	if got := probeMacOSModel(s); got != "MacBookPro11,4" {
+		t.Fatalf("probeMacOSModel() = %q, want MacBookPro11,4", got)
+	}
+	if got := probeMacOSInfo(s).ProductVersion; got != "14.5" {
+		t.Fatalf("probeMacOSInfo().ProductVersion = %q, want 14.5", got)
+	}
+	if got := probeMacOSSystemProfilerHardware(s).ModelIdentifier; got != "MacBookPro11,4" {
+		t.Fatalf("probeMacOSSystemProfilerHardware().ModelIdentifier = %q, want MacBookPro11,4", got)
+	}
+	if got := probeMacOSSystemProfilerSoftware(s).SystemVersion; got != "macOS 14.5 (23F79)" {
+		t.Fatalf("probeMacOSSystemProfilerSoftware().SystemVersion = %q, want macOS 14.5 (23F79)", got)
+	}
+	if got := probeMacOSSystemProfilerEthernet(s).BSDName; got != "en0" {
+		t.Fatalf("probeMacOSSystemProfilerEthernet().BSDName = %q, want en0", got)
+	}
+}
+
+func TestMacOSCurrentHelpersSkipNonDarwin(t *testing.T) {
+	run := func(string, ...string) string {
+		t.Fatal("macOS helper ran command outside Darwin")
+		return ""
+	}
+
+	if got := currentMacOSModel("linux", run); got != "" {
+		t.Fatalf("currentMacOSModel(linux) = %q, want empty", got)
+	}
+	if got := currentMacOSInfo("linux", run); got != (macOSInfo{}) {
+		t.Fatalf("currentMacOSInfo(linux) = %#v, want empty", got)
+	}
+	if got := currentMacOSSystemProfilerEthernet("linux", run); got != (macOSSystemProfilerEthernet{}) {
+		t.Fatalf("currentMacOSSystemProfilerEthernet(linux) = %#v, want empty", got)
+	}
+}
+
+func TestMacOSSystemProfilerProbesOmitEmptyOutput(t *testing.T) {
+	s := NewSessionContext(t.Context())
+	s.host = &fakeHostOS{
+		platform: "darwin",
+		runOutputs: map[string]string{
+			fakeRunKey("system_profiler", "SPHardwareDataType"): "",
+			fakeRunKey("system_profiler", "SPSoftwareDataType"): "",
+		},
+	}
+
+	if got := probeMacOSSystemProfilerHardware(s); got != (macOSSystemProfilerHardware{}) {
+		t.Fatalf("probeMacOSSystemProfilerHardware(empty) = %#v, want empty", got)
+	}
+	if got := probeMacOSSystemProfilerSoftware(s); got != (macOSSystemProfilerSoftware{}) {
+		t.Fatalf("probeMacOSSystemProfilerSoftware(empty) = %#v, want empty", got)
+	}
+}
+
 func TestCurrentWindowsOSDescriptionMatchesRubyResolver(t *testing.T) {
 	t.Parallel()
 
@@ -226,6 +435,14 @@ func TestCurrentWindowsKernelLogsFailureLikeRubyResolver(t *testing.T) {
 	}
 }
 
+func TestCurrentWindowsOSReleaseReturnsNilWithoutVersion(t *testing.T) {
+	t.Parallel()
+
+	if got := currentWindowsOSRelease("ProductType=1\r\nOtherTypeDescription=\r\n"); got != nil {
+		t.Fatalf("currentWindowsOSRelease(no version) = %#v, want nil", got)
+	}
+}
+
 func TestParseWindowsProductReleaseMatchesRubyResolver(t *testing.T) {
 	t.Parallel()
 
@@ -260,6 +477,18 @@ func TestParseWindowsProductReleaseFallsBackToReleaseID(t *testing.T) {
 	}
 	if got.DisplayVersion != "" {
 		t.Fatalf("DisplayVersion = %q, want empty", got.DisplayVersion)
+	}
+}
+
+func TestCurrentWindowsProductReleaseRunsRegistryQuery(t *testing.T) {
+	got := currentWindowsProductRelease("windows", func(name string, args ...string) string {
+		if name != "reg" || !reflect.DeepEqual(args, []string{"query", `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion`}) {
+			t.Fatalf("run = %s %v, want Windows current version registry query", name, args)
+		}
+		return "    ProductName    REG_SZ    Windows Server 2022 Standard\n"
+	})
+	if got.ProductName != "Windows Server 2022 Standard" {
+		t.Fatalf("ProductName = %q, want Windows Server 2022 Standard", got.ProductName)
 	}
 }
 
@@ -316,6 +545,21 @@ func TestCurrentWindowsSystem32MatchesRubyResolver(t *testing.T) {
 				t.Fatalf("currentWindowsSystem32() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestCurrentWindowsProcessWOW64ReadsEnvironment(t *testing.T) {
+	t.Setenv("PROCESSOR_ARCHITEW6432", "AMD64")
+
+	wow64, ok := currentWindowsProcessWOW64()
+	if !wow64 || !ok {
+		t.Fatalf("currentWindowsProcessWOW64() = %v, %v; want true, true", wow64, ok)
+	}
+
+	t.Setenv("PROCESSOR_ARCHITEW6432", "")
+	wow64, ok = currentWindowsProcessWOW64()
+	if wow64 || !ok {
+		t.Fatalf("currentWindowsProcessWOW64() after clear = %v, %v; want false, true", wow64, ok)
 	}
 }
 
@@ -488,6 +732,55 @@ func TestCurrentOSReleaseOpenBSDUsesKernelReleaseMap(t *testing.T) {
 	want := map[string]any{"full": "7.2", "major": "7", "minor": "2"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("currentOSRelease(testSession, openbsd) = %#v, want %#v", got, want)
+	}
+}
+
+func TestWindowsHardwareAndArchitectureMappings(t *testing.T) {
+	tests := []struct {
+		goarch       string
+		wantHardware string
+		wantArch     string
+	}{
+		{goarch: "amd64", wantHardware: "x86_64", wantArch: "x64"},
+		{goarch: "386", wantHardware: "i686", wantArch: "x86"},
+		{goarch: "riscv64", wantHardware: "riscv64", wantArch: "riscv64"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.goarch, func(t *testing.T) {
+			hardware := windowsHardwareFromGoArch(tt.goarch)
+			if hardware != tt.wantHardware {
+				t.Fatalf("windowsHardwareFromGoArch(%q) = %q, want %q", tt.goarch, hardware, tt.wantHardware)
+			}
+			if arch := windowsArchitectureFromHardware(hardware); arch != tt.wantArch {
+				t.Fatalf("windowsArchitectureFromHardware(%q) = %q, want %q", hardware, arch, tt.wantArch)
+			}
+		})
+	}
+}
+
+func TestWindows6ReleaseMapsConsumerAndServerNames(t *testing.T) {
+	tests := []struct {
+		name     string
+		version  string
+		consumer bool
+		want     string
+	}{
+		{name: "windows 8.1", version: "6.3", consumer: true, want: "8.1"},
+		{name: "windows 8", version: "6.2", consumer: true, want: "8"},
+		{name: "windows 7", version: "6.1", consumer: true, want: "7"},
+		{name: "vista", version: "6.0", consumer: true, want: "Vista"},
+		{name: "server 2012 r2", version: "6.3", want: "2012 R2"},
+		{name: "server 2012", version: "6.2", want: "2012"},
+		{name: "server 2008 r2", version: "6.1", want: "2008 R2"},
+		{name: "server 2008", version: "6.0", want: "2008"},
+		{name: "unknown", version: "5.2", want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := windows6Release(tt.version, tt.consumer); got != tt.want {
+				t.Fatalf("windows6Release(%q, %v) = %q, want %q", tt.version, tt.consumer, got, tt.want)
+			}
+		})
 	}
 }
 
@@ -778,6 +1071,56 @@ func TestCurrentOSRelease_prefersDistroSpecificReleaseFiles(t *testing.T) {
 	}
 }
 
+func TestSpecificLinuxOSRelease_ignoresMissingAndMalformedDistroFiles(t *testing.T) {
+	tests := []struct {
+		id        string
+		path      string
+		malformed string
+	}{
+		{id: "mageia", path: "/etc/mageia-release", malformed: "Mageia Cauldron\n"},
+		{id: "openwrt", path: "/etc/openwrt_version", malformed: "snapshot\n"},
+		{id: "gentoo", path: "/etc/gentoo-release", malformed: "Gentoo Base System\n"},
+		{id: "slackware", path: "/etc/slackware-version", malformed: "Slackware current\n"},
+		{id: "amzn", path: "/etc/system-release", malformed: "Amazon Linux\n"},
+		{id: "amazon", path: "/etc/system-release", malformed: "Amazon Linux\n"},
+		{id: "photon", path: "/etc/lsb-release", malformed: "DISTRIB_RELEASE=\"preview\"\n"},
+		{id: "mariner", path: "/etc/mariner-release", malformed: "CBL-Mariner preview\n"},
+		{id: "azurelinux", path: "/etc/azurelinux-release", malformed: "AZURELINUX_BUILD_NUMBER=preview\n"},
+		{id: "linuxmint", path: "/etc/linuxmint/info", malformed: "CODENAME=ulyana\n"},
+		{id: "ovs", path: "/etc/ovs-release", malformed: "Open vSwitch snapshot\n"},
+		{id: "eos", path: "/etc/Eos-release", malformed: "Arista\n"},
+		{id: "oel", path: "/etc/enterprise-release", malformed: "Oracle Linux Server\n"},
+		{id: "ol", path: "/etc/oracle-release", malformed: "Oracle Linux Server\n"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.id+"/missing", func(t *testing.T) {
+			readFile := func(path string) ([]byte, error) {
+				if path != tt.path {
+					t.Fatalf("readFile(%q), want %q", path, tt.path)
+				}
+				return nil, os.ErrNotExist
+			}
+
+			if got := specificLinuxOSRelease(tt.id, readFile, func(string, ...string) string { return "" }); got != nil {
+				t.Fatalf("specificLinuxOSRelease(%q) = %#v, want nil for missing distro file", tt.id, got)
+			}
+		})
+		t.Run(tt.id+"/malformed", func(t *testing.T) {
+			readFile := func(path string) ([]byte, error) {
+				if path != tt.path {
+					t.Fatalf("readFile(%q), want %q", path, tt.path)
+				}
+				return []byte(tt.malformed), nil
+			}
+
+			if got := specificLinuxOSRelease(tt.id, readFile, func(string, ...string) string { return "" }); got != nil {
+				t.Fatalf("specificLinuxOSRelease(%q) = %#v, want nil for malformed distro file", tt.id, got)
+			}
+		})
+	}
+}
+
 func TestCurrentOSRelease_marinerAndAzureLinuxFallbackSplitOSReleaseVersion(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -967,6 +1310,41 @@ func TestParseRedHatRelease_matchesRubyResolver(t *testing.T) {
 				t.Fatalf("parseRedHatRelease() = %#v, want %#v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestCurrentRedHatReleaseReadsReleaseFile(t *testing.T) {
+	got := currentRedHatRelease(func(path string) ([]byte, error) {
+		if path != "/etc/redhat-release" {
+			t.Fatalf("read path = %q, want /etc/redhat-release", path)
+		}
+		return []byte("CentOS Linux release 7.2.1511 (Core)\n"), nil
+	})
+	if got.ID != "CentOS" || got.Release["full"] != "7.2.1511" || got.Codename != "Core" {
+		t.Fatalf("currentRedHatRelease() = %#v, want CentOS 7.2.1511 Core", got)
+	}
+}
+
+func TestCurrentSuseReleaseReadsReleaseFile(t *testing.T) {
+	got := currentSuseRelease(func(path string) ([]byte, error) {
+		if path != "/etc/SuSE-release" {
+			t.Fatalf("read path = %q, want /etc/SuSE-release", path)
+		}
+		return []byte("SUSE Linux Enterprise Server\nVERSION = 15\n"), nil
+	})
+	if got.ID != "suse" || got.Name != "SUSE" || got.Release["full"] != "15" {
+		t.Fatalf("currentSuseRelease() = %#v, want SUSE 15", got)
+	}
+}
+
+func TestCurrentLinuxReleaseFilesReturnEmptyWhenMissing(t *testing.T) {
+	missing := func(string) ([]byte, error) { return nil, os.ErrNotExist }
+
+	if got := currentRedHatRelease(missing); !reflect.DeepEqual(got, linuxDistro{}) {
+		t.Fatalf("currentRedHatRelease(missing) = %#v, want empty", got)
+	}
+	if got := currentSuseRelease(missing); !reflect.DeepEqual(got, linuxDistro{}) {
+		t.Fatalf("currentSuseRelease(missing) = %#v, want empty", got)
 	}
 }
 
@@ -2176,5 +2554,74 @@ func TestOSName_mapsLinuxMintIDLikeRubyFact(t *testing.T) {
 
 	if got := osName("linux", distro); got != "Linuxmint" {
 		t.Fatalf("osName(linux) = %q, want Linuxmint", got)
+	}
+}
+
+func TestOSIdentityFallbacks(t *testing.T) {
+	t.Parallel()
+
+	if got := osFamily("linux", linuxDistro{}); got != "Linux" {
+		t.Fatalf("osFamily(linux, empty distro) = %q, want Linux", got)
+	}
+	if got := osFamily("unknownos", linuxDistro{}); got != "unknownos" {
+		t.Fatalf("osFamily(unknownos) = %q, want unknownos", got)
+	}
+	if got := osName("linux", linuxDistro{ID: "customlinux"}); got != "customlinux" {
+		t.Fatalf("osName(linux custom ID) = %q, want customlinux", got)
+	}
+	if got := osName("linux", linuxDistro{}); got != "Linux" {
+		t.Fatalf("osName(linux empty distro) = %q, want Linux", got)
+	}
+	if got := osName("unknownos", linuxDistro{}); got != "unknownos" {
+		t.Fatalf("osName(unknownos) = %q, want unknownos", got)
+	}
+	if got := kernelName("unknownos"); got != "unknownos" {
+		t.Fatalf("kernelName(unknownos) = %q, want unknownos", got)
+	}
+}
+
+func TestLinuxDistroCodenameFromVersionExtractsCodename(t *testing.T) {
+	tests := []struct {
+		version string
+		want    string
+	}{
+		{version: "", want: ""},
+		{version: "24.04.2 LTS (Noble Numbat)", want: "Noble Numbat"},
+		{version: "12 (bookworm)", want: "bookworm"},
+		{version: "rolling", want: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.version, func(t *testing.T) {
+			t.Parallel()
+
+			if got := linuxDistroCodenameFromVersion(tt.version); got != tt.want {
+				t.Fatalf("linuxDistroCodenameFromVersion(%q) = %q, want %q", tt.version, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestPartOrDefaultReturnsFallbackForMissingOrEmptyVersionPart(t *testing.T) {
+	parts := []string{"10", "", "2"}
+
+	if got := partOrDefault(parts, 0, "0"); got != "10" {
+		t.Fatalf("partOrDefault(major) = %q, want 10", got)
+	}
+	if got := partOrDefault(parts, 1, "0"); got != "0" {
+		t.Fatalf("partOrDefault(empty minor) = %q, want 0", got)
+	}
+	if got := partOrDefault(parts, 3, "0"); got != "0" {
+		t.Fatalf("partOrDefault(missing) = %q, want 0", got)
+	}
+}
+
+func TestUbuntuReleaseMapHandlesEmptyAndKnownRelease(t *testing.T) {
+	if got := ubuntuReleaseMap(""); got != nil {
+		t.Fatalf("ubuntuReleaseMap(empty) = %#v, want nil", got)
+	}
+	want := map[string]any{"full": "24.04", "major": "24.04"}
+	if got := ubuntuReleaseMap("24.04"); !reflect.DeepEqual(got, want) {
+		t.Fatalf("ubuntuReleaseMap() = %#v, want %#v", got, want)
 	}
 }
