@@ -64,6 +64,8 @@ acceptance/vendor
 
 # Go build and release artifacts
 /dist/
+/public/
+/.hugo_build.lock
 
 # Go binary build artifact in cmd
 cmd/facts/facts

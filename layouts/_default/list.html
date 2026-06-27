@@ -1,0 +1,25 @@
+{{ define "main" }}
+<main class="doc-shell">
+  {{ partial "docs-nav.html" . }}
+  <article class="doc-content">
+    {{ if eq .Section "supported-facts" }}
+      {{ with site.GetPage "/supported-facts/readme" }}
+        {{ .Content }}
+      {{ else }}
+        <h1>{{ partial "page-title.html" . }}</h1>
+      {{ end }}
+    {{ else if .Content }}
+      {{ .Content }}
+    {{ else }}
+      <h1>{{ partial "page-title.html" . }}</h1>
+    {{ end }}
+    <div class="doc-list">
+      {{ range sort .RegularPages "File.Path" }}
+        {{ if ne (.File.TranslationBaseName | lower) "readme" }}
+          <a href="{{ .RelPermalink }}">{{ partial "page-title.html" . }}</a>
+        {{ end }}
+      {{ end }}
+    </div>
+  </article>
+</main>
+{{ end }}
