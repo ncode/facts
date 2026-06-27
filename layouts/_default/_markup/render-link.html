@@ -1,0 +1,29 @@
+{{- $href := .Destination -}}
+{{- if not (or (hasPrefix $href "http://") (hasPrefix $href "https://") (hasPrefix $href "#") (hasPrefix $href "mailto:")) -}}
+  {{- $clean := replaceRE `^(\./|\.\./)+` "" $href -}}
+  {{- if eq $clean "adr/" -}}
+    {{- $href = "/adr/" -}}
+  {{- else if or (eq $clean "schema/facts.yaml") (eq $clean "docs/schema/facts.yaml") -}}
+    {{- $href = "https://github.com/ncode/facts/blob/main/docs/schema/facts.yaml" -}}
+  {{- else if or (eq $clean "supported-facts/") (eq $clean "docs/supported-facts/") -}}
+    {{- $href = "/supported-facts/" -}}
+  {{- else if hasSuffix $clean ".md" -}}
+    {{- $stem := replaceRE `\.md$` "" (path.Base $clean) | lower -}}
+    {{- if hasPrefix $clean "adr/" -}}
+      {{- $href = printf "/adr/%s/" $stem -}}
+    {{- else if eq $stem "history" -}}
+      {{- $href = "/history/" -}}
+    {{- else if eq $stem "custom_fact_migration" -}}
+      {{- $href = "/custom_fact_migration/" -}}
+    {{- else if eq $stem "facter_conf_compatibility" -}}
+      {{- $href = "/facter_conf_compatibility/" -}}
+    {{- else if and (or (eq .Page.Section "supported-facts") (hasPrefix $clean "supported-facts/") (hasPrefix $clean "docs/supported-facts/")) (ne $stem "readme") -}}
+      {{- $href = printf "/supported-facts/%s/" $stem -}}
+    {{- else -}}
+      {{- $href = printf "https://github.com/ncode/facts/blob/main/%s" $clean -}}
+    {{- end -}}
+  {{- else if hasPrefix $clean "docs/" -}}
+    {{- $href = printf "https://github.com/ncode/facts/blob/main/%s" $clean -}}
+  {{- end -}}
+{{- end -}}
+<a href="{{ $href }}"{{ with .Title }} title="{{ . }}"{{ end }}>{{ .Text | safeHTML }}</a>

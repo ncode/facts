@@ -1,0 +1,14 @@
+baseURL = "https://facts.martinez.io/"
+title = "Facts"
+contentDir = "docs"
+publishDir = "public"
+disableKinds = ["rss", "taxonomy", "term"]
+
+[markup]
+  [markup.goldmark]
+    [markup.goldmark.renderer]
+      unsafe = false
+
+[caches]
+  [caches.images]
+    dir = ":cacheDir/images"

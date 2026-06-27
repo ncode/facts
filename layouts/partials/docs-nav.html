@@ -1,0 +1,33 @@
+<aside class="doc-nav" aria-label="Documentation">
+  <div class="doc-nav-group">
+    <div class="doc-nav-title">Start</div>
+    <a href="{{ "/" | relURL }}">Overview</a>
+    <a href="{{ "/site/" | relURL }}">Site build notes</a>
+  </div>
+  <div class="doc-nav-group">
+    <div class="doc-nav-title">Library</div>
+    <a href="https://pkg.go.dev/github.com/ncode/facts">Go API reference</a>
+    <a href="{{ "/custom_fact_migration/" | relURL }}">External facts</a>
+  </div>
+  <div class="doc-nav-group">
+    <div class="doc-nav-title">CLI</div>
+    <a href="{{ "/facter_conf_compatibility/" | relURL }}">Input compatibility</a>
+    <a href="{{ "/custom_fact_migration/" | relURL }}">Custom fact migration</a>
+  </div>
+  <div class="doc-nav-group">
+    <div class="doc-nav-title">Supported facts</div>
+    <a href="{{ "/supported-facts/" | relURL }}">Overview</a>
+    {{ with site.GetPage "/supported-facts" }}
+      {{ range sort .RegularPages "File.Path" }}
+        {{ if ne (.File.TranslationBaseName | lower) "readme" }}
+          <a href="{{ .RelPermalink }}">{{ partial "page-title.html" . }}</a>
+        {{ end }}
+      {{ end }}
+    {{ end }}
+  </div>
+  <div class="doc-nav-group">
+    <div class="doc-nav-title">Project</div>
+    <a href="{{ "/history/" | relURL }}">History</a>
+    <a href="{{ "/adr/" | relURL }}">ADRs</a>
+  </div>
+</aside>

@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ if .IsHome }}{{ site.Title }}{{ else }}{{ .Title }} | {{ site.Title }}{{ end }}</title>
+  <meta name="description" content="Facts is a Go port of Puppet Facter: an embeddable library and the facts CLI.">
+  <link rel="stylesheet" href="{{ "css/site.css" | relURL }}">
+</head>
+<body>
+  <header class="site-header">
+    <div class="site-header-inner">
+      <a class="site-wordmark" href="{{ "/" | relURL }}">Facts</a>
+      <nav class="site-nav" aria-label="Primary">
+        <a href="{{ "/" | relURL }}">Start</a>
+        <a href="{{ "/#library" | relURL }}">Library</a>
+        <a href="{{ "/#cli" | relURL }}">CLI</a>
+        <a href="{{ "/supported-facts/" | relURL }}">Supported facts</a>
+        <a href="{{ "/history/" | relURL }}">Project</a>
+      </nav>
+    </div>
+  </header>
+  {{ block "main" . }}{{ end }}
+  <footer class="site-footer">
+    <div class="site-footer-inner">
+      <span>Apache-2.0 · Facts</span>
+      <span><a href="https://github.com/ncode/facts">GitHub</a> · <a href="https://pkg.go.dev/github.com/ncode/facts">Go package</a></span>
+    </div>
+  </footer>
+</body>
+</html>

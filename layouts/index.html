@@ -1,0 +1,79 @@
+{{ define "main" }}
+<main>
+  <section class="hero">
+    <div class="band-inner hero-content">
+      <div class="eyebrow">Facts — a Go port of Puppet Facter</div>
+      <h1>Every fact about the machine.</h1>
+      <p class="hero-lede">Facts discovers hardware, networking, OS, cloud metadata, and operator-supplied facts as one canonical tree: embeddable as a Go library, scriptable as the <code>facts</code> CLI.</p>
+      <div class="hero-actions">
+        <a class="button button-primary" href="https://pkg.go.dev/github.com/ncode/facts">Go library</a>
+        <a class="button" href="{{ "/facter_conf_compatibility/" | relURL }}">CLI compatibility</a>
+        <a class="button" href="{{ "/supported-facts/linux/" | relURL }}">Supported facts</a>
+      </div>
+      <div class="command-strip" aria-label="Install commands">
+<pre><code>$ go get github.com/ncode/facts
+$ brew install ncode/tap/facts
+$ facts --json os.family kernel.version.full</code></pre>
+      </div>
+    </div>
+  </section>
+
+  <section class="band" id="library">
+    <div class="band-inner">
+      <div class="section-heading">
+        <div class="eyebrow">Library</div>
+        <h2>Hermetic by default.</h2>
+        <p>An engine is an isolated, immutable unit of discovery configuration. It reads core facts only until you opt into config files, external facts, registered facts, or system defaults.</p>
+      </div>
+      <div class="feature-grid">
+        <article class="feature-card">
+          <h3>Engine</h3>
+          <p>Construct explicit discovery inputs with no package-global collector and no shared mutable state.</p>
+        </article>
+        <article class="feature-card">
+          <h3>Snapshot</h3>
+          <p>Discover once, then query and decode an immutable canonical tree as often as needed.</p>
+        </article>
+        <article class="feature-card">
+          <h3>Typed views</h3>
+          <p>Decode subtrees into caller-owned Go types and fail loudly when the shape does not match.</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="band band-soft" id="cli">
+    <div class="band-inner">
+      <div class="section-heading">
+        <div class="eyebrow">CLI</div>
+        <h2>Every fact, one command.</h2>
+        <p>The <code>facts</code> binary keeps the Ruby Facter process-boundary contract for output formatting, exit status, stderr diagnostics, external facts, environment facts, and config semantics.</p>
+      </div>
+<pre><code>$ facts os.name
+Darwin
+
+$ facts --external-dir ./facts.d site_role
+web</code></pre>
+    </div>
+  </section>
+
+  <section class="band" id="supported-facts">
+    <div class="band-inner">
+      <div class="section-heading">
+        <div class="eyebrow">Supported facts</div>
+        <h2>Tested where it ships.</h2>
+        <p>The schema-backed supported fact pages are generated from <code>docs/schema/facts.yaml</code> and rendered here without becoming a second source of truth.</p>
+      </div>
+      <div class="platform-grid">
+        {{ with site.GetPage "/supported-facts" }}
+          {{ range sort .RegularPages "File.Path" }}
+            {{ if ne (.File.TranslationBaseName | lower) "readme" }}
+              <a class="platform-card" href="{{ .RelPermalink }}"><h3>{{ partial "page-title.html" . }}</h3><span class="platform-count">Schema-backed reference</span></a>
+            {{ end }}
+          {{ end }}
+        {{ end }}
+      </div>
+    </div>
+  </section>
+</main>
+{{ end }}

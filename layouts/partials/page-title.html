@@ -1,0 +1,10 @@
+{{- $title := "" -}}
+{{- with findRE `(?m)^#\s+(.+)$` .RawContent 1 -}}
+  {{- $title = replaceRE `^#\s+` "" (index . 0) -}}
+{{- else -}}
+  {{- $title = .Title -}}
+  {{- if and (not $title) .File -}}
+    {{- $title = .File.TranslationBaseName | humanize | title -}}
+  {{- end -}}
+{{- end -}}
+{{- return $title -}}
