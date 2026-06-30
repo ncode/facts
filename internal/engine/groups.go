@@ -172,10 +172,10 @@ func ttlUnitScale(unit string) (multiplier, divisor int64, ok bool) {
 	return 0, 0, false
 }
 
-// BlocklistedFactsWithGroups expands config blocklist entries into concrete fact
+// DisabledFactsWithGroups expands the disabled set into concrete fact
 // names using the built-in group catalog plus any configured groups.
-func BlocklistedFactsWithGroups(entries []string, configured []FactGroup) map[string]bool {
-	blocked := make(map[string]bool)
+func DisabledFactsWithGroups(entries []string, configured []FactGroup) map[string]bool {
+	disabled := make(map[string]bool)
 	groups := MergeFactGroups(BuiltinFactGroups(), configured)
 	for _, entry := range entries {
 		matchedGroup := false
@@ -185,48 +185,48 @@ func BlocklistedFactsWithGroups(entries []string, configured []FactGroup) map[st
 			}
 			matchedGroup = true
 			for _, fact := range group.Facts {
-				blocked[fact] = true
+				disabled[fact] = true
 			}
 		}
 		if !matchedGroup {
-			blocked[entry] = true
+			disabled[entry] = true
 		}
 	}
-	return blocked
+	return disabled
 }
 
-// BlocklistedFactsForFiltering expands config blocklist entries for resolver filtering.
-func BlocklistedFactsForFiltering(entries []string, configured []FactGroup) map[string]bool {
-	return BlocklistedFactsWithGroups(entries, configured)
+// DisabledFactsForFiltering expands the disabled set for resolver filtering.
+func DisabledFactsForFiltering(entries []string, configured []FactGroup) map[string]bool {
+	return DisabledFactsWithGroups(entries, configured)
 }
 
-// FilterBlockedFacts removes facts whose root name is blocklisted.
-func FilterBlockedFacts(facts []ResolvedFact, blocked map[string]bool) []ResolvedFact {
-	if len(blocked) == 0 {
+// FilterDisabledFacts removes facts whose root name is disabled.
+func FilterDisabledFacts(facts []ResolvedFact, disabled map[string]bool) []ResolvedFact {
+	if len(disabled) == 0 {
 		return facts
 	}
 	filtered := make([]ResolvedFact, 0, len(facts))
 	for _, fact := range facts {
 		root, _, _ := strings.Cut(fact.Name, ".")
-		if blocked[fact.Name] || blocked[root] {
+		if disabled[fact.Name] || disabled[root] {
 			continue
 		}
-		fact.Value = pruneBlockedDescendants(fact.Name, fact.Value, blocked)
+		fact.Value = pruneDisabledDescendants(fact.Name, fact.Value, disabled)
 		filtered = append(filtered, fact)
 	}
 	return filtered
 }
 
-func pruneBlockedDescendants(name string, value any, blocked map[string]bool) any {
+func pruneDisabledDescendants(name string, value any, disabled map[string]bool) any {
 	var pruned any
-	for blockedName := range blocked {
-		if !strings.HasPrefix(blockedName, name+".") {
+	for disabledName := range disabled {
+		if !strings.HasPrefix(disabledName, name+".") {
 			continue
 		}
 		if pruned == nil {
 			pruned = deepCopyValue(value)
 		}
-		pruned = pruneDottedValue(pruned, strings.Split(strings.TrimPrefix(blockedName, name+"."), "."))
+		pruned = pruneDottedValue(pruned, strings.Split(strings.TrimPrefix(disabledName, name+"."), "."))
 	}
 	if pruned == nil {
 		return value

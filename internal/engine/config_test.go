@@ -40,7 +40,7 @@ fact-groups : {
 		t.Fatal(err)
 	}
 	want := Config{
-		Blocklist:          []string{"ec2", "networking"},
+		Disabled:           []string{"ec2", "networking"},
 		ExternalDirs:       []string{"/opt/facts"},
 		Debug:              true,
 		Verbose:            true,
@@ -513,8 +513,8 @@ func TestParseConfig_emptyReadableConfigReturnsEmptySections(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if config.Blocklist != nil {
-		t.Fatalf("Config.Blocklist = %#v, want nil", config.Blocklist)
+	if config.Disabled != nil {
+		t.Fatalf("Config.Disabled = %#v, want nil", config.Disabled)
 	}
 	if config.TTLs != nil {
 		t.Fatalf("Config.TTLs = %#v, want nil", config.TTLs)
@@ -615,9 +615,48 @@ cli : {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := config.Blocklist
+	got := config.Disabled
 	if want := []string{"ec2", "os", "networking"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("Config.Blocklist = %#v, want %#v", got, want)
+		t.Fatalf("Config.Disabled = %#v, want %#v", got, want)
+	}
+}
+
+func TestParseConfig_nativeDisableKeyPopulatesDisabledSet(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "facts.conf")
+	content := `facts : {
+  disable : [ "EC2", "packages" ],
+}`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	config, err := ParseConfig(path, discardLog())
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := config.Disabled
+	if want := []string{"ec2", "packages"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("Config.Disabled = %#v, want %#v", got, want)
+	}
+}
+
+func TestParseConfig_nativeDisableKeySupersedesBlocklist(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "facts.conf")
+	content := `facts : {
+  blocklist : [ "networking" ],
+  disable : [ "packages" ],
+}`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	config, err := ParseConfig(path, discardLog())
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := config.Disabled
+	if want := []string{"packages"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("Config.Disabled = %#v, want %#v (native disable must supersede blocklist)", got, want)
 	}
 }
 
@@ -634,10 +673,10 @@ func TestParseConfig_acceptsBareEntries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := config.Blocklist
+	got := config.Disabled
 	want := []string{"ec2", "os.name"}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("Config.Blocklist = %#v, want %#v", got, want)
+		t.Fatalf("Config.Disabled = %#v, want %#v", got, want)
 	}
 }
 
@@ -672,9 +711,9 @@ facts : {
 	if err != nil {
 		t.Fatal(err)
 	}
-	blocklist := config.Blocklist
+	blocklist := config.Disabled
 	if want := []string{"os"}; !reflect.DeepEqual(blocklist, want) {
-		t.Fatalf("Config.Blocklist = %#v, want %#v", blocklist, want)
+		t.Fatalf("Config.Disabled = %#v, want %#v", blocklist, want)
 	}
 }
 
@@ -969,48 +1008,48 @@ func TestGroupTTLSecondsRejectsMalformedTTLTokens(t *testing.T) {
 	}
 }
 
-func TestBlocklistedFactsForFiltering_retiredLegacyGroupBlocksNothing(t *testing.T) {
-	blocked := BlocklistedFactsForFiltering([]string{"legacy"}, nil)
+func TestDisabledFactsForFiltering_retiredLegacyGroupBlocksNothing(t *testing.T) {
+	blocked := DisabledFactsForFiltering([]string{"legacy"}, nil)
 
 	facts := []ResolvedFact{
 		{Name: "os.name", Value: "Darwin"},
 		{Name: "networking.hostname", Value: "host.example.com"},
 		{Name: "processors.count", Value: 8},
 	}
-	got := FilterBlockedFacts(facts, blocked)
+	got := FilterDisabledFacts(facts, blocked)
 	if !reflect.DeepEqual(got, facts) {
-		t.Fatalf("FilterBlockedFacts(legacy blocklist) = %#v, want discovery unchanged %#v", got, facts)
+		t.Fatalf("FilterDisabledFacts(legacy blocklist) = %#v, want discovery unchanged %#v", got, facts)
 	}
 }
 
-func TestBlocklistedFactsWithGroups_expandsGroupWithoutBlockingGroupName(t *testing.T) {
-	got := BlocklistedFactsWithGroups([]string{"blocked_group", "blocked_fact"}, []FactGroup{{Name: "blocked_group", Facts: []string{"fact1", "fact2"}}})
+func TestDisabledFactsWithGroups_expandsGroupWithoutBlockingGroupName(t *testing.T) {
+	got := DisabledFactsWithGroups([]string{"blocked_group", "blocked_fact"}, []FactGroup{{Name: "blocked_group", Facts: []string{"fact1", "fact2"}}})
 	want := map[string]bool{"fact1": true, "fact2": true, "blocked_fact": true}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("BlocklistedFactsWithGroups() = %#v, want %#v", got, want)
+		t.Fatalf("DisabledFactsWithGroups() = %#v, want %#v", got, want)
 	}
 }
 
-func TestFilterBlockedFacts_blocksExactNameAndRoot(t *testing.T) {
+func TestFilterDisabledFacts_blocksExactNameAndRoot(t *testing.T) {
 	facts := []ResolvedFact{
 		{Name: "os.name", Value: "Darwin", Type: "core"},
 		{Name: "networking.hostname", Value: "host.example.com", Type: "core"},
 	}
 
-	got := FilterBlockedFacts(facts, map[string]bool{"os.name": true})
+	got := FilterDisabledFacts(facts, map[string]bool{"os.name": true})
 	want := []ResolvedFact{{Name: "networking.hostname", Value: "host.example.com", Type: "core"}}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("FilterBlockedFacts(os.name) = %#v, want %#v", got, want)
+		t.Fatalf("FilterDisabledFacts(os.name) = %#v, want %#v", got, want)
 	}
 
-	got = FilterBlockedFacts(facts, map[string]bool{"networking": true})
+	got = FilterDisabledFacts(facts, map[string]bool{"networking": true})
 	want = []ResolvedFact{{Name: "os.name", Value: "Darwin", Type: "core"}}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("FilterBlockedFacts(networking) = %#v, want %#v", got, want)
+		t.Fatalf("FilterDisabledFacts(networking) = %#v, want %#v", got, want)
 	}
 }
 
-func TestFilterBlockedFacts_prunesBlockedDescendantsFromStructuredParents(t *testing.T) {
+func TestFilterDisabledFacts_prunesDisabledDescendantsFromStructuredParents(t *testing.T) {
 	facts := []ResolvedFact{
 		{
 			Name: "os",
@@ -1025,7 +1064,7 @@ func TestFilterBlockedFacts_prunesBlockedDescendantsFromStructuredParents(t *tes
 		},
 	}
 
-	got := FilterBlockedFacts(facts, map[string]bool{"os.release.major": true})
+	got := FilterDisabledFacts(facts, map[string]bool{"os.release.major": true})
 	want := []ResolvedFact{
 		{
 			Name: "os",
@@ -1039,11 +1078,11 @@ func TestFilterBlockedFacts_prunesBlockedDescendantsFromStructuredParents(t *tes
 		},
 	}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("FilterBlockedFacts(os.release.major) = %#v, want %#v", got, want)
+		t.Fatalf("FilterDisabledFacts(os.release.major) = %#v, want %#v", got, want)
 	}
 }
 
-func TestFilterBlockedFactsPrunesEmptyMapsAndKeepsOriginalValue(t *testing.T) {
+func TestFilterDisabledFactsPrunesEmptyMapsAndKeepsOriginalValue(t *testing.T) {
 	original := map[string]any{
 		"name": "Ubuntu",
 		"release": map[string]any{
@@ -1053,14 +1092,14 @@ func TestFilterBlockedFactsPrunesEmptyMapsAndKeepsOriginalValue(t *testing.T) {
 	}
 	facts := []ResolvedFact{{Name: "os", Value: original, Type: "core"}}
 
-	got := FilterBlockedFacts(facts, map[string]bool{
+	got := FilterDisabledFacts(facts, map[string]bool{
 		"os.release.full":    true,
 		"os.release.major":   true,
 		"os.missing.nothing": true,
 	})
 	want := []ResolvedFact{{Name: "os", Value: map[string]any{"name": "Ubuntu"}, Type: "core"}}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("FilterBlockedFacts() = %#v, want %#v", got, want)
+		t.Fatalf("FilterDisabledFacts() = %#v, want %#v", got, want)
 	}
 	if _, ok := original["release"]; !ok {
 		t.Fatalf("original value = %#v, want unpruned source map", original)

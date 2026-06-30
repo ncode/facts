@@ -43,7 +43,7 @@ func TestNewEngineFreezesConfigAndNormalizesFactNames(t *testing.T) {
 	blocked := map[string]bool{"networking": true}
 	defaultDirs := []string{"/default"}
 	config := Config{
-		Blocklist:    []string{"ssh"},
+		Disabled:     []string{"ssh"},
 		ExternalDirs: []string{"/config"},
 		TTLs:         []FactTTL{{Fact: "site_role", TTL: "30 days"}},
 		FactGroups:   []FactGroup{{Name: "site", Facts: []string{"site_role"}}},
@@ -57,7 +57,7 @@ func TestNewEngineFreezesConfigAndNormalizesFactNames(t *testing.T) {
 
 	eng, err := NewEngine(EngineConfig{
 		ExternalDirs:           externalDirs,
-		BlockedFacts:           blocked,
+		DisabledFacts:          blocked,
 		ConfigLoaded:           true,
 		Config:                 config,
 		DefaultExternalDirsSet: true,
@@ -71,7 +71,7 @@ func TestNewEngineFreezesConfigAndNormalizesFactNames(t *testing.T) {
 	externalDirs[0] = "/mutated-explicit"
 	blocked["networking"] = false
 	defaultDirs[0] = "/mutated-default"
-	config.Blocklist[0] = "mutated-blocklist"
+	config.Disabled[0] = "mutated-blocklist"
 	config.ExternalDirs[0] = "/mutated-config"
 	config.TTLs[0] = FactTTL{Fact: "mutated", TTL: "1 second"}
 	config.FactGroups[0].Facts[0] = "mutated_group_fact"
@@ -80,14 +80,14 @@ func TestNewEngineFreezesConfigAndNormalizesFactNames(t *testing.T) {
 	if got, want := eng.cfg.ExternalDirs, []string{"/explicit"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("ExternalDirs = %#v, want %#v", got, want)
 	}
-	if got := eng.cfg.BlockedFacts["networking"]; !got {
-		t.Fatalf("BlockedFacts[networking] = false, want frozen true")
+	if got := eng.cfg.DisabledFacts["networking"]; !got {
+		t.Fatalf("DisabledFacts[networking] = false, want frozen true")
 	}
 	if got, want := eng.cfg.DefaultExternalDirs, []string{"/default"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("DefaultExternalDirs = %#v, want %#v", got, want)
 	}
-	if got, want := eng.cfg.Config.Blocklist, []string{"ssh"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("Config.Blocklist = %#v, want %#v", got, want)
+	if got, want := eng.cfg.Config.Disabled, []string{"ssh"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("Config.Disabled = %#v, want %#v", got, want)
 	}
 	if got, want := eng.cfg.Config.ExternalDirs, []string{"/config"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("Config.ExternalDirs = %#v, want %#v", got, want)
@@ -127,7 +127,7 @@ func TestPlanDiscoveryMergesLoadedConfig(t *testing.T) {
 	config := Config{
 		ExternalDirs:       []string{"/config"},
 		NoExternalFacts:    true,
-		Blocklist:          []string{"site"},
+		Disabled:           []string{"site"},
 		TTLs:               []FactTTL{{Fact: "site_role", TTL: "1 day"}},
 		FactGroups:         []FactGroup{{Name: "site", Facts: []string{"site_role", "site_location"}}},
 		ForceDotResolution: true,
@@ -163,8 +163,8 @@ func TestPlanDiscoveryMergesLoadedConfig(t *testing.T) {
 	if got, want := plan.cacheGroups, []FactGroup{{Name: "site", Facts: []string{"site_role", "site_location"}}}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("cacheGroups = %#v, want %#v", got, want)
 	}
-	if !plan.blockedFacts["site_role"] || !plan.blockedFacts["site_location"] {
-		t.Fatalf("blockedFacts = %#v, want configured group expanded", plan.blockedFacts)
+	if !plan.disabledFacts["site_role"] || !plan.disabledFacts["site_location"] {
+		t.Fatalf("disabledFacts = %#v, want configured group expanded", plan.disabledFacts)
 	}
 	if plan.loaderMode != externalFactLoaderCLI {
 		t.Fatalf("loaderMode = %v, want CLI", plan.loaderMode)
@@ -183,9 +183,9 @@ func TestPlanDiscoveryMergesLoadedConfig(t *testing.T) {
 func TestPlanDiscoveryPreservesExplicitInputsAndUsesDefaultDirs(t *testing.T) {
 	eng, err := NewEngine(EngineConfig{
 		ExternalDirs:           []string{"/explicit"},
-		BlockedFacts:           map[string]bool{"explicit": true},
+		DisabledFacts:          map[string]bool{"explicit": true},
 		ConfigLoaded:           true,
-		Config:                 Config{ExternalDirs: []string{"/config"}, Blocklist: []string{"config"}},
+		Config:                 Config{ExternalDirs: []string{"/config"}, Disabled: []string{"config"}},
 		SystemDefaults:         true,
 		DefaultExternalDirsSet: true,
 		DefaultExternalDirs:    []string{"/default"},
@@ -200,8 +200,8 @@ func TestPlanDiscoveryPreservesExplicitInputsAndUsesDefaultDirs(t *testing.T) {
 	if got, want := plan.externalDirs, []string{"/explicit"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("externalDirs = %#v, want explicit dirs %#v", got, want)
 	}
-	if got, want := plan.blockedFacts, map[string]bool{"explicit": true}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("blockedFacts = %#v, want explicit blocklist %#v", got, want)
+	if got, want := plan.disabledFacts, map[string]bool{"explicit": true}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("disabledFacts = %#v, want explicit disabled %#v", got, want)
 	}
 
 	defaultEng, err := NewEngine(EngineConfig{

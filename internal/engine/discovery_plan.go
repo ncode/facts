@@ -5,7 +5,7 @@ import "slices"
 type discoveryPlan struct {
 	externalDirs       []string
 	noExternalFacts    bool
-	blockedFacts       map[string]bool
+	disabledFacts      map[string]bool
 	useCache           bool
 	cacheTTLs          []FactTTL
 	cacheGroups        []FactGroup
@@ -19,7 +19,7 @@ func (e *Engine) planDiscovery(s *Session, queries []string) (discoveryPlan, []e
 	plan := discoveryPlan{
 		externalDirs:       slices.Clone(e.cfg.ExternalDirs),
 		noExternalFacts:    e.cfg.NoExternalFacts,
-		blockedFacts:       cloneBoolMap(e.cfg.BlockedFacts),
+		disabledFacts:      cloneBoolMap(e.cfg.DisabledFacts),
 		useCache:           e.cfg.UseCache,
 		loaderMode:         externalFactLoaderLibrary,
 		includeEnv:         e.cfg.SystemDefaults,
@@ -41,8 +41,8 @@ func (e *Engine) planDiscovery(s *Session, queries []string) (discoveryPlan, []e
 		}
 		plan.noExternalFacts = plan.noExternalFacts || config.NoExternalFacts
 		plan.cacheGroups = cloneFactGroups(config.FactGroups)
-		if e.cfg.BlockedFacts == nil {
-			plan.blockedFacts = BlocklistedFactsForFiltering(config.Blocklist, config.FactGroups)
+		if e.cfg.DisabledFacts == nil {
+			plan.disabledFacts = DisabledFactsForFiltering(config.Disabled, config.FactGroups)
 		}
 		if plan.useCache {
 			plan.cacheTTLs = slices.Clone(config.TTLs)
@@ -51,8 +51,8 @@ func (e *Engine) planDiscovery(s *Session, queries []string) (discoveryPlan, []e
 			plan.includeTypedDotted = true
 		}
 	}
-	if plan.blockedFacts == nil {
-		plan.blockedFacts = map[string]bool{}
+	if plan.disabledFacts == nil {
+		plan.disabledFacts = map[string]bool{}
 	}
 	if !plan.noExternalFacts && len(plan.externalDirs) == 0 && e.cfg.SystemDefaults {
 		plan.externalDirs = e.defaultExternalDirs()
@@ -90,7 +90,7 @@ func cloneBoolMap(in map[string]bool) map[string]bool {
 }
 
 func cloneConfig(in Config) Config {
-	in.Blocklist = slices.Clone(in.Blocklist)
+	in.Disabled = slices.Clone(in.Disabled)
 	in.ExternalDirs = slices.Clone(in.ExternalDirs)
 	in.TTLs = slices.Clone(in.TTLs)
 	in.FactGroups = cloneFactGroups(in.FactGroups)

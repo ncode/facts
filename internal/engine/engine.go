@@ -55,8 +55,8 @@ type EngineConfig struct {
 	CLICompat bool
 	// NoExternalFacts skips external-fact loading (--no-external-facts).
 	NoExternalFacts bool
-	// BlockedFacts overrides the config-derived blocklist when non-nil.
-	BlockedFacts map[string]bool
+	// DisabledFacts overrides the config-derived disabled set when non-nil.
+	DisabledFacts map[string]bool
 	// ConfigLoaded carries an already parsed config from internal/app. Library
 	// engines leave it false so ConfigFile/SystemDefaults are parsed fresh on
 	// every Discover.
@@ -87,7 +87,7 @@ type Engine struct {
 // NewEngine validates and freezes cfg into an Engine.
 func NewEngine(cfg EngineConfig) (*Engine, error) {
 	cfg.ExternalDirs = slices.Clone(cfg.ExternalDirs)
-	cfg.BlockedFacts = cloneBoolMap(cfg.BlockedFacts)
+	cfg.DisabledFacts = cloneBoolMap(cfg.DisabledFacts)
 	cfg.DefaultExternalDirs = slices.Clone(cfg.DefaultExternalDirs)
 	cfg.Config = cloneConfig(cfg.Config)
 	cfg.Facts = slices.Clone(cfg.Facts)
@@ -155,7 +155,7 @@ func (e *Engine) Discover(ctx context.Context, queries ...string) (*Snapshot, er
 		loader := externalFactLoader{
 			s:       s,
 			dirs:    plan.externalDirs,
-			blocked: plan.blockedFacts,
+			blocked: plan.disabledFacts,
 		}
 		if plan.loaderMode == externalFactLoaderCLI {
 			loader.mode = plan.loaderMode
@@ -208,7 +208,7 @@ func (e *Engine) Discover(ctx context.Context, queries ...string) (*Snapshot, er
 	facts = CoreFacts(s)
 	facts = append(facts, registeredFacts...)
 	facts = append(facts, externalFacts...)
-	facts = FilterBlockedFacts(facts, plan.blockedFacts)
+	facts = FilterDisabledFacts(facts, plan.disabledFacts)
 
 	if len(plan.queries) > 0 {
 		facts = NewProjection(facts, plan.includeTypedDotted).Select(plan.queries)
