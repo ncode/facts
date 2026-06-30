@@ -552,6 +552,51 @@ func TestLoadExternalFacts_loadsFactsNativeEnvironmentFacts(t *testing.T) {
 	}
 }
 
+func TestLoadExternalEnvFacts_reservesDisableControlKey(t *testing.T) {
+	got, err := loadExternalEnvFacts([]string{"FACTS_DISABLE=packages,os", "FACTS_site_role=web"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []ResolvedFact{{Name: "site_role", Value: "web", Type: "external"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("loadExternalEnvFacts() = %#v, want %#v (FACTS_DISABLE must be reserved, not a fact)", got, want)
+	}
+}
+
+func TestLoadExternalEnvFacts_reservesDisableAcrossAllPrefixes(t *testing.T) {
+	for _, name := range []string{"FACTS_DISABLE", "FACTSDISABLE", "FACTER_DISABLE", "FACTERDISABLE"} {
+		got, err := loadExternalEnvFacts([]string{name + "=packages"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got) != 0 {
+			t.Fatalf("%s produced %#v, want no facts (reserved control key)", name, got)
+		}
+	}
+}
+
+func TestEnvironmentDisabledFacts_extractsNativeWinningCommaList(t *testing.T) {
+	got := environmentDisabledFacts([]string{"FACTER_DISABLE=os", "FACTS_DISABLE=Packages, networking"})
+	want := []string{"packages", "networking"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("environmentDisabledFacts() = %#v, want %#v (native wins, comma-split, trimmed, lowercased)", got, want)
+	}
+}
+
+func TestEnvironmentDisabledFacts_compatWhenNoNative(t *testing.T) {
+	got := environmentDisabledFacts([]string{"FACTER_DISABLE=os,dmi"})
+	want := []string{"os", "dmi"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("environmentDisabledFacts() = %#v, want %#v (facter compat when no native)", got, want)
+	}
+}
+
+func TestEnvironmentDisabledFacts_absentReturnsNil(t *testing.T) {
+	if got := environmentDisabledFacts([]string{"FACTS_site_role=web"}); got != nil {
+		t.Fatalf("environmentDisabledFacts() = %#v, want nil when unset", got)
+	}
+}
+
 func TestLoadExternalFacts_factsNativeEnvironmentFactsWinCollisions(t *testing.T) {
 	// Native wins regardless of environment ordering; names set through only
 	// one prefix resolve from that prefix.
