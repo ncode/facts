@@ -591,7 +591,7 @@ func TestCurrentProcessorISAWindowsFallsBackWhenWMIHasNoISA(t *testing.T) {
 }
 
 func TestCoreFacts_processorSpeedOmittedWhenProbeYieldsNothing(t *testing.T) {
-	collection := Collection(CoreFacts(testSession))
+	collection := Collection(CoreFacts(testSession, nil))
 	processors, ok := collection["processors"].(map[string]any)
 	if !ok {
 		t.Fatalf("processors fact = %#v, want map", collection["processors"])
@@ -667,7 +667,7 @@ func TestParseDarwinProcessorsKeepsRubyCoreCountAsCoresPerSocket(t *testing.T) {
 }
 
 func TestCoreFacts_includeProcessorTopology(t *testing.T) {
-	collection := Collection(CoreFacts(testSession))
+	collection := Collection(CoreFacts(testSession, nil))
 	processors, ok := collection["processors"].(map[string]any)
 	if !ok {
 		t.Fatalf("processors fact = %#v, want map", collection["processors"])

@@ -286,6 +286,9 @@ func environmentDisabledFacts(env []string) []string {
 			compatValue, haveCompat = value, true
 		}
 	}
+	// Native-wins is presence-based, not value-based: an empty FACTS_DISABLE="" still
+	// wins over a non-empty FACTER_DISABLE (it disables nothing), matching how the
+	// FACTS_* external-fact value shadows FACTER_* regardless of content.
 	switch {
 	case haveNative:
 		return splitDisableList(nativeValue)
@@ -294,6 +297,22 @@ func environmentDisabledFacts(env []string) []string {
 	default:
 		return nil
 	}
+}
+
+// SplitDisableList splits a comma-separated --disable value into trimmed,
+// lowercased entries, dropping empties, with the same semantics as the
+// FACTS_DISABLE environment variable. It is the exported seam internal/app uses
+// to feed EngineConfig.ExtraDisabled.
+func SplitDisableList(value string) []string {
+	return splitDisableList(value)
+}
+
+// EnvironmentDisabledFacts extracts the disabled-set entries from the reserved
+// FACTS_DISABLE / FACTER_DISABLE control variables in env (native wins). It is
+// the exported seam internal/app uses to honor ambient disables in the
+// facterversion fast path.
+func EnvironmentDisabledFacts(env []string) []string {
+	return environmentDisabledFacts(env)
 }
 
 // splitDisableList splits a comma-separated disable list into trimmed,

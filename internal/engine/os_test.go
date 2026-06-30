@@ -852,7 +852,7 @@ func TestCurrentOSReleaseIllumosFallsBackToKernelRelease(t *testing.T) {
 }
 
 func TestCoreFacts_includeOSHardware(t *testing.T) {
-	collection := Collection(CoreFacts(testSession))
+	collection := Collection(CoreFacts(testSession, nil))
 	osFact, ok := collection["os"].(map[string]any)
 	if !ok {
 		t.Fatalf("os fact = %#v, want map", collection["os"])

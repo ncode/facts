@@ -28,6 +28,7 @@ type hostOS interface {
 	lstat(string) (os.FileInfo, error)
 	glob(string) ([]string, error)
 	statMountpoint(string) (mountStat, bool)
+	environ() []string
 }
 
 type osHost struct{}
@@ -171,6 +172,10 @@ func (osHost) statMountpoint(path string) (mountStat, bool) {
 	return statMountpoint(path)
 }
 
+func (osHost) environ() []string {
+	return os.Environ()
+}
+
 // Session carries the state of one resolution run: memoized host probes and
 // resolution-scoped caches. Resolvers share a Session so facts derived from
 // the same probe agree within a run; a fresh Session re-reads the host, which
@@ -184,8 +189,14 @@ type Session struct {
 	logger *slog.Logger
 
 	coreFacts struct {
-		mu    sync.Mutex
-		facts []ResolvedFact
+		mu sync.Mutex
+		// built distinguishes "never built" from "built with an empty disabled
+		// set"; fingerprint identifies the disabled set the memo was built for so
+		// a later call with a different set rebuilds instead of returning stale
+		// gating.
+		built       bool
+		fingerprint string
+		facts       []ResolvedFact
 	}
 
 	augeasVersion                memo[string]

@@ -6,7 +6,7 @@ Facts today has only an opt-out blocklist that filters already-resolved facts ou
 
 Disabling aims to skip work, not just output — but the gating is per-resolver and per-probe, not a blanket per-name skip, because the resolver-to-top-level-fact map is many-to-one. Three classes follow:
 
-- A top-level fact produced by its own standalone resolver is **resolution-gated**: disabling it skips that resolver. `packages` is this case — `packagesCoreFacts` produces only `packages`, so `--disable packages` skips package collection entirely. (`networking`, `processors`, `memory`, `timezone`, `ssh`, `selinux`, `fips`, `augeas` are likewise single-output.)
+- A top-level fact produced by its own standalone resolver is **resolution-gated**: disabling it skips that resolver. `packages` is this case — `packagesCoreFacts` produces only `packages`, so `--disable packages` skips package collection entirely. (`networking`, `processors`, `memory`, `timezone`, `ssh`, `fips`, `augeas` are likewise single-output. `selinux` is *not* in this set: it emits as `os.selinux.*` descendants, so a name-level `--disable selinux` is a no-op — it stays eager and is disabled via `os.selinux`.)
 - A top-level fact that shares a multi-output category resolver — `osCoreFacts` → `os`/`kernel`/`filesystems`, `disksCoreFacts` → `disks`/`partitions`/`mountpoints`/`zfs`/`zpool`, `uptimeCoreFacts` → `load_averages`/`system_uptime` — is gated only when **every** top-level fact that resolver produces is disabled; otherwise the resolver runs and the disabled outputs are pruned.
 - A fact built inline in `buildCoreFacts` with no resolver seam (`facterversion`, `is_virtual`/`virtual`, `path`) is always resolve-then-prune.
 

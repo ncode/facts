@@ -28,6 +28,8 @@ type fakeHostOS struct {
 	lstats              map[string]os.FileInfo
 	globs               map[string][]string
 	mountStats          map[string]mountStat
+	environEntries      []string
+	readFileCalls       []string
 	readDirCalls        []string
 	globCalls           []string
 	statMountpointCalls []string
@@ -63,6 +65,7 @@ func (h *fakeHostOS) goos() string {
 }
 
 func (h *fakeHostOS) readFile(path string) ([]byte, error) {
+	h.readFileCalls = append(h.readFileCalls, fakeHostPath(path))
 	data, ok := h.files[fakeHostPath(path)]
 	if !ok {
 		return nil, os.ErrNotExist
@@ -108,6 +111,10 @@ func (h *fakeHostOS) statMountpoint(path string) (mountStat, bool) {
 	h.statMountpointCalls = append(h.statMountpointCalls, path)
 	stat, ok := h.mountStats[fakeHostPath(path)]
 	return stat, ok
+}
+
+func (h *fakeHostOS) environ() []string {
+	return h.environEntries
 }
 
 func fakeHostPath(path string) string {

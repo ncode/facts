@@ -64,6 +64,15 @@ var optionDefinitions = []Option{
 		},
 	},
 	{
+		Canonical:  "--disable",
+		Arity:      RequiredValue,
+		Repeatable: true,
+		Documentation: OptionDocumentation{
+			Help: "\t       [--disable]                    Disable facts or fact groups (comma-separated, repeatable). Standalone resolvers are skipped; others are pruned from output, even when queried.",
+			Man:  "  * --disable: Disable facts or fact groups (comma-separated, repeatable). Standalone resolvers are skipped; others are pruned from output, even when queried. Unions with the FACTS_DISABLE environment variable and the config file disable list; --no-block clears the whole set.",
+		},
+	},
+	{
 		Canonical:  "--external-dir",
 		Arity:      RequiredValue,
 		Repeatable: true,

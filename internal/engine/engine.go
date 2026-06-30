@@ -56,7 +56,14 @@ type EngineConfig struct {
 	// NoExternalFacts skips external-fact loading (--no-external-facts).
 	NoExternalFacts bool
 	// DisabledFacts overrides the config-derived disabled set when non-nil.
+	// When set it is used verbatim, bypassing the union below — this is how the
+	// CLI's --no-block clears everything (an empty non-nil map) and how a
+	// library consumer forces an explicit disabled set.
 	DisabledFacts map[string]bool
+	// ExtraDisabled are additional disable entries (fact or group names) unioned
+	// into the disabled set, carrying the CLI's --disable values. Names expand
+	// through the configured fact groups like every other disable source.
+	ExtraDisabled []string
 	// ConfigLoaded carries an already parsed config from internal/app. Library
 	// engines leave it false so ConfigFile/SystemDefaults are parsed fresh on
 	// every Discover.
@@ -88,6 +95,7 @@ type Engine struct {
 func NewEngine(cfg EngineConfig) (*Engine, error) {
 	cfg.ExternalDirs = slices.Clone(cfg.ExternalDirs)
 	cfg.DisabledFacts = cloneBoolMap(cfg.DisabledFacts)
+	cfg.ExtraDisabled = slices.Clone(cfg.ExtraDisabled)
 	cfg.DefaultExternalDirs = slices.Clone(cfg.DefaultExternalDirs)
 	cfg.Config = cloneConfig(cfg.Config)
 	cfg.Facts = slices.Clone(cfg.Facts)
@@ -105,6 +113,41 @@ func NewEngine(cfg EngineConfig) (*Engine, error) {
 		logger = slog.New(slog.DiscardHandler)
 	}
 	return &Engine{cfg: cfg, logger: logger, onceSeen: map[string]bool{}}, nil
+}
+
+// diagnoseAmbientDisabledQueries emits a one-line warn diagnostic for each
+// explicitly-queried fact suppressed by an ambient (FACTS_DISABLE or config)
+// disable source. The disabled set is applied before query projection, so a
+// silently-empty result is otherwise undiagnosable; --disable entries are
+// excluded by planDiscovery so a disable on the same command line stays quiet.
+func diagnoseAmbientDisabledQueries(logger *slog.Logger, queries []string, ambient map[string]string) {
+	if logger == nil || len(ambient) == 0 {
+		return
+	}
+	for _, query := range queries {
+		name := strings.ToLower(query)
+		if source, ok := ambientDisableSource(name, ambient); ok {
+			logger.Warn(fmt.Sprintf("fact %q is disabled by %s", name, source))
+		}
+	}
+}
+
+// ambientDisableSource reports the ambient source that disables name, matching
+// the full dotted name and then every ancestor (parent, grandparent, … root) so
+// the diagnostic covers descendants the way pruneDisabledDescendants /
+// FilterDisabledFacts do: a config disable of `os.release` is reported for a
+// query of `os.release.major`.
+func ambientDisableSource(name string, ambient map[string]string) (string, bool) {
+	for {
+		if source, ok := ambient[name]; ok {
+			return source, true
+		}
+		cut := strings.LastIndex(name, ".")
+		if cut < 0 {
+			return "", false
+		}
+		name = name[:cut]
+	}
 }
 
 // warnOnce emits message at warn level the first time it is seen on this
@@ -139,6 +182,7 @@ func (e *Engine) Discover(ctx context.Context, queries ...string) (*Snapshot, er
 
 	plan, planFailures := e.planDiscovery(s, queries)
 	failures = append(failures, planFailures...)
+	diagnoseAmbientDisabledQueries(s.logger, plan.queries, plan.ambientDisabled)
 
 	finish := func() (*Snapshot, error) {
 		if err := ctx.Err(); err != nil {
@@ -205,7 +249,7 @@ func (e *Engine) Discover(ctx context.Context, queries ...string) (*Snapshot, er
 		return finish()
 	}
 
-	facts = CoreFacts(s)
+	facts = CoreFacts(s, plan.disabledFacts)
 	facts = append(facts, registeredFacts...)
 	facts = append(facts, externalFacts...)
 	facts = FilterDisabledFacts(facts, plan.disabledFacts)

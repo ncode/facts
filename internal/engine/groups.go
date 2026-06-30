@@ -16,13 +16,17 @@ type FactGroup struct {
 }
 
 // BuiltinFactGroups returns the static fact group catalog for the Go port.
+// Each group keeps only its structured root fact; the legacy flat aliases
+// (memoryfree, hostname, operatingsystem, processorcount, …) were removed by
+// ADR-0007 and never resolve, so listing them was a no-op. Disabling a group
+// name still drops the whole subtree through the structured root.
 func BuiltinFactGroups() []FactGroup {
 	return []FactGroup{
-		{Name: "memory", Facts: []string{"memory", "memoryfree", "memoryfree_mb", "memorysize", "memorysize_mb"}},
-		{Name: "networking", Facts: []string{"networking", "hostname", "ipaddress", "ipaddress6", "netmask", "domain", "fqdn"}},
-		{Name: "operating system", Facts: []string{"os", "operatingsystem", "osfamily", "operatingsystemrelease", "architecture"}},
+		{Name: "memory", Facts: []string{"memory"}},
+		{Name: "networking", Facts: []string{"networking"}},
+		{Name: "operating system", Facts: []string{"os"}},
 		{Name: "path", Facts: []string{"path"}},
-		{Name: "processor", Facts: []string{"processors", "processorcount", "physicalprocessorcount", "hardwareisa"}},
+		{Name: "processor", Facts: []string{"processors"}},
 	}
 }
 

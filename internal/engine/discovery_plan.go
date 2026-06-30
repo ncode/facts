@@ -1,11 +1,15 @@
 package engine
 
-import "slices"
+import (
+	"slices"
+	"strings"
+)
 
 type discoveryPlan struct {
 	externalDirs       []string
 	noExternalFacts    bool
 	disabledFacts      map[string]bool
+	ambientDisabled    map[string]string
 	useCache           bool
 	cacheTTLs          []FactTTL
 	cacheGroups        []FactGroup
@@ -41,15 +45,19 @@ func (e *Engine) planDiscovery(s *Session, queries []string) (discoveryPlan, []e
 		}
 		plan.noExternalFacts = plan.noExternalFacts || config.NoExternalFacts
 		plan.cacheGroups = cloneFactGroups(config.FactGroups)
-		if e.cfg.DisabledFacts == nil {
-			plan.disabledFacts = DisabledFactsForFiltering(config.Disabled, config.FactGroups)
-		}
 		if plan.useCache {
 			plan.cacheTTLs = slices.Clone(config.TTLs)
 		}
 		if e.cfg.CLICompat && config.ForceDotResolution {
 			plan.includeTypedDotted = true
 		}
+	}
+	// A non-nil DisabledFacts override is used verbatim (this is how --no-block
+	// clears everything and how a library consumer forces an explicit set);
+	// otherwise the disabled set is the union of config, FACTS_DISABLE, and the
+	// --disable CLI entries, each expanded through the configured fact groups.
+	if e.cfg.DisabledFacts == nil {
+		plan.disabledFacts, plan.ambientDisabled = e.unionDisabledFacts(s, config, plan.includeEnv)
 	}
 	if plan.disabledFacts == nil {
 		plan.disabledFacts = map[string]bool{}
@@ -58,6 +66,55 @@ func (e *Engine) planDiscovery(s *Session, queries []string) (discoveryPlan, []e
 		plan.externalDirs = e.defaultExternalDirs()
 	}
 	return plan, failures
+}
+
+// disabledSourceEnv and disabledSourceConfig label the ambient (non-CLI)
+// sources of a disabled fact for the explicit-query diagnostic.
+const (
+	disabledSourceEnv    = "FACTS_DISABLE"
+	disabledSourceConfig = "the configuration file"
+)
+
+// unionDisabledFacts builds the disabled set as the union of the config
+// `disable`/`blocklist` list, the FACTS_DISABLE environment control (only when
+// includeEnv is set, consistent with environment facts), and the --disable CLI
+// entries, expanding each source through the configured fact groups. It also
+// returns the ambient map naming the env/config source of each disabled fact
+// that is not also named on the command line, for the explicit-query
+// diagnostic.
+func (e *Engine) unionDisabledFacts(s *Session, config Config, includeEnv bool) (map[string]bool, map[string]string) {
+	groups := config.FactGroups
+	disabled := map[string]bool{}
+	ambient := map[string]string{}
+
+	for name := range DisabledFactsWithGroups(config.Disabled, groups) {
+		disabled[name] = true
+		ambient[name] = disabledSourceConfig
+	}
+	if includeEnv {
+		for name := range DisabledFactsWithGroups(environmentDisabledFacts(s.host.environ()), groups) {
+			disabled[name] = true
+			ambient[name] = disabledSourceEnv
+		}
+	}
+	// --disable entries are "on the same command line", so they join the
+	// disabled set but never trigger the ambient diagnostic; a name they cover
+	// is dropped from the ambient map even if config/env also disabled it. The
+	// drop also covers descendants, mirroring pruneDisabledDescendants: a
+	// --disable of `networking` silences an ambient `networking.ip` it subsumes.
+	for name := range DisabledFactsWithGroups(e.cfg.ExtraDisabled, groups) {
+		disabled[name] = true
+		delete(ambient, name)
+		for k := range ambient {
+			if strings.HasPrefix(k, name+".") {
+				delete(ambient, k)
+			}
+		}
+	}
+	if len(ambient) == 0 {
+		ambient = nil
+	}
+	return disabled, ambient
 }
 
 func (e *Engine) configForDiscovery(s *Session) (Config, bool, error) {

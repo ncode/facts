@@ -248,6 +248,11 @@ func runQuery(stdout, stderr io.Writer, args []string) error {
 		externalDirs = append(externalDirs, value)
 		return nil
 	})
+	var disableEntries []string
+	flags.Func("disable", "disable facts or fact groups (comma-separated, repeatable)", func(value string) error {
+		disableEntries = append(disableEntries, engine.SplitDisableList(value)...)
+		return nil
+	})
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -287,10 +292,18 @@ func runQuery(stdout, stderr io.Writer, args []string) error {
 	disabledFactsForFastPath := map[string]bool{}
 	var disabledFacts map[string]bool
 	if *noBlock {
+		// --no-block is the master override: an empty non-nil map clears the
+		// whole disabled set for this run, including --disable and FACTS_DISABLE.
 		disabledFacts = map[string]bool{}
 	}
 	if !*noBlock {
-		disabledFactsForFastPath = engine.DisabledFactsForFiltering(configOptions.Disabled, configOptions.FactGroups)
+		// The fast path must honor every disable source so a disabled
+		// facterversion query falls through to normal resolution (and
+		// disable-beats-query), mirroring the engine's union.
+		fastPathEntries := append([]string(nil), configOptions.Disabled...)
+		fastPathEntries = append(fastPathEntries, disableEntries...)
+		fastPathEntries = append(fastPathEntries, engine.EnvironmentDisabledFacts(os.Environ())...)
+		disabledFactsForFastPath = engine.DisabledFactsForFiltering(fastPathEntries, configOptions.FactGroups)
 	}
 	mergeDottedFacts := configOptions.ForceDotResolution || *forceDotResolution
 	logLevel := firstNonEmpty(flags.Lookup("log-level").Value.String(), flags.Lookup("l").Value.String(), configOptions.LogLevel)
@@ -326,6 +339,7 @@ func runQuery(stdout, stderr io.Writer, args []string) error {
 		UseCache:               !*noCache,
 		NoExternalFacts:        *noExternalFacts,
 		DisabledFacts:          disabledFacts,
+		ExtraDisabled:          disableEntries,
 		DefaultExternalDirsSet: true,
 		DefaultExternalDirs:    defaultExternalFactDirs(),
 		IncludeTypedDotted:     mergeDottedFacts,

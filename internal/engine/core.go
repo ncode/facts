@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -14,14 +15,40 @@ import (
 // The literal below is the dev-build fallback when no tag is injected.
 var Version = "dev" // ponytail: var, not const, so the build pipeline can inject the git tag
 
-// CoreFacts returns the small cross-platform fact set used by the initial Go CLI.
-func CoreFacts(s *Session) []ResolvedFact {
+// CoreFacts returns the small cross-platform fact set used by the initial Go
+// CLI. disabled is the resolution-gating set: single-output categories whose
+// top-level fact name it contains skip resolution entirely (ADR-0015). The
+// result is memoized per Session, keyed by a fingerprint of the disabled set, so
+// a repeat call with the same set reuses the build while a call with a different
+// set rebuilds (the gating depends on disabled, so a stale memo would misgate).
+func CoreFacts(s *Session, disabled map[string]bool) []ResolvedFact {
+	fingerprint := disabledFingerprint(disabled)
 	s.coreFacts.mu.Lock()
 	defer s.coreFacts.mu.Unlock()
-	if s.coreFacts.facts == nil {
-		s.coreFacts.facts = buildCoreFacts(s)
+	if !s.coreFacts.built || s.coreFacts.fingerprint != fingerprint {
+		s.coreFacts.facts = buildCoreFacts(s, disabled)
+		s.coreFacts.fingerprint = fingerprint
+		s.coreFacts.built = true
 	}
 	return append([]ResolvedFact(nil), s.coreFacts.facts...)
+}
+
+// disabledFingerprint is a stable identity for a disabled set — its enabled keys
+// sorted and comma-joined. CoreFacts keys its per-Session memo on this so two
+// calls gate identically iff their fingerprints match. Only true-valued keys
+// gate (buildCoreFacts checks disabled[fact]), so a false-valued key is omitted.
+func disabledFingerprint(disabled map[string]bool) string {
+	if len(disabled) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(disabled))
+	for name, on := range disabled {
+		if on {
+			keys = append(keys, name)
+		}
+	}
+	sort.Strings(keys)
+	return strings.Join(keys, ",")
 }
 
 // buildCoreFacts composes the resolved core-fact set as the ordered union of
@@ -30,7 +57,7 @@ func CoreFacts(s *Session) []ResolvedFact {
 // resolvers depend on. Facts are collected into a name-keyed canonical tree, so
 // the composition order does not affect the resolved output; it mirrors the
 // historical assembly order for reviewability.
-func buildCoreFacts(s *Session) []ResolvedFact {
+func buildCoreFacts(s *Session, disabled map[string]bool) []ResolvedFact {
 	virtualization := detectVirtualization(s)
 	virtualFact, isVirtualFact := virtualizationFactValues(virtualization)
 	dmi := s.cachedDMI()
@@ -40,20 +67,34 @@ func buildCoreFacts(s *Session) []ResolvedFact {
 		{Name: "path", Value: currentPathEntries(runtime.GOOS, os.Getenv)},
 		{Name: "virtual", Value: virtualFact},
 	}
-	facts = append(facts, networkingCoreFacts(s)...)
-	facts = append(facts, processorsCoreFacts(s)...)
-	facts = append(facts, memoryCoreFacts(s)...)
+	// gate skips a single-output category whose only top-level fact name is
+	// disabled, so the resolver never runs (resolution-gating, ADR-0015). Only
+	// categories whose entire output shares one root and whose probes are not
+	// needed by a kept fact are gated; multi-output (os/disks/uptime),
+	// shared-probe (identity, dmi), inline, and cloud/hypervisor facts below
+	// stay eager and rely on FilterDisabledFacts resolve-then-prune. selinux is
+	// likewise eager: it emits as os.selinux.* descendants, so a name-level
+	// disable of "selinux" is a no-op — it is disabled via os.selinux.
+	gate := func(fact string, resolve func(*Session) []ResolvedFact) {
+		if disabled[fact] {
+			return
+		}
+		facts = append(facts, resolve(s)...)
+	}
+	gate("networking", networkingCoreFacts)
+	gate("processors", processorsCoreFacts)
+	gate("memory", memoryCoreFacts)
 	facts = append(facts, osCoreFacts(s)...)
 	facts = append(facts, dmiCoreFacts(s)...)
 	facts = append(facts, disksCoreFacts(s)...)
-	facts = append(facts, sshCoreFacts(s)...)
+	gate("ssh", sshCoreFacts)
 	facts = append(facts, identityCoreFacts(s)...)
 	facts = append(facts, uptimeCoreFacts(s)...)
 	facts = append(facts, selinuxCoreFacts(s)...)
-	facts = append(facts, fipsCoreFacts(s)...)
-	facts = append(facts, timezoneCoreFacts(s)...)
-	facts = append(facts, augeasCoreFacts(s)...)
-	facts = append(facts, xenCoreFacts(s)...)
+	gate("fips_enabled", fipsCoreFacts)
+	gate("timezone", timezoneCoreFacts)
+	gate("augeas", augeasCoreFacts)
+	gate("xen", xenCoreFacts)
 	facts = append(facts, currentLinuxHypervisorFacts(s)...)
 	facts = append(facts, currentWindowsHypervisorFacts(s)...)
 	facts = append(facts, azureFacts(s.Context(), newAzureClient(azureMetadataBaseURL, nil), virtualization)...)
