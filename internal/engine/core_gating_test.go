@@ -27,7 +27,7 @@ func hasRoot(facts []ResolvedFact, root string) bool {
 // top-level fact name that gates it (ADR-0015).
 var gatedSingleOutputCategories = []string{
 	"networking", "processors", "memory", "ssh",
-	"timezone", "fips_enabled", "augeas", "xen",
+	"timezone", "fips_enabled", "augeas", "xen", "packages",
 }
 
 func TestBuildCoreFacts_resolutionGatesSingleOutputCategories(t *testing.T) {

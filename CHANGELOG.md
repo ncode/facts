@@ -4,6 +4,17 @@
 
 ### Added
 
+- New `packages` fact: the installed packages on the host, namespaced by the
+  package database they come from — `packages.dpkg`, `packages.rpm`,
+  `packages.pacman`, `packages.apk`, `packages.snap`, `packages.flatpak`,
+  `packages.nix` (Linux); `packages.pkg` (FreeBSD/DragonFly),
+  `packages.openbsd_pkg`, `packages.pkgsrc`, `packages.ips`; `packages.receipts`,
+  `packages.apps`, `packages.homebrew` (macOS); and `packages.registry`,
+  `packages.appx` (Windows). Each source is an array of `{name, version, ...}`
+  records with per-source identity fields (architecture, product_code, bundle_id,
+  and so on); sources are never merged, and a source is omitted when its database
+  is absent. Scope is system package databases (language/runtime managers are out
+  of scope). The whole probe is skippable with `--disable packages`.
 - Fact disabling is now a first-class, facts-native control. Disable any fact
   or fact group with `--disable a,b`, the `FACTS_DISABLE=a,b` environment
   variable, or the `facts.conf` `disable` key; the Facter `blocklist` key keeps

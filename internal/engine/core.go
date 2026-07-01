@@ -95,6 +95,7 @@ func buildCoreFacts(s *Session, disabled map[string]bool) []ResolvedFact {
 	gate("timezone", timezoneCoreFacts)
 	gate("augeas", augeasCoreFacts)
 	gate("xen", xenCoreFacts)
+	gate("packages", packagesCoreFacts)
 	facts = append(facts, currentLinuxHypervisorFacts(s)...)
 	facts = append(facts, currentWindowsHypervisorFacts(s)...)
 	facts = append(facts, azureFacts(s.Context(), newAzureClient(azureMetadataBaseURL, nil), virtualization)...)

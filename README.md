@@ -18,7 +18,7 @@
 
 <br>
 
-Facts is a Go port of [Puppet Facter](https://github.com/puppetlabs/facter). It discovers facts about the system it runs on — hardware, networking, OS, cloud metadata — and serves them two ways: as an embeddable Go library, and as the `facts` CLI. It reads your existing facter configuration, fact directories, and `FACTER_*` environment facts as the compatibility tier of its input surface, so facter-configured hosts keep working unchanged.
+Facts is a Go port of [Puppet Facter](https://github.com/puppetlabs/facter). It discovers facts about the system it runs on — hardware, networking, OS, installed packages, cloud metadata — and serves them two ways: as an embeddable Go library, and as the `facts` CLI. It reads your existing facter configuration, fact directories, and `FACTER_*` environment facts as the compatibility tier of its input surface, so facter-configured hosts keep working unchanged.
 
 Ruby Facter compatibility is promised exactly where it matters and nowhere else: at the CLI process boundary (the output contract) and for operator-supplied fact sources — external facts and `facter.conf` (the input contract, now read under facts-native names first; see [the input-compatibility reference](docs/FACTER_CONF_COMPATIBILITY.md)). Ruby DSL fact files are not read; rewrite them as external facts ([migration guide](docs/CUSTOM_FACT_MIGRATION.md)). The Go API itself is just Go.
 

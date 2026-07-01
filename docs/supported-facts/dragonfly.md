@@ -67,7 +67,7 @@ $ facts --json
 
 ## Fact Contract
 
-115 schema entries include `dragonfly`.
+116 schema entries include `dragonfly`.
 
 | Fact | Type | Conditional | Description |
 | --- | --- | --- | --- |
@@ -161,6 +161,7 @@ $ facts --json
 | `os.release.full` | `string` | no | The full release number of the operating system. |
 | `os.release.major` | `string` | no | The major release number of the operating system. |
 | `os.release.minor` | `string` | yes | The minor release number of the operating system, when it has one. |
+| `packages.pkg` | `array` | yes | Installed pkgng packages as {name, version, architecture} records (shared by FreeBSD and DragonFly). |
 | `partitions.*` | `map` | yes | A disk partition (or device-mapper/loop device), keyed by device path. |
 | `partitions.*.filesystem` | `string` | yes | The filesystem type of the partition. |
 | `partitions.*.mount` | `string` | yes | The path the partition is mounted on. |

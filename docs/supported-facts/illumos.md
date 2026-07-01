@@ -89,7 +89,7 @@ $ facts --json
 
 ## Fact Contract
 
-114 schema entries include `illumos`.
+115 schema entries include `illumos`.
 
 | Fact | Type | Conditional | Description |
 | --- | --- | --- | --- |
@@ -178,6 +178,7 @@ $ facts --json
 | `os.name` | `string` | no | The operating system name, such as Ubuntu, Darwin, windows, or Plan 9. |
 | `os.release.full` | `string` | no | The full release number of the operating system. |
 | `os.release.major` | `string` | no | The major release number of the operating system. |
+| `packages.ips` | `array` | yes | Installed illumos IPS packages as {name, version} records, from the local image (no network refresh). |
 | `partitions.*` | `map` | yes | A disk partition (or device-mapper/loop device), keyed by device path. |
 | `partitions.*.filesystem` | `string` | yes | The filesystem type of the partition. |
 | `partitions.*.size` | `string` | yes | The display size of the partition, such as 1.00 GiB. |

@@ -795,6 +795,87 @@ os.windows.system32:
   description: The native system32 directory, sysnative-aware for 32-bit processes.
   platforms: [windows]
 
+packages.apk:
+  type: array
+  description: Installed Alpine apk packages as {name, version, architecture} records, from /lib/apk/db/installed.
+  platforms: [linux]
+  conditional: true
+packages.appx:
+  type: array
+  description: System-provisioned Windows AppX packages as {name, version, architecture} records.
+  platforms: [windows]
+  conditional: true
+packages.apps:
+  type: array
+  description: macOS application bundles as {name, version, bundle_id, path} records; secondary to receipts and never merged with it.
+  platforms: [darwin]
+  conditional: true
+packages.dpkg:
+  type: array
+  description: Installed dpkg packages as {name, version, architecture} records (install ok installed only; multiarch siblings kept), from /var/lib/dpkg/status.
+  platforms: [linux]
+  conditional: true
+packages.flatpak:
+  type: array
+  description: System-installed Flatpak applications as {name, version, architecture} records.
+  platforms: [linux]
+  conditional: true
+packages.homebrew:
+  type: array
+  description: Homebrew formulae and casks as {name, version, type} records, when a Cellar prefix exists.
+  platforms: [darwin]
+  conditional: true
+packages.ips:
+  type: array
+  description: Installed illumos IPS packages as {name, version} records, from the local image (no network refresh).
+  platforms: [illumos]
+  conditional: true
+packages.nix:
+  type: array
+  description: Installed Nix packages as {name, version} records — the NixOS system profile set (the references of /run/current-system/sw), never the whole /nix/store.
+  platforms: [linux]
+  conditional: true
+packages.openbsd_pkg:
+  type: array
+  description: Installed OpenBSD packages as {name, version} records, from /var/db/pkg.
+  platforms: [openbsd]
+  conditional: true
+packages.pacman:
+  type: array
+  description: Installed pacman packages as {name, version, architecture} records, from /var/lib/pacman/local.
+  platforms: [linux]
+  conditional: true
+packages.pkg:
+  type: array
+  description: Installed pkgng packages as {name, version, architecture} records (shared by FreeBSD and DragonFly).
+  platforms: [freebsd, dragonfly]
+  conditional: true
+packages.pkgsrc:
+  type: array
+  description: Installed pkgsrc packages as {name, version} records, from the discovered PKG_DBDIR.
+  platforms: [netbsd]
+  conditional: true
+packages.receipts:
+  type: array
+  description: macOS installer(8)/PackageKit .pkg receipts as {name, version} records, from /var/db/receipts; the primary macOS source.
+  platforms: [darwin]
+  conditional: true
+packages.registry:
+  type: array
+  description: Windows uninstall entries from both HKLM hives as {name, version, product_code, architecture} records.
+  platforms: [windows]
+  conditional: true
+packages.rpm:
+  type: array
+  description: Installed rpm packages as {name, version, architecture} records (epoch preserved, gpg-pubkey filtered).
+  platforms: [linux]
+  conditional: true
+packages.snap:
+  type: array
+  description: Installed snap packages as {name, version} records.
+  platforms: [linux]
+  conditional: true
+
 partitions.*:
   type: map
   description: A disk partition (or device-mapper/loop device), keyed by device path.
