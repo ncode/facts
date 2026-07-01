@@ -1,7 +1,7 @@
 package engine
 
 import (
-	"path/filepath"
+	"path"
 	"strings"
 )
 
@@ -135,9 +135,9 @@ func homebrewPackages(glob pathGlobber) []any {
 // keeps a dotfile sidecar (Caskroom/<name>/.metadata) that filepath.Glob's "*"
 // matches — unlike the shell — so dot-prefixed leaves are skipped.
 func appendBrewRecords(records []any, paths []string, kind string) []any {
-	for _, path := range paths {
-		version := filepath.Base(path)
-		name := filepath.Base(filepath.Dir(path))
+	for _, p := range paths {
+		version := path.Base(p)
+		name := path.Base(path.Dir(p))
 		if name == "" || version == "" || strings.HasPrefix(version, ".") {
 			continue
 		}
@@ -215,11 +215,11 @@ func unquotePlutil(s string) string {
 // appBundlePath recovers the .app bundle path from its Info.plist path
 // (.../Xxx.app/Contents/Info.plist -> .../Xxx.app).
 func appBundlePath(infoPlist string) string {
-	return filepath.Dir(filepath.Dir(infoPlist))
+	return path.Dir(path.Dir(infoPlist))
 }
 
 // appBundleName derives a display name from a bundle path when the plist carries
 // no CFBundleName/CFBundleDisplayName (.../Xxx.app -> Xxx).
 func appBundleName(appPath string) string {
-	return strings.TrimSuffix(filepath.Base(appPath), ".app")
+	return strings.TrimSuffix(path.Base(appPath), ".app")
 }

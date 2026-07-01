@@ -2,7 +2,6 @@ package engine
 
 import (
 	"os"
-	"path/filepath"
 	"strings"
 )
 
@@ -50,7 +49,7 @@ func openbsdPackages(readDir func(string) ([]os.DirEntry, error), readFile fileR
 		if name == "" || version == "" {
 			continue
 		}
-		arch := bsdContentsArch(readFile, filepath.Join("/var/db/pkg", entry.Name(), "+CONTENTS"))
+		arch := bsdContentsArch(readFile, "/var/db/pkg/"+entry.Name()+"/+CONTENTS")
 		records = append(records, packageRecord(name, version, "architecture", arch))
 	}
 	sortPackages(records)
