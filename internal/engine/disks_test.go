@@ -792,46 +792,124 @@ func TestParseDragonFlyDisklabelPartitions_returnsDevicePartitions(t *testing.T)
 	}
 }
 
-func TestCurrentDragonFlyPartitionsReadsKernelDiskNames(t *testing.T) {
-	got := currentDragonFlyPartitions(func(name string, args ...string) string {
+func TestCurrentDisksDragonFlySkipsMemoryDiskPhantoms(t *testing.T) {
+	// The DragonFly guest lists 127 md memory disks whose diskinfo returns a
+	// positive 9.77 MB size; they must not leak into the disks fact, and the
+	// probe must not even spawn diskinfo for them.
+	got := currentDisks("dragonfly", func(name string, args ...string) string {
 		switch strings.Join(append([]string{name}, args...), " ") {
 		case "sysctl -n kern.disks":
-			return "da0 vn3\n"
-		case "disklabel da0":
-			return "disklabel: Operation not supported by device\n"
-		case "disklabel da0s1":
-			return dragonFlyDisklabelDA0S1
-		case "disklabel da0s2", "disklabel da0s3", "disklabel da0s4",
-			"disklabel vn3", "disklabel vn3s1", "disklabel vn3s2", "disklabel vn3s3", "disklabel vn3s4":
-			return "disklabel: Operation not supported by device\n"
+			return "md1 da0 vn0 md0\n"
+		case "diskinfo /dev/da0":
+			return "/dev/da0         blksize=512  offset=0x000000000000 size=0x002000000000  128.00 GB\n"
+		case "diskinfo /dev/vn0":
+			return "No such file or directory\n"
 		default:
-			t.Fatalf("unexpected command %q %#v", name, args)
+			t.Fatalf("unexpected command %q %#v (memory disk probed?)", name, args)
 			return ""
 		}
-	})
-	if _, ok := got["/dev/da0s1d"]; !ok {
-		t.Fatalf("currentDragonFlyPartitions() = %#v, want /dev/da0s1d", got)
+	}, osHost{})
+	want := map[string]any{
+		"da0": map[string]any{"size": "128.00 GiB", "size_bytes": 137_438_953_472},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("currentDisks(dragonfly) = %#v, want %#v", got, want)
 	}
 }
 
-func TestCurrentDragonFlyPartitionsTriesOtherSlices(t *testing.T) {
-	got := currentDragonFlyPartitions(func(name string, args ...string) string {
+func TestDragonFlyDisklabelTargetsGlobsExistingSlices(t *testing.T) {
+	t.Parallel()
+	glob := func(pattern string) ([]string, error) {
+		if pattern != "/dev/da0s*" {
+			t.Fatalf("glob pattern = %q, want /dev/da0s*", pattern)
+		}
+		// devfs exposes the slice node plus its partition-within-slice nodes.
+		return []string{"/dev/da0s1", "/dev/da0s1a", "/dev/da0s1b", "/dev/da0s1d"}, nil
+	}
+	got := dragonFlyDisklabelTargets("da0", glob)
+	if want := []string{"da0s1"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("dragonFlyDisklabelTargets() = %#v, want %#v", got, want)
+	}
+}
+
+func TestCurrentDragonFlyPartitionsSkipsPseudoAndGlobsSlices(t *testing.T) {
+	t.Parallel()
+	var disklabelCalls []string
+	run := func(name string, args ...string) string {
+		if name == "disklabel" {
+			disklabelCalls = append(disklabelCalls, strings.Join(args, " "))
+			if len(args) == 1 && args[0] == "da0s1" {
+				return dragonFlyDisklabelDA0S1
+			}
+			return "disklabel: Operation not supported by device\n"
+		}
+		if strings.Join(append([]string{name}, args...), " ") == "sysctl -n kern.disks" {
+			return "md1 da0 vn0 md0\n"
+		}
+		t.Fatalf("unexpected command %q %#v", name, args)
+		return ""
+	}
+	glob := func(pattern string) ([]string, error) {
+		switch pattern {
+		case "/dev/da0s*":
+			return []string{"/dev/da0s1", "/dev/da0s1a", "/dev/da0s1b", "/dev/da0s1d"}, nil
+		case "/dev/vn0s*": // unattached vn: no slice nodes
+			return nil, nil
+		default:
+			t.Fatalf("unexpected glob %q (pseudo-device globbed?)", pattern)
+			return nil, nil
+		}
+	}
+
+	got := currentDragonFlyPartitions(run, glob)
+	if _, ok := got["/dev/da0s1d"]; !ok {
+		t.Fatalf("currentDragonFlyPartitions() = %#v, want /dev/da0s1d", got)
+	}
+	// Only the real slice is probed: no md*, no whole-disk da0, no da0s2..s4,
+	// no unattached vn0.
+	if want := []string{"da0s1"}; !reflect.DeepEqual(disklabelCalls, want) {
+		t.Fatalf("disklabel calls = %#v, want %#v", disklabelCalls, want)
+	}
+}
+
+func TestCurrentDragonFlyKeepsAttachedVnode(t *testing.T) {
+	// An attached vn (file-backed disk) has a positive diskinfo size and real
+	// slice nodes; it is NOT a pseudo-device and must stay in disks with its
+	// partitions probed. This guards the "keep attached vn" contract against a
+	// regression that wrongly adds vn to dragonFlyPseudoDisk.
+	t.Parallel()
+	run := func(name string, args ...string) string {
 		switch strings.Join(append([]string{name}, args...), " ") {
 		case "sysctl -n kern.disks":
-			return "da0\n"
-		case "disklabel da0", "disklabel da0s1":
-			return "disklabel: Operation not supported by device\n"
-		case "disklabel da0s2":
-			return strings.ReplaceAll(dragonFlyDisklabelDA0S1, "/dev/da0s1", "/dev/da0s2")
-		case "disklabel da0s3", "disklabel da0s4":
-			return ""
+			return "vn0 da0\n"
+		case "diskinfo /dev/vn0":
+			return "/dev/vn0         blksize=512  offset=0x000000000000 size=0x000040000000  1.00 GB\n"
+		case "diskinfo /dev/da0":
+			return "/dev/da0         blksize=512  offset=0x000000000000 size=0x002000000000  128.00 GB\n"
+		case "disklabel vn0s1", "disklabel da0s1":
+			return dragonFlyDisklabelDA0S1
 		default:
 			t.Fatalf("unexpected command %q %#v", name, args)
 			return ""
 		}
-	})
-	if _, ok := got["/dev/da0s2d"]; !ok {
-		t.Fatalf("currentDragonFlyPartitions() = %#v, want /dev/da0s2d", got)
+	}
+	glob := func(pattern string) ([]string, error) {
+		switch pattern {
+		case "/dev/vn0s*":
+			return []string{"/dev/vn0s1"}, nil
+		case "/dev/da0s*":
+			return []string{"/dev/da0s1"}, nil
+		default:
+			t.Fatalf("unexpected glob %q", pattern)
+			return nil, nil
+		}
+	}
+
+	if disks := currentDisks("dragonfly", run, osHost{}); disks["vn0"] == nil {
+		t.Fatalf("currentDisks(dragonfly) = %#v, want attached vn0 kept", disks)
+	}
+	if parts := currentDragonFlyPartitions(run, glob); parts["/dev/vn0s1d"] == nil {
+		t.Fatalf("currentDragonFlyPartitions() = %#v, want /dev/vn0s1d", parts)
 	}
 }
 
@@ -1390,21 +1468,16 @@ func TestCurrentPartitionsDispatchesBySessionPlatform(t *testing.T) {
 				platform: "dragonfly",
 				runOutputs: map[string]string{
 					fakeRunKey("sysctl", "-n", "kern.disks"): "da0\n",
-					fakeRunKey("disklabel", "da0"):           "disklabel: Operation not supported by device\n",
 					fakeRunKey("disklabel", "da0s1"):         dragonFlyDisklabelDA0S1,
-					fakeRunKey("disklabel", "da0s2"):         "disklabel: Operation not supported by device\n",
-					fakeRunKey("disklabel", "da0s3"):         "disklabel: Operation not supported by device\n",
-					fakeRunKey("disklabel", "da0s4"):         "disklabel: Operation not supported by device\n",
+				},
+				globs: map[string][]string{
+					"/dev/da0s*": {"/dev/da0s1", "/dev/da0s1a", "/dev/da0s1b", "/dev/da0s1d"},
 				},
 			},
 			wantKey: "/dev/da0s1a",
 			wantCalls: []fakeHostRunCall{
 				{name: "sysctl", args: []string{"-n", "kern.disks"}},
-				{name: "disklabel", args: []string{"da0"}},
 				{name: "disklabel", args: []string{"da0s1"}},
-				{name: "disklabel", args: []string{"da0s2"}},
-				{name: "disklabel", args: []string{"da0s3"}},
-				{name: "disklabel", args: []string{"da0s4"}},
 			},
 		},
 	}

@@ -23,6 +23,12 @@
 
 ### Fixed
 
+- The DragonFly `disks`/`partitions` probe no longer reports empty memory-disk
+  (`md`) phantoms and no longer fans out `disklabel` across non-existent slice
+  targets. It skips `md`/`cd` pseudo-devices and enumerates only the slice nodes
+  that actually exist (`/dev/<dev>s<N>`), so on a host with many memory disks
+  discovery drops from hundreds of `disklabel` spawns to a handful. Real disks,
+  their partitions, and attached file-backed (`vn`) disks are unchanged.
 - Linux DHCP lease discovery now matches explicit dhclient interface names
   exactly, so a lease for a similarly named interface such as `eth0-backup`
   is not attributed to `eth0`, and parses lease blocks without being confused
