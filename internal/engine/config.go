@@ -10,6 +10,11 @@ import (
 )
 
 var blocklistPattern = regexp.MustCompile(`(?is)blocklist\s*[:=]\s*\[(.*?)\]`)
+
+// disablePattern matches the facts-native `disable` key, the native spelling of
+// the Facter-compatible `blocklist`. It is anchored on a key boundary so it does
+// not match `disable` embedded in another word or value.
+var disablePattern = regexp.MustCompile(`(?is)(?:^|[\s{,])disable\s*[:=]\s*\[(.*?)\]`)
 var externalDirPattern = regexp.MustCompile(`(?is)(?:^|[\s{,])external-dir\s*[:=]\s*(\[(.*?)\]|"([^"]*)"|'([^']*)'|([^,\n\r}]+))`)
 var debugPattern = regexp.MustCompile(`(?is)(?:^|[\s{,])debug\s*[:=]\s*(true|false)`)
 var verbosePattern = regexp.MustCompile(`(?is)(?:^|[\s{,])verbose\s*[:=]\s*(true|false)`)
@@ -32,7 +37,7 @@ var DefaultConfigPath = platformDefaultConfigPath
 
 // Config contains the supported Facter config values loaded from a config file.
 type Config struct {
-	Blocklist          []string
+	Disabled           []string
 	ExternalDirs       []string
 	Debug              bool
 	Verbose            bool
@@ -127,8 +132,14 @@ func readConfigOptionsFile(path string, log *slog.Logger) (Config, error) {
 	}
 	cliSection := configSection(content, "cli")
 	sequential, sequentialSet := configBoolValue(content, sequentialPattern)
+	// The facts-native `disable` key supersedes the Facter-compatible
+	// `blocklist` when present; otherwise `blocklist` is read unchanged.
+	disabled := lowerConfigValues(configList(content, blocklistPattern))
+	if disable := lowerConfigValues(configList(content, disablePattern)); disable != nil {
+		disabled = disable
+	}
 	return Config{
-		Blocklist:          lowerConfigValues(configList(content, blocklistPattern)),
+		Disabled:           disabled,
 		ExternalDirs:       configList(content, externalDirPattern),
 		Debug:              configBool(cliSection, debugPattern),
 		Verbose:            configBool(cliSection, verbosePattern),

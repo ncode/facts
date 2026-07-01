@@ -9,7 +9,7 @@ import (
 func BenchmarkCoreFacts(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
-		_ = CoreFacts(testSession)
+		_ = CoreFacts(testSession, nil)
 	}
 }
 

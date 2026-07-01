@@ -267,8 +267,11 @@ fact-groups : {
 	if got["site_owner"] != "platform" {
 		t.Fatalf("stdout = %q, want site_owner preserved", stdout.String())
 	}
-	if stderr.Len() != 0 {
-		t.Fatalf("stderr = %q, want empty", stderr.String())
+	// An explicitly-queried fact disabled by an ambient (config) source emits
+	// the one-line ADR-0015 diagnostic so a silently-empty result is
+	// diagnosable; stdout stays empty for the disabled fact.
+	if got, want := stderr.String(), "WARN Facts - fact \"site_role\" is disabled by the configuration file\n"; got != want {
+		t.Fatalf("stderr = %q, want config-disable diagnostic %q", got, want)
 	}
 }
 
@@ -1242,7 +1245,7 @@ func runtimeOSName() string {
 	// resolved fact, so the assertion matches whatever the binary actually
 	// prints rather than the lowercase GOOS (which only matched on BSDs by
 	// accident when the host's hostname happened to equal the OS name).
-	collection := engine.Collection(engine.CoreFacts(engine.NewSession()))
+	collection := engine.Collection(engine.CoreFacts(engine.NewSession(), nil))
 	if osFact, ok := collection["os"].(map[string]any); ok {
 		if name, ok := osFact["name"].(string); ok && name != "" {
 			return name
@@ -1583,7 +1586,7 @@ func TestRun_listBlockGroupsPrintsFactGroups(t *testing.T) {
 	if err := Run(&stdout, &stderr, []string{"--list-block-groups"}); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"networking", "- hostname", "operating system", "- os"} {
+	for _, want := range []string{"networking", "- networking", "operating system", "- os"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("stdout = %q, want substring %q", stdout.String(), want)
 		}
@@ -1599,7 +1602,7 @@ func TestRun_listCacheGroupsPrintsFactGroups(t *testing.T) {
 	if err := Run(&stdout, &stderr, []string{"--list-cache-groups"}); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"networking", "- hostname", "processor", "- processors"} {
+	for _, want := range []string{"networking", "- networking", "processor", "- processors"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("stdout = %q, want substring %q", stdout.String(), want)
 		}

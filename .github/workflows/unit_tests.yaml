@@ -109,7 +109,7 @@ jobs:
             export PATH=/usr/local/go/bin:$PATH
             export GOFLAGS=-buildvcs=false
             go version
-            go test . ./internal/engine ./internal/app ./tests/acceptance
+            go test -timeout 25m . ./internal/engine ./internal/app ./tests/acceptance
             go build -o /tmp/facts ./cmd/facts
             sh tools/freebsd-release-gate.sh /tmp/facts
 
@@ -140,7 +140,7 @@ jobs:
             export PATH=/usr/local/go/bin:$PATH
             export GOFLAGS=-buildvcs=false
             go version
-            go test . ./internal/engine ./internal/app ./tests/acceptance
+            go test -timeout 25m . ./internal/engine ./internal/app ./tests/acceptance
             go build -o /tmp/facts ./cmd/facts
             sh tools/openbsd-release-gate.sh /tmp/facts
 
@@ -172,7 +172,7 @@ jobs:
             export PATH=/usr/local/go/bin:/usr/bin:/bin:/usr/sbin:/sbin
             export GOFLAGS=-buildvcs=false
             go version
-            go test . ./internal/engine ./internal/app ./tests/acceptance
+            go test -timeout 25m . ./internal/engine ./internal/app ./tests/acceptance
             go build -o /tmp/facts ./cmd/facts
             sh tools/netbsd-release-gate.sh /tmp/facts
 
@@ -204,7 +204,7 @@ jobs:
             export PATH=/usr/local/go/bin:$PATH
             export GOFLAGS=-buildvcs=false
             go version
-            go test . ./internal/engine ./internal/app ./tests/acceptance
+            go test -timeout 25m . ./internal/engine ./internal/app ./tests/acceptance
             go build -o /tmp/facts ./cmd/facts
             sh tools/dragonfly-release-gate.sh /tmp/facts
 
@@ -241,6 +241,6 @@ jobs:
             export PATH=/usr/local/go/bin:$PATH
             export GOFLAGS=-buildvcs=false
             go version
-            go test . ./internal/engine ./internal/app ./tests/acceptance
+            go test -timeout 25m . ./internal/engine ./internal/app ./tests/acceptance
             go build -o /tmp/facts ./cmd/facts
             sh tools/illumos-release-gate.sh /tmp/facts

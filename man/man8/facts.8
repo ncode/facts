@@ -48,6 +48,12 @@ The location of the config file\.
 Enable debug output\.
 .
 .TP
+\fB\-\-disable\fR:
+.
+.IP
+Disable facts or fact groups (comma\-separated, repeatable)\. Standalone resolvers are skipped; others are pruned from output, even when queried\. Unions with the \fBFACTS_DISABLE\fR environment variable and the config file disable list; \fB\-\-no\-block\fR clears the whole set\.
+.
+.TP
 \fB\-\-external\-dir\fR:
 .
 .IP

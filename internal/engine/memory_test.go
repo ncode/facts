@@ -93,7 +93,7 @@ func TestCoreFacts_includeRealSystemMemoryTotal(t *testing.T) {
 		t.Skipf("memory total resolution is not implemented on %s", runtime.GOOS)
 	}
 
-	collection := Collection(CoreFacts(testSession))
+	collection := Collection(CoreFacts(testSession, nil))
 	memory, ok := collection["memory"].(map[string]any)
 	if !ok {
 		t.Fatalf("memory fact = %#v, want map", collection["memory"])
@@ -116,7 +116,7 @@ func TestCoreFacts_includeMemorySystemTotal(t *testing.T) {
 		t.Skipf("memory total resolution is not implemented on %s", runtime.GOOS)
 	}
 
-	collection := Collection(CoreFacts(testSession))
+	collection := Collection(CoreFacts(testSession, nil))
 	memory, ok := collection["memory"].(map[string]any)
 	if !ok {
 		t.Fatalf("memory fact = %#v, want map", collection["memory"])
@@ -132,7 +132,7 @@ func TestCoreFacts_includeMemorySystemTotal(t *testing.T) {
 }
 
 func TestCoreFacts_includeMemoryUsageAndSwap(t *testing.T) {
-	collection := Collection(CoreFacts(testSession))
+	collection := Collection(CoreFacts(testSession, nil))
 	memory, ok := collection["memory"].(map[string]any)
 	if !ok {
 		t.Fatalf("memory fact = %#v, want map", collection["memory"])

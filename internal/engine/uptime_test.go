@@ -9,7 +9,7 @@ import (
 )
 
 func TestCoreFacts_includeSystemUptime(t *testing.T) {
-	collection := Collection(CoreFacts(testSession))
+	collection := Collection(CoreFacts(testSession, nil))
 	systemUptime, ok := collection["system_uptime"].(map[string]any)
 	if !ok {
 		t.Fatalf("system_uptime fact = %#v, want map", collection["system_uptime"])
@@ -490,7 +490,7 @@ func TestCoreFacts_includeLoadAverages(t *testing.T) {
 		t.Skipf("load averages resolution is not implemented on %s", runtime.GOOS)
 	}
 
-	collection := Collection(CoreFacts(testSession))
+	collection := Collection(CoreFacts(testSession, nil))
 	loadAverages, ok := collection["load_averages"].(map[string]any)
 	if !ok {
 		t.Fatalf("load_averages fact = %#v, want map", collection["load_averages"])

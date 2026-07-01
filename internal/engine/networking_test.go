@@ -2142,7 +2142,7 @@ func TestLinuxDHCPServerFallsBackToDHCPCDCommand(t *testing.T) {
 }
 
 func TestCoreFacts_networkingIncludesIP6(t *testing.T) {
-	collection := Collection(CoreFacts(testSession))
+	collection := Collection(CoreFacts(testSession, nil))
 	networking, ok := collection["networking"].(map[string]any)
 	if !ok {
 		t.Fatalf("networking fact = %#v, want map", collection["networking"])
@@ -2154,7 +2154,7 @@ func TestCoreFacts_networkingIncludesIP6(t *testing.T) {
 }
 
 func TestCoreFacts_networkingIncludesPrimaryIPv4Binding(t *testing.T) {
-	collection := Collection(CoreFacts(testSession))
+	collection := Collection(CoreFacts(testSession, nil))
 	networking, ok := collection["networking"].(map[string]any)
 	if !ok {
 		t.Fatalf("networking fact = %#v, want map", collection["networking"])
@@ -2169,7 +2169,7 @@ func TestCoreFacts_networkingIncludesPrimaryIPv4Binding(t *testing.T) {
 }
 
 func TestCoreFacts_networkingIncludesPrimaryIPv6Binding(t *testing.T) {
-	collection := Collection(CoreFacts(testSession))
+	collection := Collection(CoreFacts(testSession, nil))
 	networking, ok := collection["networking"].(map[string]any)
 	if !ok {
 		t.Fatalf("networking fact = %#v, want map", collection["networking"])
@@ -2479,7 +2479,7 @@ func TestInterfaceBindingIPv6NetmaskMatchesRubyBuildBinding(t *testing.T) {
 }
 
 func TestCoreFacts_networkingIncludesPrimaryMTU(t *testing.T) {
-	collection := Collection(CoreFacts(testSession))
+	collection := Collection(CoreFacts(testSession, nil))
 	networking, ok := collection["networking"].(map[string]any)
 	if !ok {
 		t.Fatalf("networking fact = %#v, want map", collection["networking"])
@@ -2502,7 +2502,7 @@ func TestCoreFacts_networkingIncludesPrimaryMTU(t *testing.T) {
 }
 
 func TestCoreFacts_includeNetworkingInterfaces(t *testing.T) {
-	collection := Collection(CoreFacts(testSession))
+	collection := Collection(CoreFacts(testSession, nil))
 	networking, ok := collection["networking"].(map[string]any)
 	if !ok {
 		t.Fatalf("networking fact = %#v, want map", collection["networking"])

@@ -186,7 +186,7 @@ func TestCoreFacts_includeMacOSReleaseKernelHardwareAndIdentity(t *testing.T) {
 	if runtime.GOOS != "darwin" {
 		t.Skipf("macOS host fact integration runs only on darwin, not %s", runtime.GOOS)
 	}
-	collection := Collection(CoreFacts(NewSession()))
+	collection := Collection(CoreFacts(NewSession(), nil))
 	osFact, ok := collection["os"].(map[string]any)
 	if !ok {
 		t.Fatalf("os = %#v, want map", collection["os"])

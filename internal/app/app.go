@@ -248,6 +248,11 @@ func runQuery(stdout, stderr io.Writer, args []string) error {
 		externalDirs = append(externalDirs, value)
 		return nil
 	})
+	var disableEntries []string
+	flags.Func("disable", "disable facts or fact groups (comma-separated, repeatable)", func(value string) error {
+		disableEntries = append(disableEntries, engine.SplitDisableList(value)...)
+		return nil
+	})
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -284,13 +289,21 @@ func runQuery(stdout, stderr io.Writer, args []string) error {
 	if !*noExternalFacts {
 		discoveryExternalDirs = effectiveExternalDirs(discoveryExternalDirs)
 	}
-	blockedFactsForFastPath := map[string]bool{}
-	var blockedFacts map[string]bool
+	disabledFactsForFastPath := map[string]bool{}
+	var disabledFacts map[string]bool
 	if *noBlock {
-		blockedFacts = map[string]bool{}
+		// --no-block is the master override: an empty non-nil map clears the
+		// whole disabled set for this run, including --disable and FACTS_DISABLE.
+		disabledFacts = map[string]bool{}
 	}
 	if !*noBlock {
-		blockedFactsForFastPath = engine.BlocklistedFactsForFiltering(configOptions.Blocklist, configOptions.FactGroups)
+		// The fast path must honor every disable source so a disabled
+		// facterversion query falls through to normal resolution (and
+		// disable-beats-query), mirroring the engine's union.
+		fastPathEntries := append([]string(nil), configOptions.Disabled...)
+		fastPathEntries = append(fastPathEntries, disableEntries...)
+		fastPathEntries = append(fastPathEntries, engine.EnvironmentDisabledFacts(os.Environ())...)
+		disabledFactsForFastPath = engine.DisabledFactsForFiltering(fastPathEntries, configOptions.FactGroups)
 	}
 	mergeDottedFacts := configOptions.ForceDotResolution || *forceDotResolution
 	logLevel := firstNonEmpty(flags.Lookup("log-level").Value.String(), flags.Lookup("l").Value.String(), configOptions.LogLevel)
@@ -311,7 +324,7 @@ func runQuery(stdout, stderr io.Writer, args []string) error {
 		writeInfo(stderr, "executed with command line: "+strings.Join(args, " "), colorDiagnostics)
 		writeInfo(stderr, "resolving facts", colorDiagnostics)
 	}
-	if canUseVersionQueryFastPath(flags.Args(), discoveryExternalDirs, blockedFactsForFastPath, *noExternalFacts, *timing || *timingShort) {
+	if canUseVersionQueryFastPath(flags.Args(), discoveryExternalDirs, disabledFactsForFastPath, *noExternalFacts, *timing || *timingShort) {
 		return writeVersionQuery(stdout, *jsonOutput || *jsonOutputShort, *yamlOutput || *yamlOutputShort, *hoconOutput)
 	}
 	resolutionStart := time.Now()
@@ -325,7 +338,8 @@ func runQuery(stdout, stderr io.Writer, args []string) error {
 		ExternalDirs:           cliExternalDirs,
 		UseCache:               !*noCache,
 		NoExternalFacts:        *noExternalFacts,
-		BlockedFacts:           blockedFacts,
+		DisabledFacts:          disabledFacts,
+		ExtraDisabled:          disableEntries,
 		DefaultExternalDirsSet: true,
 		DefaultExternalDirs:    defaultExternalFactDirs(),
 		IncludeTypedDotted:     mergeDottedFacts,
@@ -470,8 +484,8 @@ func resolvedLogOptionsConflict(debug, verbose bool, logLevel string) bool {
 	return (debug || verbose) && logLevel != ""
 }
 
-func canUseVersionQueryFastPath(queries, externalDirs []string, blockedFacts map[string]bool, noExternalFacts, timing bool) bool {
-	if len(queries) != 1 || queries[0] != "facterversion" || timing || blockedFacts["facterversion"] {
+func canUseVersionQueryFastPath(queries, externalDirs []string, disabledFacts map[string]bool, noExternalFacts, timing bool) bool {
+	if len(queries) != 1 || queries[0] != "facterversion" || timing || disabledFacts["facterversion"] {
 		return false
 	}
 	if !noExternalFacts && len(externalDirs) > 0 {

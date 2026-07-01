@@ -1068,7 +1068,7 @@ func TestCoreFacts_includeFilesystems(t *testing.T) {
 		t.Skipf("filesystems resolution is not implemented on %s", runtime.GOOS)
 	}
 
-	collection := Collection(CoreFacts(testSession))
+	collection := Collection(CoreFacts(testSession, nil))
 	got, ok := collection["filesystems"].([]string)
 	if !ok || len(got) == 0 {
 		t.Fatalf("filesystems = %#v, want non-empty array of filesystem names", collection["filesystems"])
@@ -1561,7 +1561,7 @@ func TestCoreFacts_includeRootMountpoint(t *testing.T) {
 		t.Skipf("mountpoints resolution is not implemented on %s", runtime.GOOS)
 	}
 
-	collection := Collection(CoreFacts(testSession))
+	collection := Collection(CoreFacts(testSession, nil))
 	mountpoints, ok := collection["mountpoints"].(map[string]any)
 	if !ok {
 		t.Fatalf("mountpoints fact = %#v, want map", collection["mountpoints"])

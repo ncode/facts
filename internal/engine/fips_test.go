@@ -10,7 +10,7 @@ import (
 )
 
 func TestCoreFacts_fipsEnabledOnlyOnLinuxAndWindows(t *testing.T) {
-	collection := Collection(CoreFacts(testSession))
+	collection := Collection(CoreFacts(testSession, nil))
 
 	value, ok := collection["fips_enabled"]
 	switch runtime.GOOS {

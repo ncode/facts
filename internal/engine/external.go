@@ -29,6 +29,12 @@ var ErrExternalFactTooLarge = errors.New("external fact exceeds size limit")
 
 const externalFactResolutionEnv = "FACTER_EXTERNAL_FACTS_RUNNING"
 
+// reservedDisableControlName is the resolved external-fact name reserved for the
+// disabled-set control variable. Any FACTS_*/FACTER_* variable resolving to this
+// name (FACTS_DISABLE, FACTSDISABLE, FACTER_DISABLE, FACTERDISABLE) feeds the
+// disabled set instead of becoming an external fact named "disable".
+const reservedDisableControlName = "disable"
+
 var errExternalFactOpen = errors.New("open external fact")
 var externalFactCommandTimeout = 30 * time.Second
 var externalFactMaxBytes = 1 << 20
@@ -224,6 +230,11 @@ func loadExternalEnvFacts(env []string) ([]ResolvedFact, error) {
 			continue
 		}
 		factName = strings.ToLower(factName)
+		if factName == reservedDisableControlName {
+			// FACTS_DISABLE / FACTER_DISABLE are reserved control keys that feed
+			// the disabled set; they never resolve as external facts.
+			continue
+		}
 		if err := validateExternalString(factName); err != nil {
 			return nil, fmt.Errorf("external fact name %q: %w", factName, err)
 		}
@@ -252,6 +263,73 @@ func loadExternalEnvFacts(env []string) ([]ResolvedFact, error) {
 		facts = append(facts, ResolvedFact{Name: key, Value: values[key], Type: "external"})
 	}
 	return facts, nil
+}
+
+// environmentDisabledFacts extracts the disabled-set entries from the reserved
+// FACTS_DISABLE / FACTER_DISABLE control variables. The facts-native FACTS_*
+// value wins over the facter-compatible FACTER_* value when both are set.
+func environmentDisabledFacts(env []string) []string {
+	var nativeValue, compatValue string
+	var haveNative, haveCompat bool
+	for _, entry := range env {
+		name, value, ok := strings.Cut(entry, "=")
+		if !ok {
+			continue
+		}
+		factName, native, ok := environmentFactName(name)
+		if !ok || strings.ToLower(factName) != reservedDisableControlName {
+			continue
+		}
+		if native {
+			nativeValue, haveNative = value, true
+		} else {
+			compatValue, haveCompat = value, true
+		}
+	}
+	// Native-wins is presence-based, not value-based: an empty FACTS_DISABLE="" still
+	// wins over a non-empty FACTER_DISABLE (it disables nothing), matching how the
+	// FACTS_* external-fact value shadows FACTER_* regardless of content.
+	switch {
+	case haveNative:
+		return splitDisableList(nativeValue)
+	case haveCompat:
+		return splitDisableList(compatValue)
+	default:
+		return nil
+	}
+}
+
+// SplitDisableList splits a comma-separated --disable value into trimmed,
+// lowercased entries, dropping empties, with the same semantics as the
+// FACTS_DISABLE environment variable. It is the exported seam internal/app uses
+// to feed EngineConfig.ExtraDisabled.
+func SplitDisableList(value string) []string {
+	return splitDisableList(value)
+}
+
+// EnvironmentDisabledFacts extracts the disabled-set entries from the reserved
+// FACTS_DISABLE / FACTER_DISABLE control variables in env (native wins). It is
+// the exported seam internal/app uses to honor ambient disables in the
+// facterversion fast path.
+func EnvironmentDisabledFacts(env []string) []string {
+	return environmentDisabledFacts(env)
+}
+
+// splitDisableList splits a comma-separated disable list into trimmed,
+// lowercased entries, dropping empties. It is shared by the FACTS_DISABLE
+// environment variable and the --disable CLI option.
+func splitDisableList(value string) []string {
+	parts := strings.Split(value, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part = strings.ToLower(strings.TrimSpace(part)); part != "" {
+			out = append(out, part)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // environmentFactName maps an environment variable name to an external fact

@@ -11,7 +11,7 @@ import (
 )
 
 func TestCoreFacts_includeIntegrationRootFactGroups(t *testing.T) {
-	collection := Collection(CoreFacts(testSession))
+	collection := Collection(CoreFacts(testSession, nil))
 
 	for _, name := range []string{"memory", "networking", "os", "path", "processors"} {
 		if _, ok := collection[name]; !ok {
@@ -20,10 +20,26 @@ func TestCoreFacts_includeIntegrationRootFactGroups(t *testing.T) {
 	}
 }
 
+func TestCoreFacts_rebuildsWhenDisabledSetChangesOnSameSession(t *testing.T) {
+	s := NewSession()
+
+	gated := Collection(CoreFacts(s, map[string]bool{"processors": true}))
+	if _, ok := gated["processors"]; ok {
+		t.Fatalf("CoreFacts(disabled=processors) still emitted processors; resolver was not gated: %#v", gated)
+	}
+
+	// A second call on the SAME session with a different disabled set must
+	// rebuild from the new set rather than return the first call's stale gating.
+	full := Collection(CoreFacts(s, nil))
+	if _, ok := full["processors"]; !ok {
+		t.Fatalf("CoreFacts(s, nil) after a gated call is missing processors; the memo ignored the changed disabled set: %#v", full)
+	}
+}
+
 func TestCoreFacts_includePathFromEnvironment(t *testing.T) {
 	entries := []string{"/usr/bin", "/etc", "/usr/sbin", "/usr/ucb", "/usr/bin/X11", "/sbin", "/usr/java6/jre/bin", "/usr/java6/bin"}
 	t.Setenv("PATH", strings.Join(entries, string(os.PathListSeparator)))
-	collection := Collection(CoreFacts(NewSession()))
+	collection := Collection(CoreFacts(NewSession(), nil))
 
 	got, ok := collection["path"].([]string)
 	if !ok {
@@ -95,7 +111,7 @@ func TestRootedPathAndIsSymlinkHelpers(t *testing.T) {
 }
 
 func TestCoreFacts_includeFacterVersion(t *testing.T) {
-	collection := Collection(CoreFacts(testSession))
+	collection := Collection(CoreFacts(testSession, nil))
 
 	if got := collection["facterversion"]; got != Version {
 		t.Fatalf("facterversion = %#v, want %#v", got, Version)
@@ -112,7 +128,7 @@ func TestCoreFacts_omitsRubyAndPuppetPackageVersionFacts(t *testing.T) {
 	s := NewSessionContext(context.Background())
 	s.host = host
 
-	collection := Collection(CoreFacts(s))
+	collection := Collection(CoreFacts(s, nil))
 	for _, name := range []string{"ruby", "aio_agent_version"} {
 		if got, ok := collection[name]; ok {
 			t.Fatalf("CoreFacts() %s = %#v, want absent", name, got)
@@ -178,14 +194,14 @@ func assertNoLegacyAliases(t *testing.T, collection map[string]any) {
 }
 
 func TestCoreFacts_excludeAllLegacyAliases(t *testing.T) {
-	assertNoLegacyAliases(t, Collection(CoreFacts(testSession)))
+	assertNoLegacyAliases(t, Collection(CoreFacts(testSession, nil)))
 }
 
 // Sweep: a default host discovery emits no top-level fact whose value is an
 // empty string or empty map — unresolvable facts are absent, never
 // placeholders (openspec change omit-not-applicable-facts).
 func TestCoreFacts_defaultDiscoveryHasNoEmptyTopLevelFacts(t *testing.T) {
-	collection := Collection(CoreFacts(testSession))
+	collection := Collection(CoreFacts(testSession, nil))
 
 	for name, value := range collection {
 		switch v := value.(type) {
@@ -204,7 +220,7 @@ func TestCoreFacts_defaultDiscoveryHasNoEmptyTopLevelFacts(t *testing.T) {
 // Platform-inapplicable facts are absent from the host collection, matching
 // the platforms where Ruby Facter resolves them.
 func TestCoreFacts_omitPlatformInapplicableFacts(t *testing.T) {
-	collection := Collection(CoreFacts(testSession))
+	collection := Collection(CoreFacts(testSession, nil))
 
 	if runtime.GOOS != "linux" && runtime.GOOS != "windows" {
 		if value, ok := collection["fips_enabled"]; ok {

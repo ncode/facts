@@ -37,6 +37,10 @@ A flat, pre-structured fact name (e.g. `operatingsystem`) from Ruby Facter's dep
 A fact whose preconditions don't hold on this host (e.g. EC2 metadata off-cloud). It is simply absent from the canonical tree — never an error. Only facts that were supposed to resolve and didn't count as failures.
 _Avoid_: failed fact, missing fact (that means "no such fact name")
 
+**Disabled fact**:
+A fact removed from discovery by the disabled set — the union of the CLI `--disable`, the `FACTS_DISABLE` environment variable, and the `facts.conf` `disable` key (the Facter `blocklist` key is accepted as its compatibility alias). Every fact is enabled by default; there is no opt-in. A disabled fact backed by its own resolver is not resolved at all (resolution-gating, e.g. `packages`); a fact that shares a multi-output resolver, or a disabled sub-fact, is pruned after resolution. `--no-block` re-enables everything for a run.
+_Avoid_: blocked fact (use only for the Facter-compatible `blocklist` config spelling), hidden fact (disabling a standalone-resolver fact skips resolution, not just display)
+
 **Supported fact**:
 A fact documented in the schema as part of Facts' supported output contract for one or more supported release targets.
 _Avoid_: available fact (too host-specific), implemented fact (too code-centric)
@@ -102,6 +106,20 @@ _Avoid_: fact hash, output map
 **Typed view**:
 A decode of part of the canonical tree into a caller-supplied Go type, failing loudly on shape mismatch. A view never resolves facts independently of the canonical tree.
 _Avoid_: typed fact, fact struct
+
+### Packages
+
+**Package**:
+A unit of installed software tracked by a package source (a `dpkg` entry, an `rpm` header, a macOS installer receipt, a `nix` profile entry). The `packages` fact reports packages, not arbitrary installable artifacts; an installed `.app` bundle is reported too, but as its own `apps` source, never folded into database packages.
+_Avoid_: application, artifact, software (too broad — an unpackaged binary is not a package)
+
+**Package source**:
+An authoritative inventory of installed software on the host — usually an installation database (the rpm database, the dpkg database, the FreeBSD pkg database, macOS installer receipts, the nix store), or a structured filesystem inventory where the OS keeps no database (macOS `.app` bundles → `apps`). A host has several coexisting sources, so the `packages` fact namespaces by source — `packages.<source>` — and never merges records across sources. Frontends that write to the same database are the same source (apt/aptitude → `dpkg`; dnf/yum/zypper → `rpm`), so the source key is the database, never the frontend or the file format.
+_Avoid_: package manager (ambiguous — frontend vs database), package format (`deb`/`rpm` name the artifact, not the source)
+
+**Package record**:
+One installed package's entry in a source's list — a map identified by its fields (`name` and `version` always; plus per-source identity fields such as `architecture`, `type`/`tap`, `store_path`, `bundle_id`/`path`, or the Windows uninstall subkey/`ProductCode`), never by position and never by a unique map key. `version` is the package manager's verbatim native string. The same software appearing in two sources (a macOS `.pkg` receipt and its `.app` bundle) is two records, not one.
+_Avoid_: package entry, package map (records live in a list, not a name-keyed map)
 
 ## Example dialogue
 
