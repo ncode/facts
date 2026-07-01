@@ -92,6 +92,8 @@ Errors are honest: missing facts are `ErrFactNotFound`, a registered fact that l
 
 The shipped binary is `facts`, and it keeps Ruby Facter's output contract — formatting, exit statuses, stderr diagnostics (with the program token rebranded to `Facts`), `facter.conf` semantics. Existing facter inputs keep working as the compat tier: `facter.conf` default paths, `FACTER_*` environment facts, and the puppetlabs fact directories are all still read, with the facts-native names winning when both are present.
 
+Every fact is on by default. Disable any fact or fact group with `--disable`, the `FACTS_DISABLE` environment variable, or the `facts.conf` `disable` key (the Facter `blocklist` key stays as its compatibility alias). Disabling is resolution-gated — a disabled standalone resolver is skipped, not just hidden — and `--no-block` clears every disable.
+
 
 ```console
 $ brew install ncode/tap/facts
@@ -107,6 +109,9 @@ $ facts --json os.family kernel.version.full
 
 $ facts --external-dir ./facts.d site_role
 web
+
+$ facts --disable networking os.name       # disable facts or groups; also FACTS_DISABLE, facts.conf 'disable'
+Darwin
 ```
 
 ```sh

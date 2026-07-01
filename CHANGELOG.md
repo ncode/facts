@@ -4,6 +4,15 @@
 
 ### Added
 
+- Fact disabling is now a first-class, facts-native control. Disable any fact
+  or fact group with `--disable a,b`, the `FACTS_DISABLE=a,b` environment
+  variable, or the `facts.conf` `disable` key; the Facter `blocklist` key keeps
+  working as its compatibility alias, and `--no-block` clears every disable
+  source. Disabling is resolution-gated — a disabled standalone-resolver fact
+  (`networking`, `processors`, `memory`, `ssh`, `timezone`, `fips`, `augeas`,
+  `xen`) is not resolved at all, not merely filtered from output; multi-output
+  categories resolve then prune. An explicitly queried fact disabled by the
+  environment or config emits a one-line stderr diagnostic.
 - Release artifacts and cross-compile CI now include `arm` and `arm64` for
   FreeBSD, OpenBSD, and NetBSD.
 - Added native-gated Plan 9 (`plan9/amd64`) fact support for canonical
