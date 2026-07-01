@@ -171,7 +171,7 @@ func currentPartitions(s *Session) map[string]any {
 	case "freebsd":
 		return parseFreeBSDGeomPartitions(s.commandOutput("sysctl", "-n", "kern.geom.confxml"))
 	case "dragonfly":
-		return currentDragonFlyPartitions(s.commandOutput)
+		return currentDragonFlyPartitions(s.commandOutput, s.glob)
 	case "openbsd":
 		return currentOpenBSDPartitions(s.commandOutput)
 	case "netbsd":
@@ -474,6 +474,9 @@ func currentDragonFlyDisks(run commandRunner) map[string]any {
 	}
 	disks := map[string]any{}
 	for _, device := range strings.Fields(run("sysctl", "-n", "kern.disks")) {
+		if dragonFlyPseudoDisk(device) {
+			continue
+		}
 		disk := parseDragonFlyDiskInfo(run("diskinfo", "/dev/"+device))
 		if len(disk) > 0 {
 			disks[device] = disk
@@ -661,13 +664,16 @@ func parseBSDDisklabelInt(input, key string) int {
 	return 0
 }
 
-func currentDragonFlyPartitions(run commandRunner) map[string]any {
-	if run == nil {
+func currentDragonFlyPartitions(run commandRunner, glob pathGlobber) map[string]any {
+	if run == nil || glob == nil {
 		return nil
 	}
 	partitions := map[string]any{}
 	for _, device := range strings.Fields(run("sysctl", "-n", "kern.disks")) {
-		for _, target := range dragonFlyDisklabelTargets(device) {
+		if dragonFlyPseudoDisk(device) {
+			continue
+		}
+		for _, target := range dragonFlyDisklabelTargets(device, glob) {
 			for name, partition := range parseDragonFlyDisklabelPartitions(target, run("disklabel", target)) {
 				partitions[name] = partition
 			}
@@ -679,8 +685,50 @@ func currentDragonFlyPartitions(run commandRunner) map[string]any {
 	return partitions
 }
 
-func dragonFlyDisklabelTargets(device string) []string {
-	return []string{device, device + "s1", device + "s2", device + "s3", device + "s4"}
+// dragonFlyDisklabelTargets returns the slice nodes that actually exist for a
+// device (glob /dev/<device>s<N>). The DragonFly disklabel lives on the slice,
+// not the whole disk, so the whole-disk target is deliberately omitted.
+func dragonFlyDisklabelTargets(device string, glob pathGlobber) []string {
+	matches, err := glob("/dev/" + device + "s*")
+	if err != nil {
+		return nil
+	}
+	var targets []string
+	for _, match := range matches {
+		name := strings.TrimPrefix(match, "/dev/")
+		if isDragonFlySlice(device, name) {
+			targets = append(targets, name)
+		}
+	}
+	return targets
+}
+
+// isDragonFlySlice reports whether name is a whole-slice node for device
+// (<device>s<digits>), excluding partition-within-slice nodes like <device>s1a.
+func isDragonFlySlice(device, name string) bool {
+	rest, ok := strings.CutPrefix(name, device+"s")
+	if !ok || rest == "" {
+		return false
+	}
+	for _, r := range rest {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// dragonFlyPseudoDisk reports whether a kern.disks device is a memory-disk or
+// optical pseudo-device (driver class md or cd) rather than real host storage.
+// Unattached vn is not listed here: the size gate already drops it from disks
+// and it has no slice nodes, so the glob yields no disklabel spawns for it.
+func dragonFlyPseudoDisk(name string) bool {
+	switch strings.TrimRight(name, "0123456789") {
+	case "md", "cd":
+		return true
+	default:
+		return false
+	}
 }
 
 func parseDragonFlyDisklabelPartitions(device, input string) map[string]any {
