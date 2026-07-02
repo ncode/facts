@@ -41,7 +41,13 @@ func TestBuildCoreFacts_resolutionGatesSingleOutputCategories(t *testing.T) {
 			// assert gating for the ones that do produce output by default.
 			continue
 		}
-		gated := buildCoreFacts(NewSession(), map[string]bool{fact: true})
+		// Each gated build also disables packages: its probe is the most
+		// expensive (plutil over every .app; PowerShell spawns on Windows
+		// runners), and gates are independent, so disabling it alongside does
+		// not affect the fact under test — it just keeps ~9 full package
+		// probes out of every CI run. The packages iteration itself still
+		// asserts its own gating.
+		gated := buildCoreFacts(NewSession(), map[string]bool{fact: true, "packages": true})
 		if hasRoot(gated, fact) {
 			t.Fatalf("buildCoreFacts(disabled=%q) still emitted %q root; resolver was not gated", fact, fact)
 		}

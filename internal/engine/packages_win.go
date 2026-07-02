@@ -4,24 +4,37 @@ import "strings"
 
 // registryPackagesScript queries both HKLM uninstall hives in a single
 // PowerShell invocation: the native 64-bit view and the 32-bit WOW6432Node
-// redirect. Each entry that carries a DisplayName is emitted as one
-// pipe-delimited line. The architecture marker leads and the free-text
-// DisplayName trails so a stray '|' inside a product name cannot shift the
-// fixed columns. Columns: arch|PSChildName|DisplayVersion|SystemComponent|DisplayName.
-const registryPackagesScript = `$ErrorActionPreference='SilentlyContinue';` +
-	`Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*'|Where-Object DisplayName|ForEach-Object{"x64|$($_.PSChildName)|$($_.DisplayVersion)|$($_.SystemComponent)|$($_.DisplayName)"};` +
-	`Get-ItemProperty 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*'|Where-Object DisplayName|ForEach-Object{"x86|$($_.PSChildName)|$($_.DisplayVersion)|$($_.SystemComponent)|$($_.DisplayName)"}`
+// redirect. Each entry that carries a DisplayName is emitted as one line whose
+// five columns — arch/PSChildName/DisplayVersion/SystemComponent/DisplayName —
+// are joined by the Unit Separator $([char]31): PSChildName and DisplayVersion
+// are free-text REG_SZ values that can legally contain '|', but never a control
+// character, so the columns cannot shift. The native-hive architecture label $na
+// is derived from $env:PROCESSOR_ARCHITECTURE (AMD64→x64, ARM64→arm64, X86→x86,
+// anything else lowercased) so Windows-on-ARM reports arm64 instead of a
+// hardcoded x64; WOW6432Node rows stay literal x86, that hive only holds 32-bit
+// x86 redirects. The UTF-8 console-encoding prefix keeps non-ASCII DisplayNames
+// intact: redirected PowerShell stdout otherwise uses the OEM codepage. The
+// ";exit 0" terminator matters because a failing LAST statement (e.g. a missing
+// WOW6432Node hive on 32-bit Windows) makes powershell exit 1 even under
+// SilentlyContinue, and the engine's run() discards all stdout on non-zero exit.
+const registryPackagesScript = `[Console]::OutputEncoding=[Text.Encoding]::UTF8;` +
+	`$ErrorActionPreference='SilentlyContinue';` +
+	`$na=@{'AMD64'='x64';'ARM64'='arm64';'X86'='x86'}[$env:PROCESSOR_ARCHITECTURE];if(-not $na){$na="$env:PROCESSOR_ARCHITECTURE".ToLower()};` +
+	`Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*'|Where-Object DisplayName|ForEach-Object{"$na$([char]31)$($_.PSChildName)$([char]31)$($_.DisplayVersion)$([char]31)$($_.SystemComponent)$([char]31)$($_.DisplayName)"};` +
+	`Get-ItemProperty 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*'|Where-Object DisplayName|ForEach-Object{"x86$([char]31)$($_.PSChildName)$([char]31)$($_.DisplayVersion)$([char]31)$($_.SystemComponent)$([char]31)$($_.DisplayName)"};` +
+	`exit 0`
 
 // registryPackages reads installed programs from the two HKLM uninstall hives.
 // Every subkey with a DisplayName becomes a record; system-component/update
 // entries (SystemComponent=1) are dropped, matching what Programs & Features
-// shows. The architecture reflects the hive (x64 native, x86 WOW6432Node) and
-// product_code is set only when the subkey name is an MSI product GUID.
+// shows. The architecture reflects the hive (the machine's native label — x64
+// or arm64 — for the native view, x86 for WOW6432Node) and product_code is set
+// only when the subkey name is an MSI product GUID.
 func registryPackages(run commandRunner) []any {
 	out := run("powershell", "-NoProfile", "-NonInteractive", "-Command", registryPackagesScript)
 	var records []any
 	for line := range strings.Lines(out) {
-		fields := strings.SplitN(strings.TrimRight(line, "\r\n"), "|", 5)
+		fields := strings.SplitN(strings.TrimRight(line, "\r\n"), "\x1f", 5)
 		if len(fields) != 5 {
 			continue
 		}
@@ -41,10 +54,17 @@ func registryPackages(run commandRunner) []any {
 // followed by the collector-context packages (Get-AppxPackage), one
 // Name|Version|Architecture line each. The two views are unioned and deduplicated
 // downstream, so an unavailable provisioning module (common on Server) simply
-// yields fewer lines rather than an error.
-const appxPackagesScript = `$ErrorActionPreference='SilentlyContinue';` +
+// yields fewer lines rather than an error. The UTF-8 console-encoding prefix
+// keeps non-ASCII names intact: redirected PowerShell stdout otherwise uses the
+// OEM codepage. The ";exit 0" terminator matters because a failing LAST
+// statement (e.g. Get-AppxPackage under the SYSTEM context) makes powershell
+// exit 1 even under SilentlyContinue, and the engine's run() discards all
+// stdout — including the already-emitted provisioned lines — on non-zero exit.
+const appxPackagesScript = `[Console]::OutputEncoding=[Text.Encoding]::UTF8;` +
+	`$ErrorActionPreference='SilentlyContinue';` +
 	`Get-AppxProvisionedPackage -Online|ForEach-Object{"$($_.DisplayName)|$($_.Version)|$($_.Architecture)"};` +
-	`Get-AppxPackage|ForEach-Object{"$($_.Name)|$($_.Version)|$($_.Architecture)"}`
+	`Get-AppxPackage|ForEach-Object{"$($_.Name)|$($_.Version)|$($_.Architecture)"};` +
+	`exit 0`
 
 // appxPackages reads the appx/MSIX packages via PowerShell. Records carry the
 // package name, version, and (lowercased) architecture; duplicates across the
@@ -58,7 +78,7 @@ func appxPackages(run commandRunner) []any {
 		if len(fields) != 3 {
 			continue
 		}
-		name, version, arch := fields[0], fields[1], strings.ToLower(fields[2])
+		name, version, arch := fields[0], fields[1], appxArchLabel(fields[2])
 		if name == "" || version == "" {
 			continue
 		}
@@ -71,6 +91,29 @@ func appxPackages(run commandRunner) []any {
 	}
 	sortPackages(records)
 	return records
+}
+
+// appxArchLabel normalizes an appx architecture to its lowercase enum name.
+// Get-AppxPackage renders the enum (X64, Neutral), but Get-AppxProvisionedPackage
+// exposes the raw DISM UInt32 (x86=0, arm=5, x64=9, neutral=11, arm64=12), so the
+// documented numeric codes map to their labels — letting the numeric and enum
+// spellings of the same package dedupe — and anything else passes through
+// lowercased.
+func appxArchLabel(raw string) string {
+	switch arch := strings.ToLower(raw); arch {
+	case "0":
+		return "x86"
+	case "5":
+		return "arm"
+	case "9":
+		return "x64"
+	case "11":
+		return "neutral"
+	case "12":
+		return "arm64"
+	default:
+		return arch
+	}
 }
 
 // msiProductCode returns name unchanged when it is a canonical MSI product GUID

@@ -50,7 +50,18 @@ func runPlutilChunks(run commandRunner, paths []string, perBlock func(chunkPaths
 
 func runPlutilChunk(run commandRunner, chunk []string, perBlock func([]string, int, map[string]string)) {
 	out := run("plutil", append([]string{"-p"}, chunk...)...)
-	if out == "" {
+	blocks := make([]map[string]string, 0, len(chunk))
+	if out != "" {
+		parsePlutilBlocks(out, func(fields map[string]string) {
+			blocks = append(blocks, fields)
+		})
+	}
+	// Commit only when the block count matches the path count exactly — that is
+	// what makes positional pairing trustworthy. An empty output (plutil failed)
+	// or a mismatched count (any parser desync, e.g. a value plutil prints with
+	// unescaped quotes and brace-like continuation lines) distrusts the whole
+	// invocation and bisects it, containing the damage to the offending file.
+	if len(blocks) != len(chunk) {
 		if len(chunk) > 1 {
 			mid := len(chunk) / 2
 			runPlutilChunk(run, chunk[:mid], perBlock)
@@ -58,11 +69,9 @@ func runPlutilChunk(run commandRunner, chunk []string, perBlock func([]string, i
 		}
 		return
 	}
-	index := 0
-	parsePlutilBlocks(out, func(fields map[string]string) {
+	for index, fields := range blocks {
 		perBlock(chunk, index, fields)
-		index++
-	})
+	}
 }
 
 // plutilArgChunks splits plist paths into batches whose joined argv length stays
@@ -236,6 +245,14 @@ func parsePlutilBlocks(out string, fn func(fields map[string]string)) {
 				fields = nil
 			}
 		default:
+			// A scalar-rooted plist prints one bare line at depth 0 (`"hello"`);
+			// emit an empty block so pairing advances one block per input file.
+			if depth == 0 {
+				if trimmed != "" {
+					fn(map[string]string{})
+				}
+				continue
+			}
 			// A depth-1 scalar is a real top-level key; a "key" => { or
 			// "key" => [ line opens a nested container we descend past.
 			opensContainer := strings.HasSuffix(trimmed, " => {") || strings.HasSuffix(trimmed, " => [")

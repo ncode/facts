@@ -85,8 +85,8 @@ func TestNixPackages_fallsBackToDefaultProfileOnNonNixOS(t *testing.T) {
 	got := nixPackages(func(name string, args ...string) string {
 		calls = append(calls, name)
 		switch name {
-		case "/run/current-system/sw/bin/nix-store":
-			return "" // not NixOS: no system profile environment
+		case "/run/current-system/sw/bin/nix-store", "/nix/var/nix/profiles/default/bin/nix-store":
+			return "" // not NixOS: /run/current-system does not exist
 		case "/nix/var/nix/profiles/default/bin/nix-env":
 			if !reflect.DeepEqual(args, []string{"-q", "--profile", "/nix/var/nix/profiles/default"}) {
 				t.Fatalf("nix-env args = %v", args)
@@ -105,8 +105,59 @@ func TestNixPackages_fallsBackToDefaultProfileOnNonNixOS(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("nixPackages(default profile) = %#v\nwant %#v", got, want)
 	}
-	if len(calls) != 2 {
-		t.Fatalf("calls = %v, want nix-store then nix-env fallback", calls)
+	if len(calls) != 3 {
+		t.Fatalf("calls = %v, want both nix-store probes then the nix-env fallback", calls)
+	}
+}
+
+func TestNixPackages_customOutputCollapsesOntoBaseRecord(t *testing.T) {
+	t.Parallel()
+	// bind's package.nix declares outputs [out lib dev man dnsutils host]; a
+	// systemPackages with pkgs.dnsutils (or pkgs.dig) yields the custom-output
+	// store path bind-<v>-dnsutils, which no fixed allowlist can cover. When the
+	// base record is present too, the output record must collapse onto it; a
+	// digitless-tail record WITHOUT a base sibling is kept verbatim (it could be
+	// a genuine version like 1.0-beta, which must never be corrupted).
+	got := nixPackages(func(name string, args ...string) string {
+		return "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bind-9.20.4\n" +
+			"/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-bind-9.20.4-dnsutils\n" +
+			"/nix/store/cccccccccccccccccccccccccccccccc-bind-9.20.4-host\n" +
+			"/nix/store/dddddddddddddddddddddddddddddddd-foo-1.0-beta\n"
+	})
+	want := []any{
+		map[string]any{"name": "bind", "version": "9.20.4"},
+		map[string]any{"name": "foo", "version": "1.0-beta"}, // no base sibling: kept verbatim
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("nixPackages() = %#v\nwant %#v", got, want)
+	}
+}
+
+func TestNixPackages_defaultProfileNixStoreQueriesSystemSet(t *testing.T) {
+	t.Parallel()
+	// Determinate Nix on NixOS/nix-darwin sets nix.enable=false, so the system
+	// profile exists but sw/bin/nix-store does not. The system set must then be
+	// read through the default profile's nix-store (any nix-store can query the
+	// store) before falling back to the default-profile listing.
+	var calls [][]string
+	got := nixPackages(func(name string, args ...string) string {
+		calls = append(calls, append([]string{name}, args...))
+		switch name {
+		case "/run/current-system/sw/bin/nix-store":
+			return "" // nix.enable=false: no nix-store in the system environment
+		case "/nix/var/nix/profiles/default/bin/nix-store":
+			return "/nix/store/mxq1r9w2w2y9lsqb5fkcyb5xbbki1n57-ncurses-6.6\n"
+		default:
+			t.Fatalf("unexpected command %q", name)
+			return ""
+		}
+	})
+	want := []any{map[string]any{"name": "ncurses", "version": "6.6"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("nixPackages(default-profile nix-store) = %#v\nwant %#v", got, want)
+	}
+	if len(calls) != 2 || !reflect.DeepEqual(calls[1], []string{"/nix/var/nix/profiles/default/bin/nix-store", "-q", "--references", "/run/current-system/sw"}) {
+		t.Fatalf("calls = %v, want system nix-store then default-profile nix-store on the system env", calls)
 	}
 }
 

@@ -99,6 +99,14 @@ func nixPackages(run commandRunner) []any {
 	if records := nixRecordsFromLines(out, true); records != nil {
 		return records
 	}
+	// Determinate Nix (nix.enable=false on NixOS/nix-darwin) keeps nix-store out
+	// of the system environment while the system profile still exists; any
+	// nix-store can query the store, so read the system set through the default
+	// profile's binary before falling back to the default-profile listing.
+	out = run("/nix/var/nix/profiles/default/bin/nix-store", "-q", "--references", "/run/current-system/sw")
+	if records := nixRecordsFromLines(out, true); records != nil {
+		return records
+	}
 	// Non-NixOS daemon/multi-user nix (ADR-0014: the profile set includes the
 	// default profile): nix-env lists the default profile's <name>-<version>
 	// elements directly — this profile carries the manifest.nix that the NixOS
@@ -138,8 +146,50 @@ func nixRecordsFromLines(out string, storePaths bool) []any {
 		seen[key] = true
 		records = append(records, packageRecord(name, version))
 	}
+	records = collapseNixCustomOutputs(records, seen)
 	sortPackages(records)
 	return records
+}
+
+// collapseNixCustomOutputs drops records whose version is a sibling's version
+// plus a trailing digitless component — a custom output name outside the
+// nixOutputs allowlist (bind's dnsutils/host, say), which no fixed list can
+// cover. The collapse only fires when the base record exists, so a genuine
+// digitless version tail (1.0-beta) with no base sibling is never touched.
+func collapseNixCustomOutputs(records []any, seen map[string]bool) []any {
+	kept := records[:0]
+	for _, record := range records {
+		r := record.(map[string]any)
+		name, _ := r["name"].(string)
+		version, _ := r["version"].(string)
+		if base, ok := strings.CutSuffix(version, "-"+lastHyphenComponent(version)); ok && base != "" &&
+			digitless(lastHyphenComponent(version)) && seen[name+"\x00"+base] {
+			continue
+		}
+		kept = append(kept, record)
+	}
+	return kept
+}
+
+// lastHyphenComponent returns the text after the final hyphen, or "" when the
+// value has no hyphen.
+func lastHyphenComponent(value string) string {
+	if i := strings.LastIndexByte(value, '-'); i >= 0 {
+		return value[i+1:]
+	}
+	return ""
+}
+
+func digitless(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, r := range value {
+		if r >= '0' && r <= '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // nixOutputs are the standard nix output component names appended to a store-path

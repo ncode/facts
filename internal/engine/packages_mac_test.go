@@ -399,6 +399,71 @@ func TestParsePlutilBlocks_arrayRootBlock(t *testing.T) {
 	}
 }
 
+func TestParsePlutilBlocks_scalarRootBlock(t *testing.T) {
+	t.Parallel()
+	// plutil -p of a scalar-rooted plist prints one bare line (`"hello"`). It
+	// must fire fn with an empty fields map — like the array root — so the
+	// positional pairing advances one block per input file.
+	const out = `{
+  "A" => "1"
+}
+"hello"
+{
+  "B" => "2"
+}
+`
+	var got []map[string]string
+	parsePlutilBlocks(out, func(f map[string]string) {
+		got = append(got, f)
+	})
+	want := []map[string]string{{"A": "1"}, {}, {"B": "2"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("blocks = %#v, want %#v", got, want)
+	}
+}
+
+func TestAppsPackages_blockCountMismatchIsolatedByBisection(t *testing.T) {
+	t.Parallel()
+	// If an invocation's block count does not match its path count (any parser
+	// desync — e.g. a value plutil prints with unescaped quotes and brace-only
+	// continuation lines), the whole invocation is distrusted and bisected, so
+	// mispairing is contained to the offending file instead of poisoning the
+	// records after it.
+	paths := []string{
+		"/Applications/Good1.app/Contents/Info.plist",
+		"/Applications/Weird.app/Contents/Info.plist",
+		"/Applications/Good2.app/Contents/Info.plist",
+	}
+	goodBlock := func(name string) string {
+		return "{\n  \"CFBundleName\" => \"" + name + "\"\n  \"CFBundleShortVersionString\" => \"1.0\"\n}\n"
+	}
+	// The weird file's output splits into TWO phantom blocks.
+	weird := "{\n  \"X\" => \"boom\"\n}\n{\n  \"tail\" => \"y\"\n}\n"
+	run := func(_ string, args ...string) string {
+		out := ""
+		for _, f := range args[1:] {
+			switch f {
+			case paths[0]:
+				out += goodBlock("Good1")
+			case paths[1]:
+				out += weird
+			case paths[2]:
+				out += goodBlock("Good2")
+			}
+		}
+		return out
+	}
+	glob := globStub(map[string][]string{"/Applications/*.app/Contents/Info.plist": paths})
+	got := appsPackages(glob, run)
+	want := []any{
+		map[string]any{"name": "Good1", "version": "1.0", "path": "/Applications/Good1.app"},
+		map[string]any{"name": "Good2", "version": "1.0", "path": "/Applications/Good2.app"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("appsPackages() = %#v\nwant %#v", got, want)
+	}
+}
+
 func TestHomebrewPackages(t *testing.T) {
 	glob := globStub(map[string][]string{
 		"/opt/homebrew/Cellar/*/*": {
