@@ -77,12 +77,12 @@ func TestNixPackages_emptyProfileYieldsNothing(t *testing.T) {
 	}
 }
 
-// snapListFixture is the canonical `snap list` layout (Name Version Rev Tracking
-// Publisher Notes). Not guest-validated: no fleet guest has snaps installed.
-const snapListFixture = `Name         Version    Rev    Tracking       Publisher   Notes
-bare         1.0        5      latest/stable  canonical✓  base
-core22       20240111   1122   latest/stable  canonical✓  base
-hello-world  6.4        29     latest/stable  canonical✓  -
+// snapListFixture is verbatim `snap list` output from the nlab ubuntu2404
+// guest (snapd 2.75.2) after installing hello-world.
+const snapListFixture = `Name         Version             Rev    Tracking       Publisher    Notes
+core         16-2.61.4-20260225  17292  latest/stable  canonical**  core
+hello-world  6.4                 29     latest/stable  canonical**  -
+snapd        2.75.2              26865  latest/stable  canonical**  snapd
 `
 
 func TestSnapPackages_skipsHeader(t *testing.T) {
@@ -94,9 +94,9 @@ func TestSnapPackages_skipsHeader(t *testing.T) {
 		return snapListFixture
 	})
 	want := []any{
-		map[string]any{"name": "bare", "version": "1.0"},
-		map[string]any{"name": "core22", "version": "20240111"},
+		map[string]any{"name": "core", "version": "16-2.61.4-20260225"},
 		map[string]any{"name": "hello-world", "version": "6.4"},
+		map[string]any{"name": "snapd", "version": "2.75.2"},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("snapPackages() = %#v\nwant %#v", got, want)
@@ -113,24 +113,32 @@ func TestSnapPackages_noSnapsInstalledYieldsNothing(t *testing.T) {
 	}
 }
 
-// flatpakListFixture is tab-separated `flatpak list --columns=application,version,arch`
-// output. Not guest-validated: no fleet guest has flatpak installed.
-const flatpakListFixture = "org.gnome.Platform\t46\tx86_64\n" +
-	"org.mozilla.firefox\t124.0\tx86_64\n" +
-	"com.spotify.Client\t1.2.31.1205\tx86_64\n"
+// flatpakListFixture is verbatim tab-separated output of
+// `flatpak list --columns=application,version,arch,branch` from the nlab
+// ubuntu2404 guest after installing org.vim.Vim from flathub. It exercises the
+// two real shapes the format-only fixture missed: the SAME application id
+// installed twice with identical version+arch, distinguishable only by branch
+// (GL.default 25.08 vs 25.08-extra), and an extension with an empty version
+// (codecs-extra), which is dropped by the name+version invariant.
+const flatpakListFixture = "org.freedesktop.Platform.GL.default\t26.0.8\tx86_64\t25.08\n" +
+	"org.freedesktop.Platform.GL.default\t26.0.8\tx86_64\t25.08-extra\n" +
+	"org.freedesktop.Platform.codecs-extra\t\tx86_64\t25.08-extra\n" +
+	"org.freedesktop.Sdk\tfreedesktop-sdk-25.08.13\tx86_64\t25.08\n" +
+	"org.vim.Vim\tv9.2.0758\tx86_64\tstable\n"
 
-func TestFlatpakPackages_parsesTabColumns(t *testing.T) {
+func TestFlatpakPackages_branchDistinguishesSiblings(t *testing.T) {
 	t.Parallel()
 	got := flatpakPackages(func(name string, args ...string) string {
-		if name != "flatpak" || !reflect.DeepEqual(args, []string{"list", "--columns=application,version,arch"}) {
+		if name != "flatpak" || !reflect.DeepEqual(args, []string{"list", "--columns=application,version,arch,branch"}) {
 			t.Fatalf("command = %q %v", name, args)
 		}
 		return flatpakListFixture
 	})
 	want := []any{
-		map[string]any{"name": "com.spotify.Client", "version": "1.2.31.1205", "architecture": "x86_64"},
-		map[string]any{"name": "org.gnome.Platform", "version": "46", "architecture": "x86_64"},
-		map[string]any{"name": "org.mozilla.firefox", "version": "124.0", "architecture": "x86_64"},
+		map[string]any{"name": "org.freedesktop.Platform.GL.default", "version": "26.0.8", "architecture": "x86_64", "branch": "25.08"},
+		map[string]any{"name": "org.freedesktop.Platform.GL.default", "version": "26.0.8", "architecture": "x86_64", "branch": "25.08-extra"},
+		map[string]any{"name": "org.freedesktop.Sdk", "version": "freedesktop-sdk-25.08.13", "architecture": "x86_64", "branch": "25.08"},
+		map[string]any{"name": "org.vim.Vim", "version": "v9.2.0758", "architecture": "x86_64", "branch": "stable"},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("flatpakPackages() = %#v\nwant %#v", got, want)

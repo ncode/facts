@@ -817,7 +817,7 @@ packages.dpkg:
   conditional: true
 packages.flatpak:
   type: array
-  description: System-installed Flatpak applications as {name, version, architecture} records.
+  description: System-installed Flatpak applications and runtimes as {name, version, architecture, branch} records; branch distinguishes same-version siblings.
   platforms: [linux]
   conditional: true
 packages.homebrew:

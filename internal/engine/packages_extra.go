@@ -48,11 +48,15 @@ func snapPackages(run commandRunner) []any {
 	return records
 }
 
-// flatpakPackages parses `flatpak list --columns=application,version,arch` (the
-// system installation), whose rows are tab-separated with no header. The
-// application id is the record name; the arch becomes the architecture identity.
+// flatpakPackages parses `flatpak list --columns=application,version,arch,branch`
+// (the system installation), whose rows are tab-separated with no header. The
+// application id is the record name; arch and branch are identity fields —
+// branch is load-bearing, not decorative: the same application id can be
+// installed twice with an identical version and arch, distinguishable only by
+// branch (observed live: GL.default 25.08 vs 25.08-extra). Extensions with no
+// version (e.g. codecs-extra) are dropped by the name+version invariant.
 func flatpakPackages(run commandRunner) []any {
-	out := run("flatpak", "list", "--columns=application,version,arch")
+	out := run("flatpak", "list", "--columns=application,version,arch,branch")
 	var records []any
 	for line := range strings.Lines(out) {
 		fields := strings.Split(strings.TrimRight(line, "\n"), "\t")
@@ -63,11 +67,14 @@ func flatpakPackages(run commandRunner) []any {
 		if name == "" || version == "" {
 			continue
 		}
-		arch := ""
+		var arch, branch string
 		if len(fields) >= 3 {
 			arch = strings.TrimSpace(fields[2])
 		}
-		records = append(records, packageRecord(name, version, "architecture", arch))
+		if len(fields) >= 4 {
+			branch = strings.TrimSpace(fields[3])
+		}
+		records = append(records, packageRecord(name, version, "architecture", arch, "branch", branch))
 	}
 	sortPackages(records)
 	return records

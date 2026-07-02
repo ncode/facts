@@ -219,7 +219,7 @@ $ facts --json
 | `os.selinux.policy_version` | `string` | yes | The loaded SELinux policy version, when SELinux is enabled. |
 | `packages.apk` | `array` | yes | Installed Alpine apk packages as {name, version, architecture} records, from /lib/apk/db/installed. |
 | `packages.dpkg` | `array` | yes | Installed dpkg packages as {name, version, architecture} records (install ok installed only; multiarch siblings kept), from /var/lib/dpkg/status. |
-| `packages.flatpak` | `array` | yes | System-installed Flatpak applications as {name, version, architecture} records. |
+| `packages.flatpak` | `array` | yes | System-installed Flatpak applications and runtimes as {name, version, architecture, branch} records; branch distinguishes same-version siblings. |
 | `packages.nix` | `array` | yes | Installed Nix packages as {name, version} records — the NixOS system profile set (the references of /run/current-system/sw), never the whole /nix/store. |
 | `packages.pacman` | `array` | yes | Installed pacman packages as {name, version, architecture} records, from /var/lib/pacman/local. |
 | `packages.rpm` | `array` | yes | Installed rpm packages as {name, version, architecture} records (epoch preserved, gpg-pubkey filtered). |
