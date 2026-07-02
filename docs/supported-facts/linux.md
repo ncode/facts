@@ -70,7 +70,7 @@ $ facts --json
 
 ## Fact Contract
 
-175 schema entries include `linux`.
+182 schema entries include `linux`.
 
 | Fact | Type | Conditional | Description |
 | --- | --- | --- | --- |
@@ -217,6 +217,13 @@ $ facts --json
 | `os.selinux.enabled` | `boolean` | no | Whether SELinux is enabled. |
 | `os.selinux.enforced` | `boolean` | yes | Whether SELinux is enforcing, when SELinux is enabled. |
 | `os.selinux.policy_version` | `string` | yes | The loaded SELinux policy version, when SELinux is enabled. |
+| `packages.apk` | `array` | yes | Installed Alpine apk packages as {name, version, architecture} records, from /lib/apk/db/installed. |
+| `packages.dpkg` | `array` | yes | Installed dpkg packages as {name, version, architecture} records (installed-state entries including held and trigger states; multiarch siblings kept), from /var/lib/dpkg/status. |
+| `packages.flatpak` | `array` | yes | Flatpak applications and runtimes from the system and collector-user installations as {name, version, architecture, branch} records; branch distinguishes same-version siblings. |
+| `packages.nix` | `array` | yes | Installed Nix packages as {name, version} records — the NixOS system profile set, or the default profile (/nix/var/nix/profiles/default) on non-NixOS hosts; never the whole /nix/store. |
+| `packages.pacman` | `array` | yes | Installed pacman packages as {name, version, architecture} records, from /var/lib/pacman/local. |
+| `packages.rpm` | `array` | yes | Installed rpm packages as {name, version, architecture} records (epoch preserved, gpg-pubkey filtered). |
+| `packages.snap` | `array` | yes | Installed snap packages as {name, version} records. |
 | `partitions.*` | `map` | yes | A disk partition (or device-mapper/loop device), keyed by device path. |
 | `partitions.*.backing_file` | `string` | yes | The file backing the loop device. |
 | `partitions.*.filesystem` | `string` | yes | The filesystem type of the partition. |

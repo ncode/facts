@@ -6,12 +6,12 @@ These pages are generated from [`docs/schema/facts.yaml`](../schema/facts.yaml).
 
 | Platform | Supported facts |
 | --- | ---: |
-| [Linux](linux.md) | 175 |
-| [macOS / Darwin](darwin.md) | 107 |
-| [Windows](windows.md) | 101 |
-| [FreeBSD](freebsd.md) | 131 |
-| [OpenBSD](openbsd.md) | 113 |
-| [NetBSD](netbsd.md) | 117 |
-| [DragonFly BSD](dragonfly.md) | 115 |
-| [illumos](illumos.md) | 114 |
+| [Linux](linux.md) | 182 |
+| [macOS / Darwin](darwin.md) | 111 |
+| [Windows](windows.md) | 103 |
+| [FreeBSD](freebsd.md) | 132 |
+| [OpenBSD](openbsd.md) | 114 |
+| [NetBSD](netbsd.md) | 118 |
+| [DragonFly BSD](dragonfly.md) | 117 |
+| [illumos](illumos.md) | 116 |
 | [Plan 9](plan9.md) | 29 |

@@ -174,6 +174,21 @@ func TestIsPlainYAMLStringAcceptsOnlyRubySafeScalars(t *testing.T) {
 		{name: "yaml true prefix", value: "TrueNAS", want: false},
 		{name: "lowercase off", value: "off", want: false},
 		{name: "contains unsupported punctuation", value: "hello.world", want: false},
+		// Values Psych retypes (verified against Ruby 3.4 Psych): plain
+		// emission corrupts them, so they must be quoted. Package versions
+		// exercise every one of these shapes (apps "36", homebrew "43_1"
+		// revisions and "2026-05-14" ca-certificates dates).
+		{name: "integer-looking", value: "36", want: false},
+		{name: "underscore int separators", value: "43_1", want: false}, // Psych: 431
+		{name: "underscore thousands", value: "1_000_000", want: false},
+		{name: "hex int", value: "0x1F", want: false},                                 // Psych: 31
+		{name: "octal int", value: "0755", want: false},                               // Psych: 493
+		{name: "date shape", value: "2026-05-14", want: false},                        // Psych: Date; raises under safe_load
+		{name: "huge digit string", value: "12345678901234567890123456", want: false}, // Psych: bignum
+		// Shapes Psych keeps as String stay plain.
+		{name: "dash range", value: "8-10", want: true},
+		{name: "e-notation without dot", value: "1e3", want: true},
+		{name: "version with alpha prefix", value: "v1-2", want: true},
 	}
 
 	for _, tt := range tests {

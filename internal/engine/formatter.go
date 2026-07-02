@@ -410,6 +410,52 @@ func isPlainYAMLString(value string) bool {
 		}
 		return false
 	}
+	return !yamlResolverRetypes(value)
+}
+
+// yamlResolverRetypes reports whether a YAML 1.1 resolver (Ruby Psych — the
+// Facter consumer stack — or PyYAML) parses the plain scalar as a non-string.
+// Package versions exercise every shape: "36" (Integer), "43_1" (Integer 431 —
+// underscores are YAML 1.1 digit separators), "0x1F"/"0755" (hex/octal), and
+// "2026-05-14" (Date, which even raises under Psych safe_load). Verified
+// against Ruby 3.4 Psych; such values must be quoted or consumers corrupt them.
+func yamlResolverRetypes(value string) bool {
+	digits := strings.TrimPrefix(strings.ReplaceAll(value, "_", ""), "-")
+	if digits != "" {
+		if _, err := strconv.ParseInt(digits, 0, 64); err == nil {
+			return true
+		}
+		allDigits := true
+		for _, r := range digits {
+			if r < '0' || r > '9' {
+				allDigits = false
+				break
+			}
+		}
+		if allDigits {
+			return true // digit strings beyond int64 still parse as Integer (bignum)
+		}
+	}
+	return yamlDateShaped(value)
+}
+
+// yamlDateShaped matches the YAML 1.1 date scalar (yyyy-mm-dd); datetime forms
+// contain ':' and are already forced into quotes by needsQuotedYAMLString.
+func yamlDateShaped(value string) bool {
+	parts := strings.Split(value, "-")
+	if len(parts) != 3 || len(parts[0]) != 4 || len(parts[1]) < 1 || len(parts[1]) > 2 || len(parts[2]) < 1 || len(parts[2]) > 2 {
+		return false
+	}
+	for _, part := range parts {
+		if part == "" {
+			return false
+		}
+		for _, r := range part {
+			if r < '0' || r > '9' {
+				return false
+			}
+		}
+	}
 	return true
 }
 

@@ -1,0 +1,253 @@
+package engine
+
+import (
+	"os"
+	"strings"
+)
+
+// This file adds the "extra" Linux package sources (snap, flatpak, nix) to the
+// packages fact (ADR-0014). Each reader is a pure function over injected probe
+// output and follows the packages.go conventions: {name, version, ...} records
+// via packageRecord, deterministic ordering via sortPackages, and nil when the
+// source is absent or empty. Sources are never merged.
+//
+// Wiring (added to packagesCoreFacts' `case "linux":`, gated so a tool is only
+// spawned when its state directory exists):
+//
+//	if snapdPresent(s.stat) {
+//		add("snap", snapPackages(s.commandOutput))
+//	}
+//	if flatpakPresent(s.stat) {
+//		add("flatpak", flatpakPackages(s.commandOutput))
+//	}
+//	if nixProfilePresent(s.stat) {
+//		add("nix", nixPackages(s.commandOutput))
+//	}
+
+// snapPackages parses `snap list` (columns: Name Version Rev Tracking Publisher
+// Notes). The header row is required: its absence means snap printed "No snaps
+// are installed yet." and there is nothing to record.
+func snapPackages(run commandRunner) []any {
+	out := run("snap", "list")
+	var records []any
+	sawHeader := false
+	for line := range strings.Lines(out) {
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		if !sawHeader {
+			if fields[0] == "Name" && fields[1] == "Version" {
+				sawHeader = true
+			}
+			continue
+		}
+		records = append(records, packageRecord(fields[0], fields[1]))
+	}
+	sortPackages(records)
+	return records
+}
+
+// flatpakPackages parses `flatpak list --columns=application,version,arch,branch`
+// (the system installation), whose rows are tab-separated with no header. The
+// application id is the record name; arch and branch are identity fields —
+// branch is load-bearing, not decorative: the same application id can be
+// installed twice with an identical version and arch, distinguishable only by
+// branch (observed live: GL.default 25.08 vs 25.08-extra). Extensions with no
+// version (e.g. codecs-extra) are dropped by the name+version invariant.
+func flatpakPackages(run commandRunner) []any {
+	out := run("flatpak", "list", "--columns=application,version,arch,branch")
+	var records []any
+	for line := range strings.Lines(out) {
+		fields := strings.Split(strings.TrimRight(line, "\n"), "\t")
+		if len(fields) < 2 {
+			continue
+		}
+		name, version := strings.TrimSpace(fields[0]), strings.TrimSpace(fields[1])
+		if name == "" || version == "" {
+			continue
+		}
+		var arch, branch string
+		if len(fields) >= 3 {
+			arch = strings.TrimSpace(fields[2])
+		}
+		if len(fields) >= 4 {
+			branch = strings.TrimSpace(fields[3])
+		}
+		records = append(records, packageRecord(name, version, "architecture", arch, "branch", branch))
+	}
+	sortPackages(records)
+	return records
+}
+
+// nixPackages enumerates the packages that make up the running NixOS system
+// environment via `nix-store -q --references /run/current-system/sw` (the direct
+// references of the system-path buildEnv). This is the installed profile set, not
+// the whole /nix/store. nix-env -q cannot be used here: the NixOS system-path is
+// a buildEnv without the manifest.nix nix-env requires, so it lists nothing.
+//
+// Each reference is a store path "/nix/store/<hash>-<name>-<version>[-<output>]";
+// the hash is dropped and the tail split by parseNixNameVersion. Split-output
+// derivations (name-version-doc, -man, -bin, ...) collapse to one record via
+// dedup on name+version; unversioned environment members are skipped.
+func nixPackages(run commandRunner) []any {
+	// Both nix tools live outside the engine's trusted command PATH
+	// (/usr/sbin:/usr/bin:/sbin:/bin), so they are called by absolute path.
+	// NixOS first: the system profile is canonical there, and stopping on it
+	// avoids double-reporting nix itself from the default profile.
+	out := run("/run/current-system/sw/bin/nix-store", "-q", "--references", "/run/current-system/sw")
+	if records := nixRecordsFromLines(out, true); records != nil {
+		return records
+	}
+	// Determinate Nix (nix.enable=false on NixOS/nix-darwin) keeps nix-store out
+	// of the system environment while the system profile still exists; any
+	// nix-store can query the store, so read the system set through the default
+	// profile's binary before falling back to the default-profile listing.
+	out = run("/nix/var/nix/profiles/default/bin/nix-store", "-q", "--references", "/run/current-system/sw")
+	if records := nixRecordsFromLines(out, true); records != nil {
+		return records
+	}
+	// Non-NixOS daemon/multi-user nix (ADR-0014: the profile set includes the
+	// default profile): nix-env lists the default profile's <name>-<version>
+	// elements directly — this profile carries the manifest.nix that the NixOS
+	// system buildEnv lacks.
+	out = run("/nix/var/nix/profiles/default/bin/nix-env", "-q", "--profile", "/nix/var/nix/profiles/default")
+	return nixRecordsFromLines(out, false)
+}
+
+// nixRecordsFromLines converts nix enumeration output to sorted records. With
+// storePaths true, each line is /nix/store/<hash>-<name>-<version>[-<output>]
+// and the hash is dropped; otherwise each line is a bare <name>-<version>
+// profile element. Split-output duplicates collapse via dedup on name+version.
+func nixRecordsFromLines(out string, storePaths bool) []any {
+	var records []any
+	seen := map[string]bool{}
+	for line := range strings.Lines(out) {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		tail := line
+		if storePaths {
+			base := line[strings.LastIndexByte(line, '/')+1:]
+			var ok bool
+			if _, tail, ok = strings.Cut(base, "-"); !ok { // drop the store hash
+				continue
+			}
+		}
+		name, version := parseNixNameVersion(tail)
+		if name == "" || version == "" {
+			continue
+		}
+		key := name + "\x00" + version
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		records = append(records, packageRecord(name, version))
+	}
+	records = collapseNixCustomOutputs(records, seen)
+	sortPackages(records)
+	return records
+}
+
+// collapseNixCustomOutputs drops records whose version is a sibling's version
+// plus a trailing digitless component — a custom output name outside the
+// nixOutputs allowlist (bind's dnsutils/host, say), which no fixed list can
+// cover. The collapse only fires when the base record exists, so a genuine
+// digitless version tail (1.0-beta) with no base sibling is never touched.
+func collapseNixCustomOutputs(records []any, seen map[string]bool) []any {
+	kept := records[:0]
+	for _, record := range records {
+		r := record.(map[string]any)
+		name, _ := r["name"].(string)
+		version, _ := r["version"].(string)
+		if base, ok := strings.CutSuffix(version, "-"+lastHyphenComponent(version)); ok && base != "" &&
+			digitless(lastHyphenComponent(version)) && seen[name+"\x00"+base] {
+			continue
+		}
+		kept = append(kept, record)
+	}
+	return kept
+}
+
+// lastHyphenComponent returns the text after the final hyphen, or "" when the
+// value has no hyphen.
+func lastHyphenComponent(value string) string {
+	if i := strings.LastIndexByte(value, '-'); i >= 0 {
+		return value[i+1:]
+	}
+	return ""
+}
+
+func digitless(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, r := range value {
+		if r >= '0' && r <= '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// nixOutputs are the standard nix output component names appended to a store-path
+// tail (e.g. glibc-2.42-67-bin). They are trimmed so split outputs of one
+// derivation collapse onto its base version.
+var nixOutputs = map[string]bool{
+	"out": true, "bin": true, "dev": true, "lib": true, "doc": true,
+	"man": true, "info": true, "devdoc": true, "devman": true,
+	"static": true, "dist": true, "debug": true, "terminfo": true,
+}
+
+// parseNixNameVersion splits a store-path tail "<name>-<version>[-<output>]" using
+// Nix's own boundary rule: the name ends at the first hyphen-delimited component
+// that begins with a digit, and the version is the rest (so multi-component
+// versions like glibc's "2.42-67" stay intact). A trailing standard output name
+// is dropped. Environment members with no version (e.g. "nixos-help") yield "".
+func parseNixNameVersion(tail string) (name, version string) {
+	parts := strings.Split(tail, "-")
+	boundary := -1
+	// Start at 1: the name is always at least the first hyphen component, so a
+	// package whose name starts with a digit (7zip, 0ad, 389-ds-base) is not
+	// mistaken for a bare version and dropped.
+	for i := 1; i < len(parts); i++ {
+		if p := parts[i]; p != "" && p[0] >= '0' && p[0] <= '9' {
+			boundary = i
+			break
+		}
+	}
+	if boundary < 1 {
+		return "", ""
+	}
+	ver := parts[boundary:]
+	if len(ver) > 1 && nixOutputs[ver[len(ver)-1]] {
+		ver = ver[:len(ver)-1]
+	}
+	return strings.Join(parts[:boundary], "-"), strings.Join(ver, "-")
+}
+
+// snapdPresent, flatpakPresent and nixProfilePresent gate each spawn on a cheap
+// stat of the source's state directory, mirroring rpmDatabasePresent, so tools
+// are never run on hosts that lack them.
+func snapdPresent(stat func(string) (os.FileInfo, error)) bool {
+	return dirPresent(stat, "/var/lib/snapd")
+}
+
+func flatpakPresent(stat func(string) (os.FileInfo, error)) bool {
+	return dirPresent(stat, "/var/lib/flatpak")
+}
+
+// nixProfilePresent opens the nix gate when either profile exists: the NixOS
+// system profile or the daemon-install default profile (ADR-0014 names both as
+// the installed profile set). os.Stat follows the profile symlinks.
+func nixProfilePresent(stat func(string) (os.FileInfo, error)) bool {
+	return dirPresent(stat, "/nix/var/nix/profiles/system") ||
+		dirPresent(stat, "/nix/var/nix/profiles/default")
+}
+
+func dirPresent(stat func(string) (os.FileInfo, error), path string) bool {
+	info, err := stat(path)
+	return err == nil && info.IsDir()
+}

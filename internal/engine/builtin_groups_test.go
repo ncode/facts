@@ -19,6 +19,10 @@ func TestBuiltinFactGroups_keepStructuredRootsDropLegacyFlatNames(t *testing.T) 
 		"operating system": "os",
 		"processor":        "processors",
 		"path":             "path",
+		// Facts-native group (ADR-0014): a deliberate parity divergence from
+		// Ruby Facter's group list, so `--list-block-groups` names packages as
+		// one disable unit.
+		"packages": "packages",
 	}
 	for name, root := range wantRoot {
 		facts, ok := groups[name]
