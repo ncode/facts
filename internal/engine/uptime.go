@@ -3,7 +3,6 @@ package engine
 import (
 	"fmt"
 	"log/slog"
-	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -300,7 +299,7 @@ func parseUptimeHoursMinutes(input string) (int, int, bool) {
 }
 
 func probeLoadAverages(s *Session) map[string]any {
-	return currentLoadAverages(runtime.GOOS, s.readFile, s.commandOutput)
+	return currentLoadAverages(s.goos(), s.readFile, s.commandOutput)
 }
 
 func currentLoadAverages(goos string, readFile fileReader, run commandRunner) map[string]any {

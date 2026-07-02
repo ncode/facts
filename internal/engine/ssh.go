@@ -5,9 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
-	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 )
 
@@ -17,10 +15,6 @@ type sshHostKey struct {
 	Key    string
 	SHA1   string
 	SHA256 string
-}
-
-func discoverSSHHostKeys(readFile fileReader) []sshHostKey {
-	return discoverSSHHostKeysForPlatform(runtime.GOOS, os.Getenv("programdata"), readFile)
 }
 
 func discoverSSHHostKeysForPlatform(goos, programData string, readFile fileReader) []sshHostKey {
@@ -145,8 +139,9 @@ func identityPrivileged(identity map[string]any) bool {
 // sshCoreFacts assembles the ssh category fact (the discovered host-key
 // fingerprints) for the current host, honoring the Windows privilege gate.
 func sshCoreFacts(s *Session) []ResolvedFact {
+	goos := s.goos()
 	identity := s.cachedIdentity()
-	return sshFactsForPlatformWithPrivilege(runtime.GOOS, identityPrivileged(identity), func() []sshHostKey {
-		return discoverSSHHostKeys(s.readFile)
+	return sshFactsForPlatformWithPrivilege(goos, identityPrivileged(identity), func() []sshHostKey {
+		return discoverSSHHostKeysForPlatform(goos, s.getenv("programdata"), s.readFile)
 	})
 }

@@ -4,7 +4,6 @@ import (
 	"log/slog"
 	"os"
 	osuser "os/user"
-	"runtime"
 	"strconv"
 	"strings"
 )
@@ -18,10 +17,13 @@ type identityInfo struct {
 }
 
 func identityFact(s *Session) map[string]any {
-	if runtime.GOOS == "windows" {
-		return identityFactFromInfo(runtime.GOOS, currentWindowsIdentityInfo(s.commandOutput, s.logr()))
+	goos := s.goos()
+	if goos == "windows" {
+		return identityFactFromInfo(goos, currentWindowsIdentityInfo(s.commandOutput, s.logr()))
 	}
 
+	// The uid/gid/osuser syscalls stay outside the host seam: they have no
+	// meaningful fake and describe the resolving process, not the probed host.
 	privileged := os.Geteuid() == 0
 	info := identityInfo{
 		UID:        strconv.Itoa(os.Getuid()),
@@ -30,7 +32,7 @@ func identityFact(s *Session) map[string]any {
 	}
 	current, err := osuser.Current()
 	if err != nil {
-		return identityFactFromInfo(runtime.GOOS, info)
+		return identityFactFromInfo(goos, info)
 	}
 	info.UID = current.Uid
 	info.GID = current.Gid
@@ -38,7 +40,7 @@ func identityFact(s *Session) map[string]any {
 	if group, err := osuser.LookupGroupId(current.Gid); err == nil {
 		info.Group = group.Name
 	}
-	return identityFactFromInfo(runtime.GOOS, info)
+	return identityFactFromInfo(goos, info)
 }
 
 func currentWindowsIdentityInfo(run commandRunner, log *slog.Logger) identityInfo {

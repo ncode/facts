@@ -280,6 +280,31 @@ func (s *Session) statMountpoint(path string) (mountStat, bool) {
 	return s.host.statMountpoint(path)
 }
 
+func (s *Session) getenv(name string) string {
+	return envValue(s.host.environ(), s.goos(), name)
+}
+
+// envValue returns the value of name in env ("KEY=VALUE" entries, first match
+// wins). Lookup is case-insensitive only on windows; every other platform —
+// including plan9, whose conventional variables are lowercase — matches
+// exactly. Empty names never match.
+func envValue(env []string, goos, name string) string {
+	if name == "" {
+		return ""
+	}
+	windows := goos == "windows"
+	for _, entry := range env {
+		key, value, ok := strings.Cut(entry, "=")
+		if !ok {
+			continue
+		}
+		if key == name || (windows && strings.EqualFold(key, name)) {
+			return value
+		}
+	}
+	return ""
+}
+
 // logr returns the session logger, defaulting to a discard logger so a Session
 // built as a bare literal never panics. Sessions from NewSessionContext always
 // carry a non-nil logger (a DiscardHandler unless an Engine supplies one).

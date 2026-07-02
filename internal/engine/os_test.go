@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"net"
 	"os"
 	"path/filepath"
@@ -545,21 +546,6 @@ func TestCurrentWindowsSystem32MatchesRubyResolver(t *testing.T) {
 				t.Fatalf("currentWindowsSystem32() = %q, want %q", got, tt.want)
 			}
 		})
-	}
-}
-
-func TestCurrentWindowsProcessWOW64ReadsEnvironment(t *testing.T) {
-	t.Setenv("PROCESSOR_ARCHITEW6432", "AMD64")
-
-	wow64, ok := currentWindowsProcessWOW64()
-	if !wow64 || !ok {
-		t.Fatalf("currentWindowsProcessWOW64() = %v, %v; want true, true", wow64, ok)
-	}
-
-	t.Setenv("PROCESSOR_ARCHITEW6432", "")
-	wow64, ok = currentWindowsProcessWOW64()
-	if wow64 || !ok {
-		t.Fatalf("currentWindowsProcessWOW64() after clear = %v, %v; want false, true", wow64, ok)
 	}
 }
 
@@ -2623,5 +2609,45 @@ func TestUbuntuReleaseMapHandlesEmptyAndKnownRelease(t *testing.T) {
 	want := map[string]any{"full": "24.04", "major": "24.04"}
 	if got := ubuntuReleaseMap("24.04"); !reflect.DeepEqual(got, want) {
 		t.Fatalf("ubuntuReleaseMap() = %#v, want %#v", got, want)
+	}
+}
+
+// A fake windows host drives the windows os-assembly path — SystemRoot/system32
+// derivation and the WOW64 sysnative switch via the Session env seam — from any
+// development platform.
+func TestOSCoreFactsFakeWindowsHostDerivesSystem32(t *testing.T) {
+	newWindowsSession := func(env ...string) (*Session, *fakeHostOS) {
+		host := &fakeHostOS{
+			platform:        "windows",
+			emptyRunDefault: true,
+			environEntries:  append([]string{`SystemRoot=C:\Windows`}, env...),
+		}
+		s := NewSessionContext(context.Background())
+		s.host = host
+		return s, host
+	}
+
+	factValue := func(facts []ResolvedFact, name string) any {
+		for _, f := range facts {
+			if f.Name == name {
+				return f.Value
+			}
+		}
+		return nil
+	}
+
+	s, _ := newWindowsSession()
+	facts := osCoreFacts(s)
+	if got := factValue(facts, "os.family"); got != "windows" {
+		t.Fatalf("os.family = %#v, want windows", got)
+	}
+	if got := factValue(facts, "os.windows.system32"); got != `C:\Windows\system32` {
+		t.Fatalf("os.windows.system32 = %#v, want C:\\Windows\\system32", got)
+	}
+
+	wow64, _ := newWindowsSession("PROCESSOR_ARCHITEW6432=AMD64")
+	facts = osCoreFacts(wow64)
+	if got := factValue(facts, "os.windows.system32"); got != `C:\Windows\sysnative` {
+		t.Fatalf("WOW64 os.windows.system32 = %#v, want C:\\Windows\\sysnative", got)
 	}
 }

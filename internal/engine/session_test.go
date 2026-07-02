@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -18,17 +19,28 @@ import (
 var testSession = NewSession()
 
 type fakeHostOS struct {
-	platform            string
-	runCalls            []fakeHostRunCall
-	runOutput           string
-	runOutputs          map[string]string
-	files               map[string][]byte
-	dirs                map[string][]os.DirEntry
-	stats               map[string]os.FileInfo
-	lstats              map[string]os.FileInfo
-	globs               map[string][]string
-	mountStats          map[string]mountStat
-	environEntries      []string
+	platform       string
+	runCalls       []fakeHostRunCall
+	runOutput      string
+	runOutputs     map[string]string
+	files          map[string][]byte
+	dirs           map[string][]os.DirEntry
+	stats          map[string]os.FileInfo
+	lstats         map[string]os.FileInfo
+	globs          map[string][]string
+	mountStats     map[string]mountStat
+	environEntries []string
+	// emptyRunDefault makes unmatched run() calls return "" instead of the
+	// "host-output\n" sentinel, expressing "every command produces no output".
+	emptyRunDefault bool
+	// Per-path error maps, consulted before the fixture maps, for injecting
+	// errors other than the os.ErrNotExist default (e.g. os.ErrPermission).
+	fileErrs  map[string]error
+	dirErrs   map[string]error
+	statErrs  map[string]error
+	lstatErrs map[string]error
+	globErrs  map[string]error
+
 	readFileCalls       []string
 	readDirCalls        []string
 	globCalls           []string
@@ -50,6 +62,9 @@ func (h *fakeHostOS) run(_ context.Context, name string, args ...string) string 
 	if h.runOutput != "" {
 		return h.runOutput
 	}
+	if h.emptyRunDefault {
+		return ""
+	}
 	return "host-output\n"
 }
 
@@ -66,6 +81,9 @@ func (h *fakeHostOS) goos() string {
 
 func (h *fakeHostOS) readFile(path string) ([]byte, error) {
 	h.readFileCalls = append(h.readFileCalls, fakeHostPath(path))
+	if err, ok := h.fileErrs[fakeHostPath(path)]; ok {
+		return nil, err
+	}
 	data, ok := h.files[fakeHostPath(path)]
 	if !ok {
 		return nil, os.ErrNotExist
@@ -75,6 +93,9 @@ func (h *fakeHostOS) readFile(path string) ([]byte, error) {
 
 func (h *fakeHostOS) readDir(path string) ([]os.DirEntry, error) {
 	h.readDirCalls = append(h.readDirCalls, path)
+	if err, ok := h.dirErrs[fakeHostPath(path)]; ok {
+		return nil, err
+	}
 	entries, ok := h.dirs[fakeHostPath(path)]
 	if !ok {
 		return nil, os.ErrNotExist
@@ -83,6 +104,9 @@ func (h *fakeHostOS) readDir(path string) ([]os.DirEntry, error) {
 }
 
 func (h *fakeHostOS) stat(path string) (os.FileInfo, error) {
+	if err, ok := h.statErrs[fakeHostPath(path)]; ok {
+		return nil, err
+	}
 	info, ok := h.stats[fakeHostPath(path)]
 	if !ok {
 		return nil, os.ErrNotExist
@@ -91,6 +115,9 @@ func (h *fakeHostOS) stat(path string) (os.FileInfo, error) {
 }
 
 func (h *fakeHostOS) lstat(path string) (os.FileInfo, error) {
+	if err, ok := h.lstatErrs[fakeHostPath(path)]; ok {
+		return nil, err
+	}
 	info, ok := h.lstats[fakeHostPath(path)]
 	if !ok {
 		return nil, os.ErrNotExist
@@ -100,6 +127,9 @@ func (h *fakeHostOS) lstat(path string) (os.FileInfo, error) {
 
 func (h *fakeHostOS) glob(pattern string) ([]string, error) {
 	h.globCalls = append(h.globCalls, pattern)
+	if err, ok := h.globErrs[fakeHostPath(pattern)]; ok {
+		return nil, err
+	}
 	matches, ok := h.globs[fakeHostPath(pattern)]
 	if !ok {
 		return nil, nil
@@ -147,10 +177,25 @@ func (de fakeDirEntry) Info() (os.FileInfo, error) {
 	return fakeFileInfo{name: de.name, mode: de.mode, isDir: de.isDir}, nil
 }
 
+// fakeDirEntries returns directory entries. Fixtures must list names in
+// lexical order: osHost.readDir is os.ReadDir, which sorts, and lease-order
+// tests depend on that convention holding in the fake too.
 func fakeDirEntries(names ...string) []os.DirEntry {
 	entries := make([]os.DirEntry, 0, len(names))
 	for _, name := range names {
 		entries = append(entries, fakeDirEntry{name: name, mode: os.ModeDir, isDir: true})
+	}
+	return entries
+}
+
+// fakeFileEntries returns plain-file entries (IsDir false). Loops that skip
+// directories (bonding proc files, DHCP lease dirs) need these — a want-empty
+// test fed only fakeDirEntries passes vacuously. Same lexical-order convention
+// as fakeDirEntries.
+func fakeFileEntries(names ...string) []os.DirEntry {
+	entries := make([]os.DirEntry, 0, len(names))
+	for _, name := range names {
+		entries = append(entries, fakeDirEntry{name: name})
 	}
 	return entries
 }
@@ -511,5 +556,108 @@ func TestOSHostRunDoesNotSearchCallerPath(t *testing.T) {
 
 	if got := (osHost{}).run(context.Background(), name); got != "" {
 		t.Fatalf("osHost.run() = %q, want no output from caller PATH command", got)
+	}
+}
+
+func TestFakeHostOSErrorMapsWinOverFixtures(t *testing.T) {
+	host := &fakeHostOS{
+		files:     map[string][]byte{"/f": []byte("data")},
+		dirs:      map[string][]os.DirEntry{"/d": fakeDirEntries("sub")},
+		stats:     map[string]os.FileInfo{"/f": fakeFileInfo{name: "f"}},
+		lstats:    map[string]os.FileInfo{"/f": fakeFileInfo{name: "f"}},
+		globs:     map[string][]string{"/g/*": {"/g/one"}},
+		fileErrs:  map[string]error{"/f": os.ErrPermission},
+		dirErrs:   map[string]error{"/d": os.ErrPermission},
+		statErrs:  map[string]error{"/f": os.ErrPermission},
+		lstatErrs: map[string]error{"/f": os.ErrPermission},
+		globErrs:  map[string]error{"/g/*": os.ErrPermission},
+	}
+
+	if _, err := host.readFile("/f"); !errors.Is(err, os.ErrPermission) {
+		t.Fatalf("readFile err = %v, want ErrPermission", err)
+	}
+	if _, err := host.readDir("/d"); !errors.Is(err, os.ErrPermission) {
+		t.Fatalf("readDir err = %v, want ErrPermission", err)
+	}
+	if _, err := host.stat("/f"); !errors.Is(err, os.ErrPermission) {
+		t.Fatalf("stat err = %v, want ErrPermission", err)
+	}
+	if _, err := host.lstat("/f"); !errors.Is(err, os.ErrPermission) {
+		t.Fatalf("lstat err = %v, want ErrPermission", err)
+	}
+	if _, err := host.glob("/g/*"); !errors.Is(err, os.ErrPermission) {
+		t.Fatalf("glob err = %v, want ErrPermission", err)
+	}
+}
+
+func TestFakeHostOSEmptyRunDefault(t *testing.T) {
+	host := &fakeHostOS{
+		emptyRunDefault: true,
+		runOutputs:      map[string]string{fakeRunKey("known"): "value\n"},
+	}
+	if got := host.run(context.Background(), "known"); got != "value\n" {
+		t.Fatalf("run(known) = %q, want value", got)
+	}
+	if got := host.run(context.Background(), "unmatched"); got != "" {
+		t.Fatalf("run(unmatched) = %q, want empty with emptyRunDefault", got)
+	}
+
+	// Default behavior is unchanged: the sentinel still flags unmatched calls.
+	plain := &fakeHostOS{}
+	if got := plain.run(context.Background(), "unmatched"); got != "host-output\n" {
+		t.Fatalf("run(unmatched) = %q, want host-output sentinel", got)
+	}
+}
+
+func TestFakeFileEntriesAreNotDirectories(t *testing.T) {
+	entries := fakeFileEntries("a.lease", "b.lease")
+	if len(entries) != 2 {
+		t.Fatalf("len = %d, want 2", len(entries))
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			t.Fatalf("entry %q IsDir() = true, want plain file", entry.Name())
+		}
+	}
+	if entries[0].Name() != "a.lease" || entries[1].Name() != "b.lease" {
+		t.Fatalf("names = %q,%q, want lexical a.lease,b.lease", entries[0].Name(), entries[1].Name())
+	}
+}
+
+func TestEnvValueCasingRegimes(t *testing.T) {
+	env := []string{"MALFORMED", "Path=C:\\Windows", "path=/plan9/bin\x00/rc/bin", "HOME=/home/u", ""}
+
+	// windows: case-insensitive, first match wins.
+	if got := envValue(env, "windows", "PATH"); got != "C:\\Windows" {
+		t.Fatalf("windows PATH = %q, want C:\\Windows", got)
+	}
+	// unix: exact match only.
+	if got := envValue(env, "linux", "PATH"); got != "" {
+		t.Fatalf("linux PATH = %q, want empty (no exact match)", got)
+	}
+	if got := envValue(env, "linux", "HOME"); got != "/home/u" {
+		t.Fatalf("linux HOME = %q, want /home/u", got)
+	}
+	// plan9: lowercase path is a distinct, exactly-matched variable.
+	if got := envValue(env, "plan9", "path"); got != "/plan9/bin\x00/rc/bin" {
+		t.Fatalf("plan9 path = %q, want NUL-joined entries", got)
+	}
+	// Exact match: "PATH" matches nothing; the Path entry must not leak.
+	if got := envValue(env, "plan9", "PATH"); got != "" {
+		t.Fatalf("plan9 PATH = %q, want empty", got)
+	}
+	// Empty names never match, even against malformed entries.
+	if got := envValue(env, "linux", ""); got != "" {
+		t.Fatalf("empty name = %q, want empty", got)
+	}
+}
+
+func TestSessionGetenvUsesHostEnviron(t *testing.T) {
+	s := &Session{host: &fakeHostOS{
+		platform:       "windows",
+		environEntries: []string{"ProgramData=C:\\ProgramData"},
+	}}
+	if got := s.getenv("programdata"); got != "C:\\ProgramData" {
+		t.Fatalf("getenv(programdata) = %q, want C:\\ProgramData", got)
 	}
 }

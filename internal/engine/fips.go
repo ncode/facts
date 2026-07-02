@@ -1,7 +1,6 @@
 package engine
 
 import (
-	"runtime"
 	"strconv"
 	"strings"
 )
@@ -46,5 +45,5 @@ func parseWindowsFIPSEnabled(input string) bool {
 // fipsCoreFacts assembles the fips category fact (fips_enabled), emitted only on
 // Linux and Windows.
 func fipsCoreFacts(s *Session) []ResolvedFact {
-	return fipsEnabledFacts(runtime.GOOS, "/proc/sys/crypto/fips_enabled", s.commandOutput, s.readFile)
+	return fipsEnabledFacts(s.goos(), "/proc/sys/crypto/fips_enabled", s.commandOutput, s.readFile)
 }

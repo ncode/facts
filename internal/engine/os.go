@@ -2,7 +2,6 @@ package engine
 
 import (
 	"log/slog"
-	"os"
 	"os/exec"
 	"regexp"
 	"runtime"
@@ -1081,10 +1080,6 @@ func currentWindowsSystem32(goos, systemRoot string, isWOW64 func() (bool, bool)
 	return systemRoot + `\system32`
 }
 
-func currentWindowsProcessWOW64() (bool, bool) {
-	return os.Getenv("PROCESSOR_ARCHITEW6432") != "", true
-}
-
 func windowsSystem32Facts(path string) []ResolvedFact {
 	if path == "" {
 		return nil
@@ -1193,7 +1188,7 @@ type linuxDistro struct {
 }
 
 func probeLinuxDistro(s *Session) linuxDistro {
-	return currentLinuxDistro(runtime.GOOS, exec.LookPath, s.commandOutput, s.readFile)
+	return currentLinuxDistro(s.goos(), exec.LookPath, s.commandOutput, s.readFile)
 }
 
 func currentLinuxDistro(goos string, lookPath func(string) (string, error), run commandRunner, readFile fileReader) linuxDistro {
@@ -1669,7 +1664,7 @@ func linuxDistroFacts(distro linuxDistro) []ResolvedFact {
 }
 
 func probeFilesystems(s *Session) []string {
-	return currentFilesystems(runtime.GOOS, s.readFile, s.commandOutput)
+	return currentFilesystems(s.goos(), s.readFile, s.commandOutput)
 }
 
 // filesystemsFacts returns the filesystems fact as an array of filesystem
@@ -1817,16 +1812,17 @@ func kernelFacts(name, release, version string) []ResolvedFact {
 // os name/family/release/architecture/hardware, filesystems, the Linux distro
 // facts, and the macOS and Windows OS-description facts) for the current host.
 func osCoreFacts(s *Session) []ResolvedFact {
+	goos := s.goos()
 	hardwareModel := s.cachedHardwareModel()
 	architecture := s.cachedArchitectureName()
 	linuxDistro := s.cachedLinuxDistro()
-	if runtime.GOOS == "illumos" {
+	if goos == "illumos" {
 		linuxDistro.Name = parseIllumosRelease(readFileString("/etc/release", s.readFile)).Name
 	}
-	osFamily := osFamily(runtime.GOOS, linuxDistro)
-	osName := osName(runtime.GOOS, linuxDistro)
-	kernelName := kernelName(runtime.GOOS)
-	if runtime.GOOS == "plan9" {
+	osFamily := osFamily(goos, linuxDistro)
+	osName := osName(goos, linuxDistro)
+	kernelName := kernelName(goos)
+	if goos == "plan9" {
 		return []ResolvedFact{
 			{Name: "os.architecture", Value: architecture},
 			{Name: "os.family", Value: osFamily},
@@ -1837,8 +1833,8 @@ func osCoreFacts(s *Session) []ResolvedFact {
 	}
 	kernelRelease := s.cachedKernelRelease()
 	osRelease := s.cachedOSRelease()
-	kernelVersion := kernelVersionFact(runtime.GOOS, kernelRelease, "")
-	if runtime.GOOS == "windows" {
+	kernelVersion := kernelVersionFact(goos, kernelRelease, "")
+	if goos == "windows" {
 		if name, release, version, ok := currentWindowsKernel(s.cachedWindowsOSVersionInput(), s.logr()); ok {
 			kernelName = name
 			kernelRelease = release
@@ -1862,7 +1858,9 @@ func osCoreFacts(s *Session) []ResolvedFact {
 	facts = append(facts, macOSSystemProfilerFacts(s.cachedMacOSSystemProfilerHardware())...)
 	facts = append(facts, macOSSystemProfilerSoftwareFacts(s.cachedMacOSSystemProfilerSoftware())...)
 	facts = append(facts, macOSSystemProfilerEthernetFacts(s.cachedMacOSSystemProfilerEthernet())...)
-	facts = append(facts, windowsSystem32Facts(currentWindowsSystem32(runtime.GOOS, os.Getenv("SystemRoot"), currentWindowsProcessWOW64))...)
-	facts = append(facts, windowsProductReleaseFacts(currentWindowsProductRelease(runtime.GOOS, s.commandOutput))...)
+	facts = append(facts, windowsSystem32Facts(currentWindowsSystem32(goos, s.getenv("SystemRoot"), func() (bool, bool) {
+		return s.getenv("PROCESSOR_ARCHITEW6432") != "", true
+	}))...)
+	facts = append(facts, windowsProductReleaseFacts(currentWindowsProductRelease(goos, s.commandOutput))...)
 	return facts
 }

@@ -2,7 +2,6 @@ package engine
 
 import (
 	"log/slog"
-	"runtime"
 	"strconv"
 	"strings"
 )
@@ -73,7 +72,7 @@ func dmiBIOSVendor(dmi map[string]any) string {
 }
 
 func currentFreeBSDDMIFacts(s *Session) []ResolvedFact {
-	return currentFreeBSDDMIFactsForPlatform(runtime.GOOS, s.commandOutput)
+	return currentFreeBSDDMIFactsForPlatform(s.goos(), s.commandOutput)
 }
 
 func currentFreeBSDDMIFactsForPlatform(goos string, run commandRunner) []ResolvedFact {
@@ -91,7 +90,7 @@ func currentFreeBSDDMIFactsForPlatform(goos string, run commandRunner) []Resolve
 // FreeBSD builder. kenv is PATH-resolved here (DragonFly ships it outside
 // FreeBSD's /bin/kenv path).
 func currentDragonFlyDMIFacts(s *Session) []ResolvedFact {
-	return currentDragonFlyDMIFactsForPlatform(runtime.GOOS, s.commandOutput)
+	return currentDragonFlyDMIFactsForPlatform(s.goos(), s.commandOutput)
 }
 
 func currentDragonFlyDMIFactsForPlatform(goos string, run commandRunner) []ResolvedFact {
@@ -113,7 +112,7 @@ func currentDragonFlyDMIFactsForPlatform(goos string, run commandRunner) []Resol
 }
 
 func currentOpenBSDDMIFacts(s *Session) []ResolvedFact {
-	return currentOpenBSDDMIFactsForPlatform(runtime.GOOS, s.commandOutput)
+	return currentOpenBSDDMIFactsForPlatform(s.goos(), s.commandOutput)
 }
 
 func currentOpenBSDDMIFactsForPlatform(goos string, run commandRunner) []ResolvedFact {
@@ -128,7 +127,7 @@ func currentOpenBSDDMIFactsForPlatform(goos string, run commandRunner) []Resolve
 }
 
 func currentNetBSDDMIFacts(s *Session) []ResolvedFact {
-	return currentNetBSDDMIFactsForPlatform(runtime.GOOS, s.commandOutput)
+	return currentNetBSDDMIFactsForPlatform(s.goos(), s.commandOutput)
 }
 
 func currentNetBSDDMIFactsForPlatform(goos string, run commandRunner) []ResolvedFact {
@@ -143,7 +142,7 @@ func currentNetBSDDMIFactsForPlatform(goos string, run commandRunner) []Resolved
 }
 
 func currentIllumosDMIFacts(s *Session) []ResolvedFact {
-	return currentIllumosDMIFactsForPlatform(runtime.GOOS, s.commandOutput)
+	return currentIllumosDMIFactsForPlatform(s.goos(), s.commandOutput)
 }
 
 func currentIllumosDMIFactsForPlatform(goos string, run commandRunner) []ResolvedFact {
@@ -507,7 +506,7 @@ func dmiCoreFacts(s *Session) []ResolvedFact {
 	dmi := s.cachedDMI()
 	facts := dmiFacts(dmi)
 	facts = append(facts, macOSDMIFacts(s.cachedMacOSModel())...)
-	facts = append(facts, windowsDMIFacts(currentWindowsDMI(runtime.GOOS, s.commandOutput, s.logr()))...)
+	facts = append(facts, windowsDMIFacts(currentWindowsDMI(s.goos(), s.commandOutput, s.logr()))...)
 	facts = append(facts, currentFreeBSDDMIFacts(s)...)
 	facts = append(facts, currentDragonFlyDMIFacts(s)...)
 	facts = append(facts, currentOpenBSDDMIFacts(s)...)
