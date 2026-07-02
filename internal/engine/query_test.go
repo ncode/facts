@@ -5,50 +5,26 @@ import (
 	"testing"
 )
 
-func TestSelectWithDottedFacts_digsPartialQueriesThroughStructuredDottedFacts(t *testing.T) {
+func TestProjectionKeepsTypedDottedFactFlatByDefault(t *testing.T) {
 	facts := []ResolvedFact{
 		{Name: "a.b.c", Value: "external", Type: "external"},
 	}
 
-	selected := SelectWithDottedFacts(facts, []string{"a.b", "a"}, true)
-	if len(selected) != 2 {
-		t.Fatalf("Select() returned %d facts, want 2", len(selected))
-	}
-
-	if got, want := ValueForQuery(selected[0]), (map[string]any{"c": "external"}); !reflect.DeepEqual(got, want) {
-		t.Fatalf("ValueForQuery(a.b) = %#v, want %#v", got, want)
-	}
-	if got, want := ValueForQuery(selected[1]), (map[string]any{"b": map[string]any{"c": "external"}}); !reflect.DeepEqual(got, want) {
-		t.Fatalf("ValueForQuery(a) = %#v, want %#v", got, want)
-	}
-}
-
-func TestSelect_keepsTypedDottedFactFlatByDefault(t *testing.T) {
-	facts := []ResolvedFact{
-		{Name: "a.b.c", Value: "external", Type: "external"},
-	}
-
-	selected := Select(facts, []string{"a.b.c", "a.b", "a"})
-	if len(selected) != 3 {
-		t.Fatalf("Select() returned %d facts, want 3", len(selected))
+	selected := NewProjection(facts, false).Select([]string{"a.b.c"})
+	if len(selected) != 1 {
+		t.Fatalf("Select() returned %d facts, want 1", len(selected))
 	}
 	if got := ValueForQuery(selected[0]); got != "external" {
 		t.Fatalf("ValueForQuery(a.b.c) = %#v, want external", got)
 	}
-	if got := ValueForQuery(selected[1]); got != nil {
-		t.Fatalf("ValueForQuery(a.b) = %#v, want nil", got)
-	}
-	if got := ValueForQuery(selected[2]); got != nil {
-		t.Fatalf("ValueForQuery(a) = %#v, want nil", got)
-	}
 }
 
-func TestSelect_unmatchedQueryWithRegexMetacharacterReturnsNilFact(t *testing.T) {
+func TestProjectionUnmatchedQueryWithRegexMetacharacterReturnsNilFact(t *testing.T) {
 	facts := []ResolvedFact{
 		{Name: "a_loaded_fact", Type: "custom"},
 	}
 
-	selected := Select(facts, []string{"regex(string"})
+	selected := NewProjection(facts, false).Select([]string{"regex(string"})
 	if len(selected) != 1 {
 		t.Fatalf("Select() returned %d facts, want 1", len(selected))
 	}
@@ -68,13 +44,13 @@ func TestSelect_unmatchedQueryWithRegexMetacharacterReturnsNilFact(t *testing.T)
 	}
 }
 
-func TestSelect_matchesWildcardFactNameLikeRubyQueryParser(t *testing.T) {
+func TestProjectionMatchesWildcardFactNameLikeRubyQueryParser(t *testing.T) {
 	facts := []ResolvedFact{
 		{Name: "ipaddress_.*", Value: "10.0.0.2", Type: "external"},
 		{Name: "os.family", Value: "Debian", Type: "core"},
 	}
 
-	selected := Select(facts, []string{"ipaddress_ens160"})
+	selected := NewProjection(facts, false).Select([]string{"ipaddress_ens160"})
 	if len(selected) != 1 {
 		t.Fatalf("Select() returned %d facts, want 1", len(selected))
 	}
@@ -91,12 +67,12 @@ func TestSelect_matchesWildcardFactNameLikeRubyQueryParser(t *testing.T) {
 	}
 }
 
-func TestSelect_wildcardFactNameEscapesOtherRegexpCharacters(t *testing.T) {
+func TestProjectionWildcardFactNameEscapesOtherRegexpCharacters(t *testing.T) {
 	facts := []ResolvedFact{
 		{Name: "metric[prod].*", Value: "literal", Type: "external"},
 	}
 
-	selected := Select(facts, []string{"metric[prod]cpu"})
+	selected := NewProjection(facts, false).Select([]string{"metric[prod]cpu"})
 	if len(selected) != 1 {
 		t.Fatalf("Select() returned %d facts, want 1", len(selected))
 	}
@@ -110,13 +86,13 @@ func TestSelect_wildcardFactNameEscapesOtherRegexpCharacters(t *testing.T) {
 	}
 }
 
-func TestSelect_doesNotMatchWildcardNameForDottedStructuredQuery(t *testing.T) {
+func TestProjectionDoesNotMatchWildcardNameForDottedStructuredQuery(t *testing.T) {
 	facts := []ResolvedFact{
 		{Name: "ssh.*key", Value: "wildcard", Type: "external"},
 		{Name: "ssh", Value: map[string]any{"rsa": map[string]any{"key": "structured"}}, Type: "core"},
 	}
 
-	selected := Select(facts, []string{"ssh.rsa.key"})
+	selected := NewProjection(facts, false).Select([]string{"ssh.rsa.key"})
 	if len(selected) != 1 {
 		t.Fatalf("Select() returned %d facts, want 1", len(selected))
 	}

@@ -1,6 +1,9 @@
 package engine
 
-import "strings"
+import (
+	"regexp"
+	"strings"
+)
 
 // Projection owns query selection and output projection over one set of
 // resolved facts. It centralizes the rules that Snapshot value lookup, the CLI
@@ -156,4 +159,13 @@ func findFactIn(facts []ResolvedFact, collection map[string]any, query string) R
 		return ResolvedFact{Name: query, UserQuery: query, Value: value}
 	}
 	return ResolvedFact{Name: query, UserQuery: query, Type: "nil"}
+}
+
+func factMatchesQuery(factName, query string) bool {
+	if strings.Contains(factName, ".*") && !strings.Contains(query, ".") {
+		pattern := strings.ReplaceAll(regexp.QuoteMeta(factName), `\.\*`, `.*`)
+		matched, err := regexp.MatchString("^"+pattern+"$", query)
+		return err == nil && matched
+	}
+	return query == factName || strings.HasPrefix(query, factName+".")
 }
