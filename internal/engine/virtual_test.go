@@ -1632,3 +1632,61 @@ func mapsEqual(got, want map[string]any) bool {
 	}
 	return true
 }
+
+// One discovery must gather the virtualization signals exactly once, however
+// many consumers read them: the virtual/is_virtual facts, the hypervisors
+// tree, and the uptime container gate all share the Session memo.
+func TestBuildCoreFactsGathersVirtualizationOncePerDiscovery(t *testing.T) {
+	t.Run("linux", func(t *testing.T) {
+		// Gather outputs pinned empty so classification is physical — the
+		// assertion is about probe count, not classification.
+		host := &fakeHostOS{
+			platform:        "linux",
+			emptyRunDefault: true,
+			runOutputs:      map[string]string{fakeRunKey("uname", "-r"): "6.1.0-generic\n"},
+		}
+		s := NewSessionContext(context.Background())
+		s.host = host
+
+		buildCoreFacts(s, nil)
+
+		counts := map[string]int{}
+		for _, call := range host.runCalls {
+			counts[fakeRunKey(call.name, call.args...)]++
+		}
+		for _, cmd := range []string{
+			fakeRunKey("dmidecode"),
+			fakeRunKey("virt-what"),
+			fakeRunKey("vmware", "-v"),
+			fakeRunKey("lspci"),
+		} {
+			if counts[cmd] != 1 {
+				t.Fatalf("command %q ran %d times across virtual+hypervisors+uptime, want exactly 1", cmd, counts[cmd])
+			}
+		}
+	})
+
+	t.Run("windows", func(t *testing.T) {
+		host := &fakeHostOS{
+			platform:        "windows",
+			emptyRunDefault: true,
+			runOutputs: map[string]string{
+				fakeRunKey("wmic", "computersystem", "get", "Manufacturer,Model,OEMStringArray", "/value"): "Manufacturer=Fake Inc.\nModel=FakeStation\nOEMStringArray={}\n",
+				fakeRunKey("wmic", "bios", "get", "Manufacturer", "/value"):                                "Manufacturer=FakeBIOS\n",
+			},
+		}
+		s := NewSessionContext(context.Background())
+		s.host = host
+
+		buildCoreFacts(s, nil)
+
+		counts := map[string]int{}
+		for _, call := range host.runCalls {
+			counts[fakeRunKey(call.name, call.args...)]++
+		}
+		gather := fakeRunKey("wmic", "computersystem", "get", "Manufacturer,Model,OEMStringArray", "/value")
+		if counts[gather] != 1 {
+			t.Fatalf("windows wmic gather ran %d times across virtual+hypervisors, want exactly 1", counts[gather])
+		}
+	})
+}

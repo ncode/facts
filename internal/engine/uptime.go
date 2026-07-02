@@ -45,7 +45,7 @@ func currentUptimeInfo(s *Session, goos string, readFile fileReader, run command
 		return currentPlan9Uptime(run)
 	}
 	if goos == "linux" {
-		virtual := detectLinuxVirtualization(currentLinuxVirtualizationInputWithCommands(s, run))
+		virtual := detectLinuxVirtualization(s.cachedLinuxVirtualizationInput())
 		return currentLinuxUptimeInfo(readFile, run, now, linuxContainerUptimeUsesPID1(virtual.Name))
 	}
 	return currentPosixUptime(readFile, run, now)

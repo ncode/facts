@@ -661,3 +661,69 @@ func TestSessionGetenvUsesHostEnviron(t *testing.T) {
 		t.Fatalf("getenv(programdata) = %q, want C:\\ProgramData", got)
 	}
 }
+
+// Two accessor calls must run each virtualization gather command exactly once.
+// Commands are counted by exact name+args (fakeRunKey): ec2 runs a
+// path-qualified virt-what and the BSD DMI probe a path-qualified dmidecode,
+// so substring counting would miscount.
+func TestSessionLinuxVirtualizationGatherRunsOnce(t *testing.T) {
+	host := &fakeHostOS{
+		platform:        "linux",
+		emptyRunDefault: true,
+		runOutputs:      map[string]string{fakeRunKey("uname", "-r"): "6.1.0-generic\n"},
+	}
+	s := NewSessionContext(context.Background())
+	s.host = host
+
+	first := s.cachedLinuxVirtualizationInput()
+	second := s.cachedLinuxVirtualizationInput()
+	if !reflect.DeepEqual(first, second) {
+		t.Fatalf("second gather = %#v, want memoized %#v", second, first)
+	}
+
+	counts := map[string]int{}
+	for _, call := range host.runCalls {
+		counts[fakeRunKey(call.name, call.args...)]++
+	}
+	for _, cmd := range []string{
+		fakeRunKey("dmidecode"),
+		fakeRunKey("virt-what"),
+		fakeRunKey("vmware", "-v"),
+		fakeRunKey("lspci"),
+		fakeRunKey("uname", "-r"), // the gather reads cachedKernelRelease
+	} {
+		if counts[cmd] != 1 {
+			t.Fatalf("command %q ran %d times, want exactly 1 (calls=%v)", cmd, counts[cmd], host.runCalls)
+		}
+	}
+	if len(host.runCalls) != 5 {
+		t.Fatalf("gather ran %d commands, want 5: %v", len(host.runCalls), host.runCalls)
+	}
+}
+
+func TestSessionWindowsVirtualizationGatherRunsOnce(t *testing.T) {
+	// The wmic outputs contain "=" so windowsWMIOutput never falls back to the
+	// powershell CIM script — the gather is 3 commands, not 5.
+	host := &fakeHostOS{
+		platform:        "windows",
+		emptyRunDefault: true,
+		runOutputs: map[string]string{
+			fakeRunKey("wmic", "computersystem", "get", "Manufacturer,Model,OEMStringArray", "/value"): "Manufacturer=Fake Inc.\nModel=FakeStation\nOEMStringArray={}\n",
+			fakeRunKey("wmic", "bios", "get", "Manufacturer", "/value"):                                "Manufacturer=FakeBIOS\n",
+		},
+	}
+	s := NewSessionContext(context.Background())
+	s.host = host
+
+	first := s.cachedWindowsVirtualizationInput()
+	second := s.cachedWindowsVirtualizationInput()
+	if !reflect.DeepEqual(first, second) {
+		t.Fatalf("second gather = %#v, want memoized %#v", second, first)
+	}
+	if len(host.runCalls) != 3 {
+		t.Fatalf("gather ran %d commands, want 3 (wmic x2 + reg query): %v", len(host.runCalls), host.runCalls)
+	}
+	if first.Manufacturer != "Fake Inc." || first.BIOSManufacturer != "FakeBIOS" {
+		t.Fatalf("gather input = %#v, want parsed wmic values", first)
+	}
+}

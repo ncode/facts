@@ -231,6 +231,8 @@ type Session struct {
 	filesystems                  memo[[]string]
 	identity                     memo[map[string]any]
 	dmi                          memo[map[string]any]
+	linuxVirtualization          memo[linuxVirtualizationInput]
+	windowsVirtualization        memo[windowsVirtualizationInput]
 }
 
 // NewSession returns an empty Session; probes run on first use.
@@ -451,4 +453,20 @@ func (s *Session) cachedIdentity() map[string]any {
 // the per-category split (ADR-0010).
 func (s *Session) cachedDMI() map[string]any {
 	return s.dmi.get(func() map[string]any { return dmiFact("/sys/class/dmi/id", s.readFile) })
+}
+
+// cachedLinuxVirtualizationInput memoizes the Linux virtualization signal
+// gather (DMI reads plus the dmidecode/virt-what/vmware/lspci command set) so
+// the virtual fact, the hypervisors tree, and the uptime container gate share
+// one gather per discovery. Classification stays a pure derivation over the
+// memoized input.
+func (s *Session) cachedLinuxVirtualizationInput() linuxVirtualizationInput {
+	return s.linuxVirtualization.get(func() linuxVirtualizationInput { return currentLinuxVirtualizationInput(s) })
+}
+
+// cachedWindowsVirtualizationInput memoizes the Windows virtualization gather
+// (wmic/CIM computersystem+bios plus the services registry query) shared by the
+// virtual fact and the hypervisors tree.
+func (s *Session) cachedWindowsVirtualizationInput() windowsVirtualizationInput {
+	return s.windowsVirtualization.get(func() windowsVirtualizationInput { return currentWindowsVirtualizationInput(s.goos(), s.commandOutput) })
 }

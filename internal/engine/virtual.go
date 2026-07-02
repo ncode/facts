@@ -118,7 +118,7 @@ type windowsVirtualizationInput struct {
 func detectVirtualization(s *Session) virtualization {
 	switch s.goos() {
 	case "linux":
-		return detectLinuxVirtualization(currentLinuxVirtualizationInput(s))
+		return detectLinuxVirtualization(s.cachedLinuxVirtualizationInput())
 	case "darwin":
 		return detectMacOSVirtualization(s.cachedMacOSSystemProfilerHardware())
 	case "freebsd":
@@ -132,7 +132,7 @@ func detectVirtualization(s *Session) virtualization {
 	case "illumos":
 		return detectDMIHostVirtualization(currentIllumosVirtualizationInput(s.commandOutput))
 	case "windows":
-		return detectWindowsVirtualization(currentWindowsVirtualizationInput(s.goos(), s.commandOutput))
+		return detectWindowsVirtualization(s.cachedWindowsVirtualizationInput())
 	case "plan9":
 		return virtualization{Unknown: true}
 	default:
@@ -335,7 +335,7 @@ func currentWindowsHypervisorFacts(s *Session) []ResolvedFact {
 	if s.goos() != "windows" {
 		return nil
 	}
-	return windowsHypervisorFacts(currentWindowsVirtualizationInput(s.goos(), s.commandOutput))
+	return windowsHypervisorFacts(s.cachedWindowsVirtualizationInput())
 }
 
 func windowsHypervisorFacts(input windowsVirtualizationInput) []ResolvedFact {
@@ -613,7 +613,7 @@ func currentLinuxHypervisorFacts(s *Session) []ResolvedFact {
 	if s.goos() != "linux" {
 		return nil
 	}
-	return linuxHypervisorFacts(currentLinuxVirtualizationInput(s))
+	return linuxHypervisorFacts(s.cachedLinuxVirtualizationInput())
 }
 
 func linuxHypervisorFacts(input linuxVirtualizationInput) []ResolvedFact {
