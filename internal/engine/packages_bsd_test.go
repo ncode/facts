@@ -153,6 +153,8 @@ func TestPkgsrcPackages(t *testing.T) {
 		dbdir string
 	}{
 		{name: "default pkgdb", dbdir: "/usr/pkg/pkgdb"},
+		{name: "smartos pkgdb", dbdir: "/opt/local/pkgdb"},
+		{name: "smartos legacy", dbdir: "/opt/local/pkg"},
 		{name: "legacy fallback", dbdir: "/var/db/pkg"},
 	}
 	for _, tt := range tests {

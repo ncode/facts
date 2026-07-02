@@ -63,7 +63,7 @@ $ facts --json
 
 ## Fact Contract
 
-110 schema entries include `darwin`.
+111 schema entries include `darwin`.
 
 | Fact | Type | Conditional | Description |
 | --- | --- | --- | --- |
@@ -154,7 +154,8 @@ $ facts --json
 | `os.release.major` | `string` | no | The major release number of the operating system. |
 | `os.release.minor` | `string` | yes | The minor release number of the operating system, when it has one. |
 | `packages.apps` | `array` | yes | macOS application bundles as {name, version, bundle_id, path} records; secondary to receipts and never merged with it. |
-| `packages.homebrew` | `array` | yes | Homebrew formulae and casks as {name, version, type} records, when a Cellar prefix exists. |
+| `packages.homebrew` | `array` | yes | Homebrew formulae and casks as {name, version, type, prefix} records from every detected prefix (/opt/homebrew, /usr/local); prefix distinguishes dual-install duplicates. |
+| `packages.nix` | `array` | yes | Installed Nix packages as {name, version} records — the NixOS system profile set, or the default profile (/nix/var/nix/profiles/default) on non-NixOS hosts; never the whole /nix/store. |
 | `packages.receipts` | `array` | yes | macOS installer(8)/PackageKit .pkg receipts as {name, version} records, from /var/db/receipts; the primary macOS source. |
 | `path` | `array` | no | The PATH environment entries of the Facts process, in lookup order. |
 | `processors.cores` | `integer` | no | The number of cores per processor socket. |

@@ -175,7 +175,7 @@ $ facts --json
 | `os.release.full` | `string` | no | The full release number of the operating system. |
 | `os.release.major` | `string` | no | The major release number of the operating system. |
 | `os.release.minor` | `string` | yes | The minor release number of the operating system, when it has one. |
-| `packages.pkgsrc` | `array` | yes | Installed pkgsrc packages as {name, version} records, from the discovered PKG_DBDIR. |
+| `packages.pkgsrc` | `array` | yes | Installed pkgsrc packages as {name, version} records, from the discovered PKG_DBDIR; NetBSD's primary source and an illumos/SmartOS and DragonFly secondary. |
 | `partitions.*` | `map` | yes | A disk partition (or device-mapper/loop device), keyed by device path. |
 | `partitions.*.filesystem` | `string` | yes | The filesystem type of the partition. |
 | `partitions.*.mount` | `string` | yes | The path the partition is mounted on. |

@@ -56,13 +56,16 @@ func openbsdPackages(readDir func(string) ([]os.DirEntry, error), readFile fileR
 	return records
 }
 
-// pkgsrcPackages enumerates the installed NetBSD pkgsrc packages recorded as
-// <name>-<version> subdirectories of PKG_DBDIR. PKG_DBDIR is not hardcoded to a
-// single path: the standard candidates are probed in order (the pkgsrc default
-// /usr/pkg/pkgdb, then the legacy /var/db/pkg), using the first that lists any
-// package entries.
+// pkgsrcPackages enumerates the installed pkgsrc packages recorded as
+// <name>-<version> subdirectories of PKG_DBDIR. It is NetBSD's primary source
+// and an illumos/SmartOS and DragonFly secondary (ADR-0014). PKG_DBDIR is not
+// hardcoded to a single path: the standard candidates are probed in order —
+// the pkgsrc default /usr/pkg/pkgdb, the SmartOS prefix /opt/local/pkgdb (and
+// its pre-2019 /opt/local/pkg), then the legacy /var/db/pkg — using the first
+// that lists any package entries. On a pkgng host /var/db/pkg holds only
+// sqlite files (no <name>-<version> directories), so it contributes nothing.
 func pkgsrcPackages(readDir func(string) ([]os.DirEntry, error)) []any {
-	for _, dbdir := range []string{"/usr/pkg/pkgdb", "/var/db/pkg"} {
+	for _, dbdir := range []string{"/usr/pkg/pkgdb", "/opt/local/pkgdb", "/opt/local/pkg", "/var/db/pkg"} {
 		entries, err := readDir(dbdir)
 		if err != nil {
 			continue

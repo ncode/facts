@@ -91,9 +91,27 @@ func flatpakPackages(run commandRunner) []any {
 // derivations (name-version-doc, -man, -bin, ...) collapse to one record via
 // dedup on name+version; unversioned environment members are skipped.
 func nixPackages(run commandRunner) []any {
-	// nix-store lives in the NixOS system profile, outside the engine's trusted
-	// command PATH (/usr/sbin:/usr/bin:/sbin:/bin); call it by absolute path.
+	// Both nix tools live outside the engine's trusted command PATH
+	// (/usr/sbin:/usr/bin:/sbin:/bin), so they are called by absolute path.
+	// NixOS first: the system profile is canonical there, and stopping on it
+	// avoids double-reporting nix itself from the default profile.
 	out := run("/run/current-system/sw/bin/nix-store", "-q", "--references", "/run/current-system/sw")
+	if records := nixRecordsFromLines(out, true); records != nil {
+		return records
+	}
+	// Non-NixOS daemon/multi-user nix (ADR-0014: the profile set includes the
+	// default profile): nix-env lists the default profile's <name>-<version>
+	// elements directly — this profile carries the manifest.nix that the NixOS
+	// system buildEnv lacks.
+	out = run("/nix/var/nix/profiles/default/bin/nix-env", "-q", "--profile", "/nix/var/nix/profiles/default")
+	return nixRecordsFromLines(out, false)
+}
+
+// nixRecordsFromLines converts nix enumeration output to sorted records. With
+// storePaths true, each line is /nix/store/<hash>-<name>-<version>[-<output>]
+// and the hash is dropped; otherwise each line is a bare <name>-<version>
+// profile element. Split-output duplicates collapse via dedup on name+version.
+func nixRecordsFromLines(out string, storePaths bool) []any {
 	var records []any
 	seen := map[string]bool{}
 	for line := range strings.Lines(out) {
@@ -101,10 +119,13 @@ func nixPackages(run commandRunner) []any {
 		if line == "" {
 			continue
 		}
-		base := line[strings.LastIndexByte(line, '/')+1:]
-		_, tail, ok := strings.Cut(base, "-") // drop the store hash
-		if !ok {
-			continue
+		tail := line
+		if storePaths {
+			base := line[strings.LastIndexByte(line, '/')+1:]
+			var ok bool
+			if _, tail, ok = strings.Cut(base, "-"); !ok { // drop the store hash
+				continue
+			}
 		}
 		name, version := parseNixNameVersion(tail)
 		if name == "" || version == "" {
@@ -168,8 +189,12 @@ func flatpakPresent(stat func(string) (os.FileInfo, error)) bool {
 	return dirPresent(stat, "/var/lib/flatpak")
 }
 
+// nixProfilePresent opens the nix gate when either profile exists: the NixOS
+// system profile or the daemon-install default profile (ADR-0014 names both as
+// the installed profile set). os.Stat follows the profile symlinks.
 func nixProfilePresent(stat func(string) (os.FileInfo, error)) bool {
-	return dirPresent(stat, "/nix/var/nix/profiles/system")
+	return dirPresent(stat, "/nix/var/nix/profiles/system") ||
+		dirPresent(stat, "/nix/var/nix/profiles/default")
 }
 
 func dirPresent(stat func(string) (os.FileInfo, error), path string) bool {

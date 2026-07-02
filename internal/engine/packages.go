@@ -37,18 +37,25 @@ func packagesCoreFacts(s *Session) []ResolvedFact {
 		if nixProfilePresent(s.stat) {
 			add("nix", nixPackages(s.commandOutput))
 		}
-	case "freebsd", "dragonfly":
+	case "freebsd":
 		add("pkg", pkgngPackages(s.commandOutput))
+	case "dragonfly":
+		add("pkg", pkgngPackages(s.commandOutput))
+		add("pkgsrc", pkgsrcPackages(s.readDir)) // ADR-0014: pkgsrc secondary
 	case "openbsd":
 		add("openbsd_pkg", openbsdPackages(s.readDir, s.readFile))
 	case "netbsd":
 		add("pkgsrc", pkgsrcPackages(s.readDir))
 	case "illumos":
 		add("ips", ipsPackages(s.commandOutput))
+		add("pkgsrc", pkgsrcPackages(s.readDir)) // ADR-0014: SmartOS pkgsrc secondary
 	case "darwin":
 		add("receipts", receiptsPackages(s.glob, s.commandOutput))
 		add("apps", appsPackages(s.glob, s.commandOutput))
 		add("homebrew", homebrewPackages(s.glob))
+		if nixProfilePresent(s.stat) { // design: nix where a profile is present
+			add("nix", nixPackages(s.commandOutput))
+		}
 	case "windows":
 		add("registry", registryPackages(s.commandOutput))
 		add("appx", appxPackages(s.commandOutput))
@@ -80,7 +87,7 @@ func sortPackages(records []any) {
 		// name/architecture/version first, then the remaining identity fields,
 		// so siblings that share a name+arch+version still order deterministically
 		// regardless of the reader's append order.
-		for _, key := range []string{"name", "architecture", "version", "type", "branch", "product_code", "bundle_id", "store_path", "path"} {
+		for _, key := range []string{"name", "architecture", "version", "type", "branch", "prefix", "product_code", "bundle_id", "store_path", "path"} {
 			if av, bv := packageField(a, key), packageField(b, key); av != bv {
 				return av < bv
 			}
@@ -130,11 +137,22 @@ func dpkgPackages(readFile fileReader) []any {
 }
 
 // dpkgInstalled reports whether a dpkg Status line's current-state component
-// (the third field of "<want> ok <state>") is "installed", so held packages
-// ("hold ok installed") are kept while removed/config-files entries are dropped.
+// (the third field of "<want> ok <state>") means the package is on disk and
+// functional: "installed", plus the two trigger states — a package awaiting or
+// pending trigger processing is fully unpacked and configured, and dpkg can sit
+// in those states across discoveries. Held packages ("hold ok installed") are
+// kept; removed/config-files/half-installed entries are dropped.
 func dpkgInstalled(status string) bool {
 	fields := strings.Fields(status)
-	return len(fields) == 3 && fields[2] == "installed"
+	if len(fields) != 3 {
+		return false
+	}
+	switch fields[2] {
+	case "installed", "triggers-awaited", "triggers-pending":
+		return true
+	default:
+		return false
+	}
 }
 
 // rpmPackages runs one epoch-bearing rpm query (a bare `rpm -qa` omits the epoch

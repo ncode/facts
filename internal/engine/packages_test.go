@@ -30,6 +30,21 @@ Status: hold ok installed
 Architecture: amd64
 Version: 1.22.1-9
 
+Package: man-db
+Status: install ok triggers-awaited
+Architecture: amd64
+Version: 2.11.2-2
+
+Package: fontconfig
+Status: install ok triggers-pending
+Architecture: amd64
+Version: 2.14.1-4
+
+Package: broken-pkg
+Status: install ok half-installed
+Architecture: amd64
+Version: 0.9
+
 Package: removed-pkg
 Status: deinstall ok config-files
 Architecture: amd64
@@ -46,9 +61,11 @@ func TestDpkgPackages_installedOnlyWithMultiarchSiblings(t *testing.T) {
 	})
 	want := []any{
 		map[string]any{"name": "adduser", "version": "3.134", "architecture": "all"},
+		map[string]any{"name": "fontconfig", "version": "2.14.1-4", "architecture": "amd64"}, // triggers-pending kept
 		map[string]any{"name": "libc6", "version": "2.36-9+deb12u7", "architecture": "amd64"},
 		map[string]any{"name": "libc6", "version": "2.36-9+deb12u7", "architecture": "i386"},
-		map[string]any{"name": "nginx", "version": "1.22.1-9", "architecture": "amd64"}, // held package kept
+		map[string]any{"name": "man-db", "version": "2.11.2-2", "architecture": "amd64"}, // triggers-awaited kept
+		map[string]any{"name": "nginx", "version": "1.22.1-9", "architecture": "amd64"},  // held package kept
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("dpkgPackages() = %#v\nwant %#v", got, want)

@@ -25,6 +25,10 @@ func BuiltinFactGroups() []FactGroup {
 		{Name: "memory", Facts: []string{"memory"}},
 		{Name: "networking", Facts: []string{"networking"}},
 		{Name: "operating system", Facts: []string{"os"}},
+		// Facts-native group (ADR-0014): a deliberate divergence from Ruby
+		// Facter's group list, so a disable names package collection as one
+		// unit and --list-block-groups shows it.
+		{Name: "packages", Facts: []string{"packages"}},
 		{Name: "path", Facts: []string{"path"}},
 		{Name: "processor", Facts: []string{"processors"}},
 	}

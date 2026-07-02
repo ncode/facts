@@ -70,6 +70,63 @@ func TestParseNixNameVersion_digitLeadingNames(t *testing.T) {
 	}
 }
 
+// nixEnvDefaultProfileFixture is verbatim `nix-env -q --profile
+// /nix/var/nix/profiles/default` output from a daemon (multi-user) nix install
+// on the nlab ubuntu2404 guest — the non-NixOS shape (ADR-0014: the installed
+// profile set is the default profile AND the NixOS system profile).
+const nixEnvDefaultProfileFixture = `nix-2.34.7
+nix-manual-2.34.7-man
+nss-cacert-3.117
+`
+
+func TestNixPackages_fallsBackToDefaultProfileOnNonNixOS(t *testing.T) {
+	t.Parallel()
+	var calls []string
+	got := nixPackages(func(name string, args ...string) string {
+		calls = append(calls, name)
+		switch name {
+		case "/run/current-system/sw/bin/nix-store":
+			return "" // not NixOS: no system profile environment
+		case "/nix/var/nix/profiles/default/bin/nix-env":
+			if !reflect.DeepEqual(args, []string{"-q", "--profile", "/nix/var/nix/profiles/default"}) {
+				t.Fatalf("nix-env args = %v", args)
+			}
+			return nixEnvDefaultProfileFixture
+		default:
+			t.Fatalf("unexpected command %q", name)
+			return ""
+		}
+	})
+	want := []any{
+		map[string]any{"name": "nix", "version": "2.34.7"},
+		map[string]any{"name": "nix-manual", "version": "2.34.7"}, // -man output suffix stripped
+		map[string]any{"name": "nss-cacert", "version": "3.117"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("nixPackages(default profile) = %#v\nwant %#v", got, want)
+	}
+	if len(calls) != 2 {
+		t.Fatalf("calls = %v, want nix-store then nix-env fallback", calls)
+	}
+}
+
+func TestNixPackages_systemProfileWinsWithoutFallbackSpawn(t *testing.T) {
+	t.Parallel()
+	var calls []string
+	got := nixPackages(func(name string, args ...string) string {
+		calls = append(calls, name)
+		return "/nix/store/mxq1r9w2w2y9lsqb5fkcyb5xbbki1n57-ncurses-6.6\n"
+	})
+	if want := []any{map[string]any{"name": "ncurses", "version": "6.6"}}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("nixPackages(system) = %#v, want %#v", got, want)
+	}
+	// NixOS: the system profile is canonical; the default-profile fallback must
+	// not run (it could double-report nix itself).
+	if want := []string{"/run/current-system/sw/bin/nix-store"}; !reflect.DeepEqual(calls, want) {
+		t.Fatalf("calls = %v, want %v", calls, want)
+	}
+}
+
 func TestNixPackages_emptyProfileYieldsNothing(t *testing.T) {
 	t.Parallel()
 	if got := nixPackages(func(string, ...string) string { return "" }); got != nil {
@@ -161,7 +218,6 @@ func TestExtraPackageSourcePresenceGates(t *testing.T) {
 	}{
 		{"snap", snapdPresent, "/var/lib/snapd"},
 		{"flatpak", flatpakPresent, "/var/lib/flatpak"},
-		{"nix", nixProfilePresent, "/nix/var/nix/profiles/system"},
 	}
 	for _, tc := range cases {
 		present := func(path string) (os.FileInfo, error) {
@@ -183,5 +239,28 @@ func TestExtraPackageSourcePresenceGates(t *testing.T) {
 		if tc.gate(notDir) {
 			t.Fatalf("%s gate = true with %s a non-directory, want false", tc.name, tc.dir)
 		}
+	}
+}
+
+func TestNixProfilePresent_eitherSystemOrDefault(t *testing.T) {
+	t.Parallel()
+	// ADR-0014: the nix profile set is the NixOS system profile AND the
+	// default profile — the gate must open when either exists.
+	only := func(dir string) func(string) (os.FileInfo, error) {
+		return func(path string) (os.FileInfo, error) {
+			if path == dir {
+				return fakeFileInfo{name: dir, mode: os.ModeDir, isDir: true}, nil
+			}
+			return nil, os.ErrNotExist
+		}
+	}
+	if !nixProfilePresent(only("/nix/var/nix/profiles/system")) {
+		t.Fatal("nixProfilePresent = false with only the NixOS system profile")
+	}
+	if !nixProfilePresent(only("/nix/var/nix/profiles/default")) {
+		t.Fatal("nixProfilePresent = false with only the default profile")
+	}
+	if nixProfilePresent(func(string) (os.FileInfo, error) { return nil, os.ErrNotExist }) {
+		t.Fatal("nixProfilePresent = true with neither profile")
 	}
 }

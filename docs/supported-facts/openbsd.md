@@ -156,7 +156,7 @@ $ facts --json
 | `os.release.full` | `string` | no | The full release number of the operating system. |
 | `os.release.major` | `string` | no | The major release number of the operating system. |
 | `os.release.minor` | `string` | yes | The minor release number of the operating system, when it has one. |
-| `packages.openbsd_pkg` | `array` | yes | Installed OpenBSD packages as {name, version} records, from /var/db/pkg. |
+| `packages.openbsd_pkg` | `array` | yes | Installed OpenBSD packages as {name, version, architecture} records, from /var/db/pkg (architecture from each package's +CONTENTS @arch; omitted for arch-independent packages). |
 | `partitions.*` | `map` | yes | A disk partition (or device-mapper/loop device), keyed by device path. |
 | `partitions.*.filesystem` | `string` | yes | The filesystem type of the partition. |
 | `partitions.*.mount` | `string` | yes | The path the partition is mounted on. |

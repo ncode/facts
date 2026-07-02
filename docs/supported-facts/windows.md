@@ -134,7 +134,7 @@ $ facts --json
 | `os.windows.product_name` | `string` | no | The Windows product name, such as Windows Server 2022 Datacenter. |
 | `os.windows.release_id` | `string` | no | The Windows release identifier (the display version when available). |
 | `os.windows.system32` | `string` | no | The native system32 directory, sysnative-aware for 32-bit processes. |
-| `packages.appx` | `array` | yes | System-provisioned Windows AppX packages as {name, version, architecture} records. |
+| `packages.appx` | `array` | yes | Windows AppX/MSIX packages as {name, version, architecture} records — the system-provisioned set plus the collector context's packages, deduplicated. |
 | `packages.registry` | `array` | yes | Windows uninstall entries from both HKLM hives as {name, version, product_code, architecture} records. |
 | `path` | `array` | no | The PATH environment entries of the Facts process, in lookup order. |
 | `processors.cores` | `integer` | no | The number of cores per processor socket. |

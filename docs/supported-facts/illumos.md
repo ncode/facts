@@ -89,7 +89,7 @@ $ facts --json
 
 ## Fact Contract
 
-115 schema entries include `illumos`.
+116 schema entries include `illumos`.
 
 | Fact | Type | Conditional | Description |
 | --- | --- | --- | --- |
@@ -179,6 +179,7 @@ $ facts --json
 | `os.release.full` | `string` | no | The full release number of the operating system. |
 | `os.release.major` | `string` | no | The major release number of the operating system. |
 | `packages.ips` | `array` | yes | Installed illumos IPS packages as {name, version} records, from the local image (no network refresh). |
+| `packages.pkgsrc` | `array` | yes | Installed pkgsrc packages as {name, version} records, from the discovered PKG_DBDIR; NetBSD's primary source and an illumos/SmartOS and DragonFly secondary. |
 | `partitions.*` | `map` | yes | A disk partition (or device-mapper/loop device), keyed by device path. |
 | `partitions.*.filesystem` | `string` | yes | The filesystem type of the partition. |
 | `partitions.*.size` | `string` | yes | The display size of the partition, such as 1.00 GiB. |

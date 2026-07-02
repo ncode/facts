@@ -7,11 +7,11 @@ These pages are generated from [`docs/schema/facts.yaml`](../schema/facts.yaml).
 | Platform | Supported facts |
 | --- | ---: |
 | [Linux](linux.md) | 182 |
-| [macOS / Darwin](darwin.md) | 110 |
+| [macOS / Darwin](darwin.md) | 111 |
 | [Windows](windows.md) | 103 |
 | [FreeBSD](freebsd.md) | 132 |
 | [OpenBSD](openbsd.md) | 114 |
 | [NetBSD](netbsd.md) | 118 |
-| [DragonFly BSD](dragonfly.md) | 116 |
-| [illumos](illumos.md) | 115 |
+| [DragonFly BSD](dragonfly.md) | 117 |
+| [illumos](illumos.md) | 116 |
 | [Plan 9](plan9.md) | 29 |
