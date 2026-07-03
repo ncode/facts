@@ -1,7 +1,6 @@
 package engine
 
 import (
-	"log/slog"
 	"strconv"
 	"strings"
 )
@@ -72,16 +71,12 @@ func dmiBIOSVendor(dmi map[string]any) string {
 }
 
 func currentFreeBSDDMIFacts(s *Session) []ResolvedFact {
-	return currentFreeBSDDMIFactsForPlatform(s.goos(), s.commandOutput)
-}
-
-func currentFreeBSDDMIFactsForPlatform(goos string, run commandRunner) []ResolvedFact {
-	if goos != "freebsd" {
+	if s.goos() != "freebsd" {
 		return nil
 	}
 	values := make(map[string]string, len(freeBSDDMIKeys))
 	for _, key := range freeBSDDMIKeys {
-		values[key] = run("/bin/kenv", key)
+		values[key] = s.commandOutput("/bin/kenv", key)
 	}
 	return freeBSDDMIFacts(values)
 }
@@ -90,69 +85,53 @@ func currentFreeBSDDMIFactsForPlatform(goos string, run commandRunner) []Resolve
 // FreeBSD builder. kenv is PATH-resolved here (DragonFly ships it outside
 // FreeBSD's /bin/kenv path).
 func currentDragonFlyDMIFacts(s *Session) []ResolvedFact {
-	return currentDragonFlyDMIFactsForPlatform(s.goos(), s.commandOutput)
-}
-
-func currentDragonFlyDMIFactsForPlatform(goos string, run commandRunner) []ResolvedFact {
-	if goos != "dragonfly" {
+	if s.goos() != "dragonfly" {
 		return nil
 	}
 	values := make(map[string]string, len(freeBSDDMIKeys))
 	for _, key := range freeBSDDMIKeys {
-		values[key] = run("kenv", key)
+		values[key] = s.commandOutput("kenv", key)
 	}
 	if facts := freeBSDDMIFacts(values); len(facts) > 0 {
 		return facts
 	}
 	return dragonFlyDMIDecodeFacts(
-		run("/usr/local/sbin/dmidecode", "-t", "bios"),
-		run("/usr/local/sbin/dmidecode", "-t", "system"),
-		run("/usr/local/sbin/dmidecode", "-t", "chassis"),
+		s.commandOutput("/usr/local/sbin/dmidecode", "-t", "bios"),
+		s.commandOutput("/usr/local/sbin/dmidecode", "-t", "system"),
+		s.commandOutput("/usr/local/sbin/dmidecode", "-t", "chassis"),
 	)
 }
 
 func currentOpenBSDDMIFacts(s *Session) []ResolvedFact {
-	return currentOpenBSDDMIFactsForPlatform(s.goos(), s.commandOutput)
-}
-
-func currentOpenBSDDMIFactsForPlatform(goos string, run commandRunner) []ResolvedFact {
-	if goos != "openbsd" {
+	if s.goos() != "openbsd" {
 		return nil
 	}
 	values := make(map[string]string, len(openBSDDMIKeys))
 	for _, key := range openBSDDMIKeys {
-		values[key] = run("/sbin/sysctl", "-n", key)
+		values[key] = s.commandOutput("/sbin/sysctl", "-n", key)
 	}
 	return openBSDDMIFacts(values)
 }
 
 func currentNetBSDDMIFacts(s *Session) []ResolvedFact {
-	return currentNetBSDDMIFactsForPlatform(s.goos(), s.commandOutput)
-}
-
-func currentNetBSDDMIFactsForPlatform(goos string, run commandRunner) []ResolvedFact {
-	if goos != "netbsd" {
+	if s.goos() != "netbsd" {
 		return nil
 	}
 	values := make(map[string]string, len(netBSDDMIKeys))
 	for _, key := range netBSDDMIKeys {
-		values[key] = run("/sbin/sysctl", "-n", key)
+		values[key] = s.commandOutput("/sbin/sysctl", "-n", key)
 	}
 	return netBSDDMIFacts(values)
 }
 
 func currentIllumosDMIFacts(s *Session) []ResolvedFact {
-	return currentIllumosDMIFactsForPlatform(s.goos(), s.commandOutput)
-}
-
-func currentIllumosDMIFactsForPlatform(goos string, run commandRunner) []ResolvedFact {
-	if goos != "illumos" {
+	if s.goos() != "illumos" {
 		return nil
 	}
 	return illumosDMIFacts(
-		run("/usr/sbin/smbios", "-t", "SMB_TYPE_BIOS"),
-		run("/usr/sbin/smbios", "-t", "SMB_TYPE_SYSTEM"),
-		run("/usr/sbin/smbios", "-t", "SMB_TYPE_CHASSIS"),
+		s.commandOutput("/usr/sbin/smbios", "-t", "SMB_TYPE_BIOS"),
+		s.commandOutput("/usr/sbin/smbios", "-t", "SMB_TYPE_SYSTEM"),
+		s.commandOutput("/usr/sbin/smbios", "-t", "SMB_TYPE_CHASSIS"),
 	)
 }
 
@@ -411,17 +390,17 @@ type windowsDMI struct {
 	ProductUUID  string
 }
 
-func currentWindowsDMI(goos string, run commandRunner, log *slog.Logger) windowsDMI {
-	if goos != "windows" {
+func currentWindowsDMI(s *Session) windowsDMI {
+	if s.goos() != "windows" {
 		return windowsDMI{}
 	}
-	bios := parseWindowsWMIValues(windowsWMIOutput(run, "bios", "Manufacturer,SerialNumber"))
-	product := parseWindowsWMIValues(windowsWMIOutput(run, "computersystemproduct", "Name,UUID"))
+	bios := parseWindowsWMIValues(windowsWMIOutput(s.commandOutput, "bios", "Manufacturer,SerialNumber"))
+	product := parseWindowsWMIValues(windowsWMIOutput(s.commandOutput, "computersystemproduct", "Name,UUID"))
 	if len(bios) == 0 {
-		log.Debug("WMI query returned no results for Win32_BIOS with values Manufacturer and SerialNumber.")
+		s.logr().Debug("WMI query returned no results for Win32_BIOS with values Manufacturer and SerialNumber.")
 	}
 	if len(product) == 0 {
-		log.Debug("WMI query returned no results for Win32_ComputerSystemProduct with values Name and UUID.")
+		s.logr().Debug("WMI query returned no results for Win32_ComputerSystemProduct with values Name and UUID.")
 	}
 	return windowsDMI{
 		Manufacturer: bios["Manufacturer"],
@@ -506,7 +485,7 @@ func dmiCoreFacts(s *Session) []ResolvedFact {
 	dmi := s.cachedDMI()
 	facts := dmiFacts(dmi)
 	facts = append(facts, macOSDMIFacts(s.cachedMacOSModel())...)
-	facts = append(facts, windowsDMIFacts(currentWindowsDMI(s.goos(), s.commandOutput, s.logr()))...)
+	facts = append(facts, windowsDMIFacts(currentWindowsDMI(s))...)
 	facts = append(facts, currentFreeBSDDMIFacts(s)...)
 	facts = append(facts, currentDragonFlyDMIFacts(s)...)
 	facts = append(facts, currentOpenBSDDMIFacts(s)...)

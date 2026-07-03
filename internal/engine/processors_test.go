@@ -3,7 +3,6 @@ package engine
 import (
 	"context"
 	"os"
-	"path/filepath"
 	"reflect"
 	"runtime"
 	"strings"
@@ -558,15 +557,18 @@ func TestParseIllumosProcessorsInfersCountsFromClockedModels(t *testing.T) {
 }
 
 func TestCurrentProcessorISAUsesOpenBSDUnameProcessor(t *testing.T) {
-	got := currentProcessorISA(testSession, "openbsd", "amd64", func(name string, args ...string) string {
-		if name != "uname" || !reflect.DeepEqual(args, []string{"-p"}) {
-			t.Fatalf("command = %s %#v, want uname -p", name, args)
-		}
-		return "i386\n"
-	})
+	s := NewSession()
+	host := &fakeHostOS{runOutputs: map[string]string{fakeRunKey("uname", "-p"): "i386\n"}}
+	s.host = host
+
+	got := currentProcessorISA(s, "openbsd", "amd64")
 
 	if got != "i386" {
-		t.Fatalf("currentProcessorISA(testSession, openbsd) = %q, want i386", got)
+		t.Fatalf("currentProcessorISA(openbsd) = %q, want i386", got)
+	}
+	want := []fakeHostRunCall{{name: "uname", args: []string{"-p"}}}
+	if !reflect.DeepEqual(host.runCalls, want) {
+		t.Fatalf("commands = %#v, want uname -p", host.runCalls)
 	}
 }
 
@@ -574,7 +576,9 @@ func TestCurrentProcessorISAFallsBackWhenUnameProcessorIsUnknown(t *testing.T) {
 	t.Parallel()
 
 	for _, output := range []string{"", "unknown\n"} {
-		got := currentProcessorISA(testSession, "linux", "x86_64", func(string, ...string) string { return output })
+		s := NewSession()
+		s.host = &fakeHostOS{runOutputs: map[string]string{fakeRunKey("uname", "-p"): output}}
+		got := currentProcessorISA(s, "linux", "x86_64")
 		if got != "x86_64" {
 			t.Fatalf("currentProcessorISA(%q) = %q, want fallback", output, got)
 		}
@@ -585,7 +589,7 @@ func TestCurrentProcessorISAWindowsFallsBackWhenWMIHasNoISA(t *testing.T) {
 	s := NewSession()
 	s.host = &fakeHostOS{platform: "windows", runOutput: ""}
 
-	if got := currentProcessorISA(s, "windows", "amd64", func(string, ...string) string { return "" }); got != "amd64" {
+	if got := currentProcessorISA(s, "windows", "amd64"); got != "amd64" {
 		t.Fatalf("currentProcessorISA(windows) = %q, want amd64 fallback", got)
 	}
 }
@@ -788,27 +792,27 @@ func TestParseLinuxProcessorTopologyMatchesRubyLscpuResolver(t *testing.T) {
 }
 
 func TestLinuxProcessorPhysicalCountFallsBackToSysfsPackageIDsLikeRuby(t *testing.T) {
-	sysCPU := t.TempDir()
-	for cpu, packageID := range map[string]string{"cpu0": "0", "cpu1": "1"} {
-		topology := filepath.Join(sysCPU, cpu, "topology")
-		if err := os.MkdirAll(topology, 0o755); err != nil {
-			t.Fatalf("MkdirAll(%q): %v", topology, err)
-		}
-		if err := os.WriteFile(filepath.Join(topology, "physical_package_id"), []byte(packageID), 0o644); err != nil {
-			t.Fatalf("WriteFile package id: %v", err)
-		}
-	}
-	if err := os.Mkdir(filepath.Join(sysCPU, "cpuindex"), 0o755); err != nil {
-		t.Fatalf("Mkdir cpuindex: %v", err)
+	t.Parallel()
+
+	host := &fakeHostOS{
+		files: map[string][]byte{
+			"/sys/devices/system/cpu/cpu0/topology/physical_package_id": []byte("0"),
+			"/sys/devices/system/cpu/cpu1/topology/physical_package_id": []byte("1"),
+		},
+		dirs: map[string][]os.DirEntry{
+			"/sys/devices/system/cpu": fakeDirEntries("cpu0", "cpu1", "cpuindex"),
+		},
 	}
 
 	cpuinfo := "processor\t: 0\nmodel name\t: CPU\nprocessor\t: 1\nmodel name\t: CPU\n"
-	if got, want := linuxProcessorPhysicalCount(cpuinfo, sysCPU), 2; got != want {
+	if got, want := linuxProcessorPhysicalCount(cpuinfo, host), 2; got != want {
 		t.Fatalf("linuxProcessorPhysicalCount() = %d, want %d", got, want)
 	}
 }
 
-func TestCurrentLinuxProcessorPhysicalCountUsesHostSysfsWhenCPUInfoMissing(t *testing.T) {
+func TestLinuxProcessorPhysicalCountUsesHostSysfsWhenCPUInfoEmpty(t *testing.T) {
+	t.Parallel()
+
 	host := &fakeHostOS{
 		files: map[string][]byte{
 			"/sys/devices/system/cpu/cpu0/topology/physical_package_id": []byte("0\n"),
@@ -819,28 +823,27 @@ func TestCurrentLinuxProcessorPhysicalCountUsesHostSysfsWhenCPUInfoMissing(t *te
 		},
 	}
 
-	got := currentLinuxProcessorPhysicalCount("/proc/cpuinfo", "/sys/devices/system/cpu", host)
+	got := linuxProcessorPhysicalCount("", host)
 	if got != 2 {
-		t.Fatalf("currentLinuxProcessorPhysicalCount() = %d, want sysfs fallback count 2", got)
+		t.Fatalf("linuxProcessorPhysicalCount() = %d, want sysfs fallback count 2", got)
 	}
 	if !reflect.DeepEqual(host.readDirCalls, []string{"/sys/devices/system/cpu"}) {
 		t.Fatalf("readDir calls = %#v, want sysfs path", host.readDirCalls)
 	}
 }
 
-func TestCurrentLinuxProcessorPhysicalCountUsesHostCPUInfoFirst(t *testing.T) {
+func TestLinuxProcessorPhysicalCountUsesCPUInfoFirst(t *testing.T) {
+	t.Parallel()
+
 	host := &fakeHostOS{
-		files: map[string][]byte{
-			"/proc/cpuinfo": []byte("processor: 0\nphysical id: 0\nprocessor: 1\nphysical id: 1\n"),
-		},
 		dirs: map[string][]os.DirEntry{
 			"/sys/devices/system/cpu": fakeDirEntries("cpu0", "cpu1"),
 		},
 	}
 
-	got := currentLinuxProcessorPhysicalCount("/proc/cpuinfo", "/sys/devices/system/cpu", host)
+	got := linuxProcessorPhysicalCount("processor: 0\nphysical id: 0\nprocessor: 1\nphysical id: 1\n", host)
 	if got != 2 {
-		t.Fatalf("currentLinuxProcessorPhysicalCount() = %d, want cpuinfo physical count 2", got)
+		t.Fatalf("linuxProcessorPhysicalCount() = %d, want cpuinfo physical count 2", got)
 	}
 	if len(host.readDirCalls) != 0 {
 		t.Fatalf("readDir calls = %#v, want none when cpuinfo has physical IDs", host.readDirCalls)
@@ -850,51 +853,58 @@ func TestCurrentLinuxProcessorPhysicalCountUsesHostCPUInfoFirst(t *testing.T) {
 func TestLinuxProcessorPhysicalCountUsesCPUInfoPhysicalIDs(t *testing.T) {
 	t.Parallel()
 
+	host := &fakeHostOS{}
 	cpuinfo := "processor\t: 0\nphysical id\t: 0\nprocessor\t: 1\nphysical id\t: 1\n"
-	got := linuxProcessorPhysicalCountWithReaders(cpuinfo, "/unused", nil, func(string) ([]os.DirEntry, error) {
-		t.Fatal("linuxProcessorPhysicalCountWithReaders() read sysfs despite cpuinfo physical IDs")
-		return nil, nil
-	})
+	got := linuxProcessorPhysicalCount(cpuinfo, host)
 	if got != 2 {
-		t.Fatalf("linuxProcessorPhysicalCountWithReaders() = %d, want 2", got)
+		t.Fatalf("linuxProcessorPhysicalCount() = %d, want 2", got)
+	}
+	if len(host.readDirCalls) != 0 {
+		t.Fatalf("readDir calls = %#v, want none: read sysfs despite cpuinfo physical IDs", host.readDirCalls)
 	}
 }
 
 func TestLinuxProcessorPhysicalCountHandlesSysfsReadFailures(t *testing.T) {
 	t.Parallel()
 
-	if got := linuxProcessorPhysicalCountWithReaders("", "/sys/cpu", nil, func(string) ([]os.DirEntry, error) {
-		return nil, os.ErrNotExist
-	}); got != 0 {
-		t.Fatalf("linuxProcessorPhysicalCountWithReaders(readDir error) = %d, want 0", got)
+	denied := &fakeHostOS{
+		dirErrs: map[string]error{"/sys/devices/system/cpu": os.ErrPermission},
+	}
+	if got := linuxProcessorPhysicalCount("", denied); got != 0 {
+		t.Fatalf("linuxProcessorPhysicalCount(readDir error) = %d, want 0", got)
 	}
 
-	got := linuxProcessorPhysicalCountWithReaders(
-		"",
-		"/sys/cpu",
-		func(string) ([]byte, error) { return nil, os.ErrPermission },
-		func(string) ([]os.DirEntry, error) { return fakeDirEntries("cpu0"), nil },
-	)
-	if got != 0 {
-		t.Fatalf("linuxProcessorPhysicalCountWithReaders(readFile error) = %d, want 0", got)
+	unreadable := &fakeHostOS{
+		dirs: map[string][]os.DirEntry{
+			"/sys/devices/system/cpu": fakeDirEntries("cpu0"),
+		},
+		fileErrs: map[string]error{
+			"/sys/devices/system/cpu/cpu0/topology/physical_package_id": os.ErrPermission,
+		},
+	}
+	if got := linuxProcessorPhysicalCount("", unreadable); got != 0 {
+		t.Fatalf("linuxProcessorPhysicalCount(readFile error) = %d, want 0", got)
 	}
 }
 
-func TestLinuxProcessorPhysicalCountUsesInjectedReader(t *testing.T) {
-	sysCPU := t.TempDir()
-	if err := os.Mkdir(filepath.Join(sysCPU, "cpu0"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	readFile := func(path string) ([]byte, error) {
-		want := filepath.Join(sysCPU, "cpu0", "topology", "physical_package_id")
-		if path != want {
-			t.Fatalf("readFile(%q), want %q", path, want)
-		}
-		return []byte("7\n"), nil
+func TestLinuxProcessorPhysicalCountReadsPackageIDsThroughHost(t *testing.T) {
+	t.Parallel()
+
+	host := &fakeHostOS{
+		files: map[string][]byte{
+			"/sys/devices/system/cpu/cpu0/topology/physical_package_id": []byte("7\n"),
+		},
+		dirs: map[string][]os.DirEntry{
+			"/sys/devices/system/cpu": fakeDirEntries("cpu0"),
+		},
 	}
 
-	if got := linuxProcessorPhysicalCount("", sysCPU, readFile); got != 1 {
+	if got := linuxProcessorPhysicalCount("", host); got != 1 {
 		t.Fatalf("linuxProcessorPhysicalCount() = %d, want 1", got)
+	}
+	want := []string{"/sys/devices/system/cpu/cpu0/topology/physical_package_id"}
+	if !reflect.DeepEqual(host.readFileCalls, want) {
+		t.Fatalf("readFile calls = %#v, want %#v", host.readFileCalls, want)
 	}
 }
 

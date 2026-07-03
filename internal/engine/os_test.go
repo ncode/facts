@@ -4,7 +4,6 @@ import (
 	"context"
 	"net"
 	"os"
-	"path/filepath"
 	"reflect"
 	"runtime"
 	"strings"
@@ -564,23 +563,29 @@ func TestWindowsSystem32FactsReturnStructuredFacts(t *testing.T) {
 func TestAddLinuxBondingSlaveMACsUsesPermanentHardwareAddress(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "proc/net/bonding/bond0"), strings.Join([]string{
-		"Ethernet Channel Bonding Driver: v3.7.1 (April 27, 2011)",
-		"",
-		"Slave Interface: eth2",
-		"Permanent HW addr: 08:00:27:29:dc:a5",
-		"",
-		"Slave Interface: eth3",
-		"Permanent HW addr: 08:00:27:d5:44:7e",
-	}, "\n"))
+	host := &fakeHostOS{
+		// Bonding proc entries are plain files; a directory entry would be
+		// skipped by the production loop.
+		dirs: map[string][]os.DirEntry{"/proc/net/bonding": fakeFileEntries("bond0")},
+		files: map[string][]byte{
+			"/proc/net/bonding/bond0": []byte(strings.Join([]string{
+				"Ethernet Channel Bonding Driver: v3.7.1 (April 27, 2011)",
+				"",
+				"Slave Interface: eth2",
+				"Permanent HW addr: 08:00:27:29:dc:a5",
+				"",
+				"Slave Interface: eth3",
+				"Permanent HW addr: 08:00:27:d5:44:7e",
+			}, "\n")),
+		},
+	}
 	interfaces := map[string]any{
 		"bond0": map[string]any{"mac": "08:00:27:29:dc:a5"},
 		"eth2":  map[string]any{"mac": "08:00:27:29:dc:a5"},
 		"eth3":  map[string]any{"mac": "08:00:27:29:dc:a5"},
 	}
 
-	addLinuxBondingSlaveMACsFromRoot(root, interfaces)
+	addLinuxBondingSlaveMACs(interfaces, host)
 
 	eth3 := interfaces["eth3"].(map[string]any)
 	if got, want := eth3["mac"], "08:00:27:d5:44:7e"; got != want {

@@ -155,11 +155,7 @@ func readOptionalText(path string, readFile fileReader) any {
 	return strings.TrimSpace(string(data))
 }
 
-func readFileString(path string, readFiles ...fileReader) string {
-	readFile := osHost{}.readFile
-	if len(readFiles) > 0 && readFiles[0] != nil {
-		readFile = readFiles[0]
-	}
+func readFileString(path string, readFile fileReader) string {
 	data, err := readFile(path)
 	if err != nil {
 		return ""
@@ -167,11 +163,7 @@ func readFileString(path string, readFiles ...fileReader) string {
 	return string(data)
 }
 
-func isSymlink(path string, lstats ...func(string) (os.FileInfo, error)) bool {
-	lstat := osHost{}.lstat
-	if len(lstats) > 0 && lstats[0] != nil {
-		lstat = lstats[0]
-	}
+func isSymlink(path string, lstat func(string) (os.FileInfo, error)) bool {
 	info, err := lstat(path)
 	if err != nil {
 		return false
@@ -179,11 +171,7 @@ func isSymlink(path string, lstats ...func(string) (os.FileInfo, error)) bool {
 	return info.Mode()&os.ModeSymlink != 0
 }
 
-func readSysfsString(root, device, name string, readFiles ...fileReader) string {
-	readFile := osHost{}.readFile
-	if len(readFiles) > 0 && readFiles[0] != nil {
-		readFile = readFiles[0]
-	}
+func readSysfsString(root, device, name string, readFile fileReader) string {
 	data, err := readFile(filepath.Join(root, device, name))
 	if err != nil {
 		return ""
@@ -191,11 +179,7 @@ func readSysfsString(root, device, name string, readFiles ...fileReader) string 
 	return strings.TrimSpace(string(data))
 }
 
-func readDMIString(root, name string, readFiles ...fileReader) string {
-	readFile := osHost{}.readFile
-	if len(readFiles) > 0 && readFiles[0] != nil {
-		readFile = readFiles[0]
-	}
+func readDMIString(root, name string, readFile fileReader) string {
 	data, err := readFile(filepath.Join(root, name))
 	if err != nil {
 		return ""
