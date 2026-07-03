@@ -1,7 +1,6 @@
 package engine
 
 import (
-	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -381,17 +380,14 @@ func windowsXenContext(model string) string {
 }
 
 func currentLinuxVirtualizationInput(s *Session) linuxVirtualizationInput {
-	return currentLinuxVirtualizationInputWithCommands(s, s.commandOutput)
-}
-
-func currentLinuxVirtualizationInputWithCommands(s *Session, run commandRunner) linuxVirtualizationInput {
+	run := s.commandOutput
 	return linuxVirtualizationInput{
 		CGroup:        readLinuxCGroup(s.readFile),
-		DockerEnv:     fileExistsWithHost(s.host, "/.dockerenv"),
-		ContainerEnv:  fileExistsWithHost(s.host, "/run/.containerenv"),
-		ProcVZ:        dirExistsWithHost(s.host, "/proc/vz"),
-		LVEList:       fileExistsWithHost(s.host, "/proc/lve/list"),
-		ProcVZEntries: procVZEntryCount("/proc/vz"),
+		DockerEnv:     fileExists(s.host, "/.dockerenv"),
+		ContainerEnv:  fileExists(s.host, "/run/.containerenv"),
+		ProcVZ:        dirExists(s.host, "/proc/vz"),
+		LVEList:       fileExists(s.host, "/proc/lve/list"),
+		ProcVZEntries: procVZEntryCount(s.host, "/proc/vz"),
 		ProcStatus:    readText("/proc/self/status", s.readFile),
 		ContainerRuntime: containerRuntimeFromEnviron(
 			readText("/proc/1/environ", s.readFile),
@@ -575,11 +571,7 @@ func openVZEnvID(input linuxVirtualizationInput) (int, bool) {
 	return 0, false
 }
 
-func readLinuxCGroup(readFiles ...fileReader) string {
-	readFile := osHost{}.readFile
-	if len(readFiles) > 0 && readFiles[0] != nil {
-		readFile = readFiles[0]
-	}
+func readLinuxCGroup(readFile fileReader) string {
 	data, err := readFile("/proc/1/cgroup")
 	if err != nil {
 		return ""
@@ -587,22 +579,18 @@ func readLinuxCGroup(readFiles ...fileReader) string {
 	return string(data)
 }
 
-func fileExists(path string) bool {
-	return fileExistsWithHost(osHost{}, path)
-}
-
-func fileExistsWithHost(host hostOS, path string) bool {
+func fileExists(host hostOS, path string) bool {
 	_, err := host.stat(path)
 	return err == nil
 }
 
-func dirExistsWithHost(host hostOS, path string) bool {
+func dirExists(host hostOS, path string) bool {
 	info, err := host.stat(path)
 	return err == nil && info.IsDir()
 }
 
-func procVZEntryCount(path string) int {
-	entries, err := os.ReadDir(path)
+func procVZEntryCount(host hostOS, path string) int {
+	entries, err := host.readDir(path)
 	if err != nil {
 		return 0
 	}

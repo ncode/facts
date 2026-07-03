@@ -71,7 +71,8 @@ func ec2Facts(s *Session, client *ec2Client, virt virtualization) []ResolvedFact
 }
 
 func cloudProviderFact(s *Session, virt virtualization, ec2Metadata map[string]any) *ResolvedFact {
-	return cloudProviderFactForPlatform(s.goos(), virt, ec2Metadata, os.Geteuid(), fileExecutable, s.commandOutput)
+	executable := func(path string) bool { return fileExecutable(s.host, path) }
+	return cloudProviderFactForPlatform(s.goos(), virt, ec2Metadata, os.Geteuid(), executable, s.commandOutput)
 }
 
 func cloudProviderFactForPlatform(goos string, virt virtualization, ec2Metadata map[string]any, euid int, executable func(string) bool, run func(string, ...string) string) *ResolvedFact {
@@ -102,8 +103,8 @@ func linuxAWSCloudProvider(name string, ec2Metadata map[string]any, euid int, ex
 	return false
 }
 
-func fileExecutable(path string) bool {
-	info, err := os.Stat(path)
+func fileExecutable(host hostOS, path string) bool {
+	info, err := host.stat(path)
 	return err == nil && info.Mode().IsRegular() && info.Mode()&0o111 != 0
 }
 

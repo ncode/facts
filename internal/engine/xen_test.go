@@ -79,32 +79,44 @@ func TestSelectXenCommandMatchesRubyResolver(t *testing.T) {
 	}
 }
 
-func TestDetectXenDomainsWithCommandRunsSelectedToolstack(t *testing.T) {
-	exists := map[string]bool{
-		"/usr/sbin/xl": true,
-	}
-	got := detectXenDomainsWithCommand(func(path string) bool { return exists[path] }, func(name string, args ...string) string {
-		if name != "/usr/sbin/xl" || !reflect.DeepEqual(args, []string{"list"}) {
-			t.Fatalf("run(%q, %#v), want xl list", name, args)
+func TestDetectXenDomainsRunsSelectedToolstack(t *testing.T) {
+	xlHost := func(output string) *fakeHostOS {
+		return &fakeHostOS{
+			platform:        "linux",
+			emptyRunDefault: true,
+			stats:           map[string]os.FileInfo{"/usr/sbin/xl": fakeFileInfo{name: "xl"}},
+			runOutputs:      map[string]string{fakeRunKey("/usr/sbin/xl", "list"): output},
 		}
-		return "Name ID Mem VCPUs State Time(s)\nDomain-0 0 4096 4 r----- 100.0\nguest-web 1 2048 2 -b---- 10.0\n"
-	})
+	}
+
+	host := xlHost("Name ID Mem VCPUs State Time(s)\nDomain-0 0 4096 4 r----- 100.0\nguest-web 1 2048 2 -b---- 10.0\n")
+	s := NewSession()
+	s.host = host
 	want := []string{"guest-web"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("detectXenDomainsWithCommand() = %#v, want %#v", got, want)
+	if got := detectXenDomains(s); !reflect.DeepEqual(got, want) {
+		t.Fatalf("detectXenDomains() = %#v, want %#v", got, want)
+	}
+	wantCall := []fakeHostRunCall{{name: "/usr/sbin/xl", args: []string{"list"}}}
+	if !reflect.DeepEqual(host.runCalls, wantCall) {
+		t.Fatalf("commands = %#v, want xl list", host.runCalls)
 	}
 
-	if got := detectXenDomainsWithCommand(func(string) bool { return false }, func(string, ...string) string {
-		t.Fatal("detectXenDomainsWithCommand ran command without Xen toolstack")
-		return ""
-	}); got != nil {
-		t.Fatalf("detectXenDomainsWithCommand(no command) = %#v, want nil", got)
+	// No toolstack present: no command runs.
+	noStack := &fakeHostOS{platform: "linux", emptyRunDefault: true}
+	sNo := NewSession()
+	sNo.host = noStack
+	if got := detectXenDomains(sNo); got != nil {
+		t.Fatalf("detectXenDomains(no command) = %#v, want nil", got)
+	}
+	if len(noStack.runCalls) != 0 {
+		t.Fatalf("ran %#v without a Xen toolstack, want no commands", noStack.runCalls)
 	}
 
-	if got := detectXenDomainsWithCommand(func(path string) bool { return path == "/usr/sbin/xl" }, func(string, ...string) string {
-		return ""
-	}); got != nil {
-		t.Fatalf("detectXenDomainsWithCommand(no output) = %#v, want nil", got)
+	// Toolstack present but no output: nil domains.
+	sEmpty := NewSession()
+	sEmpty.host = xlHost("")
+	if got := detectXenDomains(sEmpty); got != nil {
+		t.Fatalf("detectXenDomains(no output) = %#v, want nil", got)
 	}
 }
 

@@ -1,7 +1,6 @@
 package engine
 
 import (
-	"log/slog"
 	"os"
 	osuser "os/user"
 	"strconv"
@@ -19,7 +18,7 @@ type identityInfo struct {
 func identityFact(s *Session) map[string]any {
 	goos := s.goos()
 	if goos == "windows" {
-		return identityFactFromInfo(goos, currentWindowsIdentityInfo(s.commandOutput, s.logr()))
+		return identityFactFromInfo(goos, currentWindowsIdentityInfo(s))
 	}
 
 	// The uid/gid/osuser syscalls stay outside the host seam: they have no
@@ -43,17 +42,14 @@ func identityFact(s *Session) map[string]any {
 	return identityFactFromInfo(goos, info)
 }
 
-func currentWindowsIdentityInfo(run commandRunner, log *slog.Logger) identityInfo {
+func currentWindowsIdentityInfo(s *Session) identityInfo {
 	info := identityInfo{}
-	if run == nil {
-		return info
-	}
-	info.User = strings.TrimSpace(run("whoami"))
+	info.User = strings.TrimSpace(s.commandOutput("whoami"))
 	if info.User == "" {
-		log.Debug("failure resolving identity facts: ")
+		s.logr().Debug("failure resolving identity facts: ")
 		return info
 	}
-	if privileged, ok := parseWindowsAdministratorGroups(run("whoami", "/groups")); ok {
+	if privileged, ok := parseWindowsAdministratorGroups(s.commandOutput("whoami", "/groups")); ok {
 		info.Privileged = &privileged
 	}
 	return info

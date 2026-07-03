@@ -31,23 +31,22 @@ func TestIdentityFactFromInfoWindowsOmitsPOSIXFields(t *testing.T) {
 func TestCurrentWindowsIdentityInfoUsesWhoamiCommands(t *testing.T) {
 	t.Parallel()
 
-	run := func(name string, args ...string) string {
-		switch {
-		case name == "whoami" && len(args) == 0:
-			return `MG93C9IN9WKOITF\Administrator`
-		case name == "whoami" && reflect.DeepEqual(args, []string{"/groups"}):
-			return strings.Join([]string{
+	host := &fakeHostOS{
+		platform:        "windows",
+		emptyRunDefault: true,
+		runOutputs: map[string]string{
+			fakeRunKey("whoami"): `MG93C9IN9WKOITF\Administrator`,
+			fakeRunKey("whoami", "/groups"): strings.Join([]string{
 				`Group Name                                 Type             SID          Attributes`,
 				`========================================== ================ ============ ===============================================`,
 				`BUILTIN\Administrators                    Alias            S-1-5-32-544 Mandatory group, Enabled by default, Enabled group`,
-			}, "\n")
-		default:
-			t.Fatalf("run = %s %v, want whoami or whoami /groups", name, args)
-			return ""
-		}
+			}, "\n"),
+		},
 	}
+	s := NewSession()
+	s.host = host
 
-	got := currentWindowsIdentityInfo(run, discardLog())
+	got := currentWindowsIdentityInfo(s)
 	if got.User != `MG93C9IN9WKOITF\Administrator` {
 		t.Fatalf("User = %q, want administrator", got.User)
 	}
@@ -60,15 +59,20 @@ func TestCurrentWindowsIdentityInfoLogsFailureWhenUserCannotResolveLikeRubyResol
 	debugMessages := []string{}
 	logger := captureLogger(&debugMessages, nil, nil)
 
-	got := currentWindowsIdentityInfo(func(name string, args ...string) string {
-		if name != "whoami" || len(args) != 0 {
-			t.Fatalf("run = %s %v, want only whoami", name, args)
-		}
-		return ""
-	}, logger)
+	host := &fakeHostOS{platform: "windows", emptyRunDefault: true}
+	s := NewSession()
+	s.host = host
+	s.logger = logger
+
+	got := currentWindowsIdentityInfo(s)
 
 	if got.User != "" {
 		t.Fatalf("User = %q, want empty", got.User)
+	}
+	// A missing user short-circuits before the group query.
+	wantCalls := []fakeHostRunCall{{name: "whoami", args: nil}}
+	if !reflect.DeepEqual(host.runCalls, wantCalls) {
+		t.Fatalf("commands = %#v, want only whoami", host.runCalls)
 	}
 	if got.Privileged != nil {
 		t.Fatalf("Privileged = %#v, want nil", got.Privileged)
