@@ -111,25 +111,6 @@ func ExternalFactResolutionRunning() bool {
 	return os.Getenv(externalFactResolutionEnv) != ""
 }
 
-// LoadExternalFacts loads static external facts from the provided directories.
-func LoadExternalFacts(s *Session, dirs []string) ([]ResolvedFact, error) {
-	return LoadExternalFactsWithBlocklist(s, dirs, nil)
-}
-
-// LoadExternalFactsWithBlocklist loads external facts from dirs plus the
-// FACTS_*/FACTER_* environment variables — the CLI's system-following
-// semantics — skipping files whose base name is blocklisted by the Facter
-// config.
-func LoadExternalFactsWithBlocklist(s *Session, dirs []string, blocked map[string]bool) ([]ResolvedFact, error) {
-	return externalFactLoader{
-		s:          s,
-		mode:       externalFactLoaderCLI,
-		dirs:       dirs,
-		blocked:    blocked,
-		includeEnv: true,
-	}.load()
-}
-
 func (l externalFactLoader) load() ([]ResolvedFact, error) {
 	l = l.withDefaults()
 	facts, failures, err := l.loadDirFacts()

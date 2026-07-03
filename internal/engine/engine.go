@@ -197,27 +197,23 @@ func (e *Engine) Discover(ctx context.Context, queries ...string) (*Snapshot, er
 			e.warnOnce("Recursion detected while resolving external facts; executable external facts will be skipped")
 		}
 		loader := externalFactLoader{
-			s:       s,
-			dirs:    plan.externalDirs,
-			blocked: plan.disabledFacts,
+			s:          s,
+			dirs:       plan.externalDirs,
+			blocked:    plan.disabledFacts,
+			mode:       plan.loaderMode,
+			includeEnv: plan.includeEnv,
 		}
-		if plan.loaderMode == externalFactLoaderCLI {
-			loader.mode = plan.loaderMode
-			loader.includeEnv = plan.includeEnv
-			loaded, err := loader.load()
-			if err != nil {
-				return newSnapshot(nil, s.logger), err
-			}
-			externalFacts = loaded
-		} else {
-			loader.mode = plan.loaderMode
-			loader.includeEnv = plan.includeEnv
-			loaded, err := loader.load()
-			if err != nil {
-				failures = append(failures, err)
-			}
-			externalFacts = loaded
+		loaded, err := loader.load()
+		if err != nil && plan.loaderMode == externalFactLoaderCLI {
+			// CLI mode aborts on the first loader error, discarding the facts
+			// loaded before it and any earlier planFailures, and returns the bare
+			// loader error (finish()'s ctx.Err() join is skipped).
+			return newSnapshot(nil, s.logger), err
 		}
+		if err != nil {
+			failures = append(failures, err)
+		}
+		externalFacts = loaded
 	}
 	if ctx.Err() != nil {
 		facts = externalFacts
