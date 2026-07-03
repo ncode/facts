@@ -297,13 +297,11 @@ func runQuery(stdout, stderr io.Writer, args []string) error {
 		disabledFacts = map[string]bool{}
 	}
 	if !*noBlock {
-		// The fast path must honor every disable source so a disabled
-		// facterversion query falls through to normal resolution (and
-		// disable-beats-query), mirroring the engine's union.
-		fastPathEntries := append([]string(nil), configOptions.Disabled...)
-		fastPathEntries = append(fastPathEntries, disableEntries...)
-		fastPathEntries = append(fastPathEntries, engine.EnvironmentDisabledFacts(os.Environ())...)
-		disabledFactsForFastPath = engine.DisabledFactsForFiltering(fastPathEntries, configOptions.FactGroups)
+		// The fast path honors every disable source so a disabled facterversion
+		// query falls through to normal resolution (and disable-beats-query). It
+		// derives its set from the same engine union discovery planning uses, so
+		// the two can never disagree on whether facterversion is disabled.
+		disabledFactsForFastPath = engine.DisabledUnion(configOptions, disableEntries, os.Environ())
 	}
 	mergeDottedFacts := configOptions.ForceDotResolution || *forceDotResolution
 	logLevel := firstNonEmpty(flags.Lookup("log-level").Value.String(), flags.Lookup("l").Value.String(), configOptions.LogLevel)
@@ -496,19 +494,14 @@ func canUseVersionQueryFastPath(queries, externalDirs []string, disabledFacts ma
 
 func writeVersionQuery(stdout io.Writer, jsonOutput, yamlOutput, hoconOutput bool) error {
 	facts := []engine.ResolvedFact{{Name: "facterversion", Value: engine.Version, UserQuery: "facterversion"}}
-	var (
-		out string
-		err error
-	)
-	if jsonOutput {
-		out, err = engine.FormatJSON(facts)
-	} else if yamlOutput {
-		out = engine.FormatYAML(facts)
-	} else if hoconOutput {
-		out = engine.FormatHOCON(facts)
-	} else {
-		out = engine.FormatLegacy(facts)
-	}
+	// The fast path carries only the three format booleans: it deliberately
+	// ignores --color and --force-dot-resolution, so Colorize/IncludeTypedDotted
+	// stay false and formatter selection reuses the engine's own precedence.
+	out, err := engine.BuildFormatter(engine.FormatOptions{
+		JSON:  jsonOutput,
+		YAML:  yamlOutput,
+		HOCON: hoconOutput,
+	}).Format(facts)
 	if err != nil {
 		return err
 	}

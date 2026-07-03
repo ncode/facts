@@ -58,6 +58,38 @@ func TestRun_shortVersion(t *testing.T) {
 	}
 }
 
+// Byte pins for the version fast path's formatter selection. These lock the
+// exact stdout before writeVersionQuery routes through engine.BuildFormatter,
+// so the reroute is proven byte-identical.
+func TestRun_facterversionJSONFastPathBytes(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+
+	if err := Run(&stdout, &stderr, []string{"--json", "facterversion"}); err != nil {
+		t.Fatal(err)
+	}
+	want := "{\n  \"facterversion\": \"" + engine.Version + "\"\n}\n"
+	if got := stdout.String(); got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}
+
+func TestRun_facterversionHOCONFastPathBytes(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+
+	if err := Run(&stdout, &stderr, []string{"--hocon", "facterversion"}); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := stdout.String(), engine.Version+"\n"; got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}
+
 func TestRun_facterversionQueryAllowsExternalOverride(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "version.txt"), []byte("facterversion=external\n"), 0o600); err != nil {

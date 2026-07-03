@@ -84,16 +84,22 @@ const (
 // diagnostic.
 func (e *Engine) unionDisabledFacts(s *Session, config Config, includeEnv bool) (map[string]bool, map[string]string) {
 	groups := config.FactGroups
-	disabled := map[string]bool{}
-	ambient := map[string]string{}
+	var environ []string
+	if includeEnv {
+		environ = s.host.environ()
+	}
+	// The disabled set is derived from the exported union so a full discovery
+	// and the version fast path can never disagree on whether a fact is disabled.
+	disabled := DisabledUnion(config, e.cfg.ExtraDisabled, environ)
 
+	// The ambient map names the env/config source of each disabled fact for the
+	// explicit-query diagnostic; it mirrors the union's sources but is engine-only.
+	ambient := map[string]string{}
 	for name := range DisabledFactsWithGroups(config.Disabled, groups) {
-		disabled[name] = true
 		ambient[name] = disabledSourceConfig
 	}
 	if includeEnv {
 		for name := range DisabledFactsWithGroups(environmentDisabledFacts(s.host.environ()), groups) {
-			disabled[name] = true
 			ambient[name] = disabledSourceEnv
 		}
 	}
@@ -103,7 +109,6 @@ func (e *Engine) unionDisabledFacts(s *Session, config Config, includeEnv bool) 
 	// drop also covers descendants, mirroring pruneDisabledDescendants: a
 	// --disable of `networking` silences an ambient `networking.ip` it subsumes.
 	for name := range DisabledFactsWithGroups(e.cfg.ExtraDisabled, groups) {
-		disabled[name] = true
 		delete(ambient, name)
 		for k := range ambient {
 			if strings.HasPrefix(k, name+".") {

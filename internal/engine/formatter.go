@@ -57,11 +57,6 @@ func BuildFormatter(opts FormatOptions) Formatter {
 	}
 }
 
-// FormatJSON renders facts using Facter's JSON presentation contract.
-func FormatJSON(facts []ResolvedFact) (string, error) {
-	return FormatJSONWithDottedFacts(facts, false)
-}
-
 // FormatJSONWithDottedFacts renders JSON and optionally merges dotted custom and external facts.
 func FormatJSONWithDottedFacts(facts []ResolvedFact, includeTypedDotted bool) (string, error) {
 	projection := NewProjection(facts, includeTypedDotted)
@@ -77,11 +72,6 @@ func FormatJSONWithDottedFacts(facts []ResolvedFact, includeTypedDotted bool) (s
 	return string(out), nil
 }
 
-// FormatYAML renders facts using Facter's YAML presentation contract.
-func FormatYAML(facts []ResolvedFact) string {
-	return FormatYAMLWithDottedFacts(facts, false)
-}
-
 // FormatYAMLWithDottedFacts renders YAML and optionally merges dotted custom and external facts.
 func FormatYAMLWithDottedFacts(facts []ResolvedFact, includeTypedDotted bool) string {
 	projection := NewProjection(facts, includeTypedDotted)
@@ -94,11 +84,6 @@ func FormatYAMLWithDottedFacts(facts []ResolvedFact, includeTypedDotted bool) st
 		return ""
 	}
 	return out + "\n"
-}
-
-// FormatHOCON renders facts using Facter's HOCON presentation contract.
-func FormatHOCON(facts []ResolvedFact) string {
-	return FormatHOCONWithDottedFacts(facts, false)
 }
 
 // FormatHOCONWithDottedFacts renders HOCON and optionally merges dotted custom and external facts.
@@ -119,11 +104,6 @@ func FormatHOCONWithDottedFacts(facts []ResolvedFact, includeTypedDotted bool) s
 		}
 		return strings.Join(lines, "\n") + "\n"
 	}
-}
-
-// FormatLegacy renders facts using the original key => value text format.
-func FormatLegacy(facts []ResolvedFact) string {
-	return FormatLegacyColored(facts, false, false)
 }
 
 // FormatLegacyColored renders legacy text and, when colorize is set, wraps each

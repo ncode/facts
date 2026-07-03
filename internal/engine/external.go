@@ -288,14 +288,6 @@ func SplitDisableList(value string) []string {
 	return splitDisableList(value)
 }
 
-// EnvironmentDisabledFacts extracts the disabled-set entries from the reserved
-// FACTS_DISABLE / FACTER_DISABLE control variables in env (native wins). It is
-// the exported seam internal/app uses to honor ambient disables in the
-// facterversion fast path.
-func EnvironmentDisabledFacts(env []string) []string {
-	return environmentDisabledFacts(env)
-}
-
 // splitDisableList splits a comma-separated disable list into trimmed,
 // lowercased entries, dropping empties. It is shared by the FACTS_DISABLE
 // environment variable and the --disable CLI option.
