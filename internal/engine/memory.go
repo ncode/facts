@@ -23,13 +23,6 @@ type windowsMemory struct {
 	Capacity       string
 }
 
-func currentWindowsMemory(goos string, run commandRunner, log *slog.Logger) windowsMemory {
-	if goos != "windows" {
-		return windowsMemory{}
-	}
-	return parseWindowsMemory(windowsWMIOutput(run, "os", "FreePhysicalMemory,TotalVisibleMemorySize"), log)
-}
-
 func parseWindowsMemory(input string, log *slog.Logger) windowsMemory {
 	if strings.TrimSpace(input) == "" {
 		log.Debug("Resolving memory facts failed")
@@ -146,7 +139,10 @@ func probeSwapEncrypted(s *Session) bool {
 }
 
 func probeWindowsMemory(s *Session) windowsMemory {
-	return currentWindowsMemory(s.goos(), s.commandOutput, s.logr())
+	if s.goos() != "windows" {
+		return windowsMemory{}
+	}
+	return parseWindowsMemory(windowsWMIOutput(s.commandOutput, "os", "FreePhysicalMemory,TotalVisibleMemorySize"), s.logr())
 }
 
 type darwinSwapUsage struct {
@@ -465,14 +461,10 @@ func parseIllumosKToken(value string) int {
 }
 
 func probeDarwinSwapUsage(s *Session) darwinSwapUsage {
-	return currentDarwinSwapUsage(s.goos(), s.commandOutput)
-}
-
-func currentDarwinSwapUsage(goos string, run commandRunner) darwinSwapUsage {
-	if goos != "darwin" {
+	if s.goos() != "darwin" {
 		return darwinSwapUsage{}
 	}
-	return parseDarwinSwapUsage(run("sysctl", "-n", "vm.swapusage"))
+	return parseDarwinSwapUsage(s.commandOutput("sysctl", "-n", "vm.swapusage"))
 }
 
 func probeLinuxMeminfo(s *Session) string {

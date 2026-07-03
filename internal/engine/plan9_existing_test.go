@@ -1,7 +1,6 @@
 package engine
 
 import (
-	"os"
 	"reflect"
 	"testing"
 )
@@ -24,15 +23,9 @@ func TestCurrentOSReleasePlan9OmitsOSVersionProtocol(t *testing.T) {
 	t.Parallel()
 
 	s := NewSession()
-	s.host = &fakeHostOS{runOutput: "2000\n"}
-	readFile := func(path string) ([]byte, error) {
-		if path != "/dev/osversion" {
-			return nil, os.ErrNotExist
-		}
-		return []byte("2000\n"), nil
-	}
+	s.host = &fakeHostOS{platform: "plan9"}
 
-	if got := currentOSRelease(s, "plan9", readFile, func(string, ...string) string { return "" }); got != nil {
+	if got := currentOSRelease(s); got != nil {
 		t.Fatalf("currentOSRelease(plan9) = %#v, want nil", got)
 	}
 }
@@ -45,8 +38,8 @@ func TestCurrentOSReleaseUnsupportedTargetOmitsOSRelease(t *testing.T) {
 			t.Parallel()
 
 			s := NewSession()
-			s.host = &fakeHostOS{runOutput: "5.11\n"}
-			if got := currentOSRelease(s, goos, nil, func(string, ...string) string { return "5.11\n" }); got != nil {
+			s.host = &fakeHostOS{platform: goos, runOutput: "5.11\n"}
+			if got := currentOSRelease(s); got != nil {
 				t.Fatalf("currentOSRelease(%s) = %#v, want nil", goos, got)
 			}
 		})
@@ -56,13 +49,24 @@ func TestCurrentOSReleaseUnsupportedTargetOmitsOSRelease(t *testing.T) {
 func TestCurrentLoadAveragesPlan9OmitsLoadAverages(t *testing.T) {
 	t.Parallel()
 
-	got := currentLoadAverages("plan9", func(string) ([]byte, error) {
-		return []byte("0.00 0.01 0.02\n"), nil
-	}, func(string, ...string) string {
-		return "cirno up 0 days, 01:35:26"
-	})
+	host := &fakeHostOS{
+		platform: "plan9",
+		files: map[string][]byte{
+			"/proc/loadavg": []byte("0.00 0.01 0.02\n"),
+		},
+		runOutputs: map[string]string{
+			fakeRunKey("uptime"): "cirno up 0 days, 01:35:26",
+		},
+	}
+	s := NewSession()
+	s.host = host
+
+	got := currentLoadAverages(s)
 	if got != nil {
 		t.Fatalf("currentLoadAverages(plan9) = %#v, want nil", got)
+	}
+	if len(host.readFileCalls) != 0 || len(host.runCalls) != 0 {
+		t.Fatalf("currentLoadAverages(plan9) consulted host: reads=%#v runs=%#v", host.readFileCalls, host.runCalls)
 	}
 }
 
@@ -91,14 +95,17 @@ func TestParseUptimeCommandSecondsPlan9Format(t *testing.T) {
 func TestCurrentUptimeInfoPlan9UsesNativeUptimeFormat(t *testing.T) {
 	t.Parallel()
 
-	got := currentUptimeInfo(testSession, "plan9", func(path string) ([]byte, error) {
-		return nil, os.ErrNotExist
-	}, func(name string, args ...string) string {
-		if name != "uptime" {
-			return ""
-		}
-		return "cirno up 0 days, 01:35:26"
-	}, nil)
+	host := &fakeHostOS{
+		platform:        "plan9",
+		emptyRunDefault: true,
+		runOutputs: map[string]string{
+			fakeRunKey("uptime"): "cirno up 0 days, 01:35:26",
+		},
+	}
+	s := NewSession()
+	s.host = host
+
+	got := currentUptimeInfo(s, nil)
 
 	want := uptimeInfo{Duration: 5726 * 1_000_000_000, Known: true}
 	if !reflect.DeepEqual(got, want) {

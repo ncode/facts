@@ -203,9 +203,18 @@ func DisabledFactsWithGroups(entries []string, configured []FactGroup) map[strin
 	return disabled
 }
 
-// DisabledFactsForFiltering expands the disabled set for resolver filtering.
-func DisabledFactsForFiltering(entries []string, configured []FactGroup) map[string]bool {
-	return DisabledFactsWithGroups(entries, configured)
+// DisabledUnion is the disabled-fact set both the version fast path and
+// discovery planning derive from: the config disable/blocklist list, the
+// --disable extraDisabled entries, and the FACTS_DISABLE control from environ,
+// each expanded through the config's fact groups. Deriving both callers from
+// this one function is what guarantees the fast path takes effect exactly when a
+// full discovery would omit the queried fact. Pass a nil environ to exclude the
+// environment source (the library default when SystemDefaults is off).
+func DisabledUnion(config Config, extraDisabled []string, environ []string) map[string]bool {
+	entries := append([]string(nil), config.Disabled...)
+	entries = append(entries, extraDisabled...)
+	entries = append(entries, environmentDisabledFacts(environ)...)
+	return DisabledFactsWithGroups(entries, config.FactGroups)
 }
 
 // FilterDisabledFacts removes facts whose root name is disabled.

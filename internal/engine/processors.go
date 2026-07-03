@@ -2,7 +2,6 @@ package engine
 
 import (
 	"log/slog"
-	"os"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -20,7 +19,7 @@ type processorInfo struct {
 	ThreadsPerCore int
 }
 
-func currentProcessorISA(s *Session, goos, fallback string, run commandRunner) string {
+func currentProcessorISA(s *Session, goos, fallback string) string {
 	if goos == "windows" {
 		if isa := s.cachedPlatformProcessorInfo().ISA; isa != "" {
 			return isa
@@ -30,7 +29,7 @@ func currentProcessorISA(s *Session, goos, fallback string, run commandRunner) s
 	if goos == "plan9" {
 		return plan9ProcessorISA(s.readFile, fallback)
 	}
-	processor := strings.TrimSpace(run("uname", "-p"))
+	processor := strings.TrimSpace(s.commandOutput("uname", "-p"))
 	if processor == "" || processor == "unknown" {
 		return fallback
 	}
@@ -437,27 +436,7 @@ func parseLinuxProcessorTopology(input string) (int, int) {
 	return 0, 0
 }
 
-func currentLinuxProcessorPhysicalCount(cpuinfoPath, sysCPUPath string, host hostOS) int {
-	if host == nil {
-		host = osHost{}
-	}
-	data, err := host.readFile(cpuinfoPath)
-	cpuinfo := ""
-	if err == nil {
-		cpuinfo = string(data)
-	}
-	return linuxProcessorPhysicalCountWithReaders(cpuinfo, sysCPUPath, host.readFile, host.readDir)
-}
-
-func linuxProcessorPhysicalCount(cpuinfo, sysCPUPath string, readFiles ...fileReader) int {
-	readFile := osHost{}.readFile
-	if len(readFiles) > 0 && readFiles[0] != nil {
-		readFile = readFiles[0]
-	}
-	return linuxProcessorPhysicalCountWithReaders(cpuinfo, sysCPUPath, readFile, os.ReadDir)
-}
-
-func linuxProcessorPhysicalCountWithReaders(cpuinfo, sysCPUPath string, readFile fileReader, readDir func(string) ([]os.DirEntry, error)) int {
+func linuxProcessorPhysicalCount(cpuinfo string, host hostOS) int {
 	physicalIDs := make(map[string]struct{})
 	for line := range strings.SplitSeq(cpuinfo, "\n") {
 		key, value, ok := strings.Cut(line, ":")
@@ -473,7 +452,8 @@ func linuxProcessorPhysicalCountWithReaders(cpuinfo, sysCPUPath string, readFile
 		return len(physicalIDs)
 	}
 
-	entries, err := readDir(sysCPUPath)
+	const sysCPUPath = "/sys/devices/system/cpu"
+	entries, err := host.readDir(sysCPUPath)
 	if err != nil {
 		return 0
 	}
@@ -482,7 +462,7 @@ func linuxProcessorPhysicalCountWithReaders(cpuinfo, sysCPUPath string, readFile
 		if !linuxCPUEntryName(name) {
 			continue
 		}
-		data, err := readFile(filepath.Join(sysCPUPath, name, "topology", "physical_package_id"))
+		data, err := host.readFile(filepath.Join(sysCPUPath, name, "topology", "physical_package_id"))
 		if err != nil {
 			continue
 		}
@@ -618,14 +598,18 @@ func processorsCoreFacts(s *Session) []ResolvedFact {
 	goos := s.goos()
 	architecture := architectureName(goos, s.cachedHardwareModel())
 	if goos == "plan9" {
-		return plan9ProcessorsCoreFacts(s.cachedPlatformProcessorInfo(), currentProcessorISA(s, goos, architecture, s.commandOutput))
+		return plan9ProcessorsCoreFacts(s.cachedPlatformProcessorInfo(), currentProcessorISA(s, goos, architecture))
 	}
 	platformProcessors := processorInfo{}
 	if goos == "darwin" || goos == "freebsd" || goos == "netbsd" || goos == "openbsd" || goos == "dragonfly" || goos == "illumos" || goos == "windows" {
 		platformProcessors = s.cachedPlatformProcessorInfo()
 	}
 	if goos == "linux" {
-		platformProcessors.PhysicalCount = currentLinuxProcessorPhysicalCount("/proc/cpuinfo", "/sys/devices/system/cpu", s.host)
+		cpuinfo := ""
+		if data, err := s.readFile("/proc/cpuinfo"); err == nil {
+			cpuinfo = string(data)
+		}
+		platformProcessors.PhysicalCount = linuxProcessorPhysicalCount(cpuinfo, s.host)
 	}
 	processorCount := runtime.NumCPU()
 	if platformProcessors.LogicalCount > 0 {
@@ -635,7 +619,7 @@ func processorsCoreFacts(s *Session) []ResolvedFact {
 	if platformProcessors.PhysicalCount > 0 {
 		physicalProcessorCount = platformProcessors.PhysicalCount
 	}
-	processorISA := currentProcessorISA(s, goos, architecture, s.commandOutput)
+	processorISA := currentProcessorISA(s, goos, architecture)
 	processorModels := s.cachedProcessorModels()
 	processorSpeed := s.cachedProcessorSpeed()
 	processorCores, processorThreads := s.cachedProcessorTopology()

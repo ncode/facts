@@ -2,7 +2,6 @@ package engine
 
 import (
 	"context"
-	"io"
 	"net/http"
 	"os"
 	"strconv"
@@ -13,7 +12,6 @@ import (
 const (
 	ec2MetadataBaseURL = "http://169.254.169.254/latest"
 	ec2RequestTimeout  = 100 * time.Millisecond
-	ec2MaxBodyBytes    = 1 << 20
 	ec2MaxDepth        = 16
 	ec2TokenTTL        = 21600 * time.Second
 )
@@ -29,12 +27,7 @@ type ec2Client struct {
 
 func newEC2Client(baseURL string, httpClient *http.Client) *ec2Client {
 	if httpClient == nil {
-		httpClient = &http.Client{
-			Timeout: ec2RequestTimeout,
-			Transport: &http.Transport{
-				Proxy: nil,
-			},
-		}
+		httpClient = newMetadataHTTPClient(ec2RequestTimeout)
 	}
 	return &ec2Client{
 		baseURL:    strings.TrimRight(baseURL, "/"),
@@ -71,7 +64,8 @@ func ec2Facts(s *Session, client *ec2Client, virt virtualization) []ResolvedFact
 }
 
 func cloudProviderFact(s *Session, virt virtualization, ec2Metadata map[string]any) *ResolvedFact {
-	return cloudProviderFactForPlatform(s.goos(), virt, ec2Metadata, os.Geteuid(), fileExecutable, s.commandOutput)
+	executable := func(path string) bool { return fileExecutable(s.host, path) }
+	return cloudProviderFactForPlatform(s.goos(), virt, ec2Metadata, os.Geteuid(), executable, s.commandOutput)
 }
 
 func cloudProviderFactForPlatform(goos string, virt virtualization, ec2Metadata map[string]any, euid int, executable func(string) bool, run func(string, ...string) string) *ResolvedFact {
@@ -102,8 +96,8 @@ func linuxAWSCloudProvider(name string, ec2Metadata map[string]any, euid int, ex
 	return false
 }
 
-func fileExecutable(path string) bool {
-	info, err := os.Stat(path)
+func fileExecutable(host hostOS, path string) bool {
+	info, err := host.stat(path)
 	return err == nil && info.Mode().IsRegular() && info.Mode()&0o111 != 0
 }
 
@@ -180,26 +174,12 @@ func (ec *ec2Client) get(ctx context.Context, path string) (string, bool) {
 }
 
 func (ec *ec2Client) getRaw(ctx context.Context, path string) (string, bool) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ec.baseURL+"/"+path, nil)
-	if err != nil {
-		return "", false
-	}
+	var headers map[string]string
 	if token := ec.v2Token(ctx); token != "" {
-		req.Header.Set("X-aws-ec2-metadata-token", token)
+		headers = map[string]string{"X-aws-ec2-metadata-token": token}
 	}
-	resp, err := ec.httpClient.Do(req)
-	if err != nil {
-		return "", false
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return "", false
-	}
-	data, err := io.ReadAll(io.LimitReader(resp.Body, ec2MaxBodyBytes))
-	if err != nil {
-		return "", false
-	}
-	return string(data), true
+	body, _, ok := fetchMetadata(ctx, ec.httpClient, http.MethodGet, ec.baseURL+"/"+path, headers)
+	return body, ok
 }
 
 func (ec *ec2Client) v2Token(ctx context.Context) string {
@@ -214,24 +194,13 @@ func (ec *ec2Client) v2Token(ctx context.Context) string {
 	if ec.token != "" && now().Before(ec.tokenUntil) {
 		return ec.token
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, ec.baseURL+"/api/token", nil)
-	if err != nil {
+	body, _, ok := fetchMetadata(ctx, ec.httpClient, http.MethodPut, ec.baseURL+"/api/token", map[string]string{
+		"X-aws-ec2-metadata-token-ttl-seconds": strconv.FormatInt(int64(ttl/time.Second), 10),
+	})
+	if !ok {
 		return ""
 	}
-	req.Header.Set("X-aws-ec2-metadata-token-ttl-seconds", strconv.FormatInt(int64(ttl/time.Second), 10))
-	resp, err := ec.httpClient.Do(req)
-	if err != nil {
-		return ""
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return ""
-	}
-	data, err := io.ReadAll(io.LimitReader(resp.Body, ec2MaxBodyBytes))
-	if err != nil {
-		return ""
-	}
-	ec.token = strings.TrimSpace(string(data))
+	ec.token = strings.TrimSpace(body)
 	ec.tokenUntil = now().Add(ttl)
 	return ec.token
 }

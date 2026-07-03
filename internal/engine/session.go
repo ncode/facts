@@ -231,6 +231,8 @@ type Session struct {
 	filesystems                  memo[[]string]
 	identity                     memo[map[string]any]
 	dmi                          memo[map[string]any]
+	linuxVirtualization          memo[linuxVirtualizationInput]
+	windowsVirtualization        memo[windowsVirtualizationInput]
 }
 
 // NewSession returns an empty Session; probes run on first use.
@@ -278,6 +280,31 @@ func (s *Session) glob(pattern string) ([]string, error) {
 
 func (s *Session) statMountpoint(path string) (mountStat, bool) {
 	return s.host.statMountpoint(path)
+}
+
+func (s *Session) getenv(name string) string {
+	return envValue(s.host.environ(), s.goos(), name)
+}
+
+// envValue returns the value of name in env ("KEY=VALUE" entries, first match
+// wins). Lookup is case-insensitive only on windows; every other platform —
+// including plan9, whose conventional variables are lowercase — matches
+// exactly. Empty names never match.
+func envValue(env []string, goos, name string) string {
+	if name == "" {
+		return ""
+	}
+	windows := goos == "windows"
+	for _, entry := range env {
+		key, value, ok := strings.Cut(entry, "=")
+		if !ok {
+			continue
+		}
+		if key == name || (windows && strings.EqualFold(key, name)) {
+			return value
+		}
+	}
+	return ""
 }
 
 // logr returns the session logger, defaulting to a discard logger so a Session
@@ -426,4 +453,20 @@ func (s *Session) cachedIdentity() map[string]any {
 // the per-category split (ADR-0010).
 func (s *Session) cachedDMI() map[string]any {
 	return s.dmi.get(func() map[string]any { return dmiFact("/sys/class/dmi/id", s.readFile) })
+}
+
+// cachedLinuxVirtualizationInput memoizes the Linux virtualization signal
+// gather (DMI reads plus the dmidecode/virt-what/vmware/lspci command set) so
+// the virtual fact, the hypervisors tree, and the uptime container gate share
+// one gather per discovery. Classification stays a pure derivation over the
+// memoized input.
+func (s *Session) cachedLinuxVirtualizationInput() linuxVirtualizationInput {
+	return s.linuxVirtualization.get(func() linuxVirtualizationInput { return currentLinuxVirtualizationInput(s) })
+}
+
+// cachedWindowsVirtualizationInput memoizes the Windows virtualization gather
+// (wmic/CIM computersystem+bios plus the services registry query) shared by the
+// virtual fact and the hypervisors tree.
+func (s *Session) cachedWindowsVirtualizationInput() windowsVirtualizationInput {
+	return s.windowsVirtualization.get(func() windowsVirtualizationInput { return currentWindowsVirtualizationInput(s.goos(), s.commandOutput) })
 }

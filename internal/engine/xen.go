@@ -30,7 +30,7 @@ func detectXenVM(s *Session) string {
 	if strings.Contains(readFileString("/proc/xen/capabilities", s.readFile), "control_d") {
 		return "xen0"
 	}
-	return detectXenVMFromSignals(fileExistsWithHost(s.host, "/dev/xen/evtchn"), dirExistsWithHost(s.host, "/proc/xen"), fileExistsWithHost(s.host, "/dev/xvda1"), isSymlink("/dev/xvda1", s.lstat))
+	return detectXenVMFromSignals(fileExists(s.host, "/dev/xen/evtchn"), dirExists(s.host, "/proc/xen"), fileExists(s.host, "/dev/xvda1"), isSymlink("/dev/xvda1", s.lstat))
 }
 
 func detectXenVMFromSignals(evtchn, procXen, xvda1, xvda1Symlink bool) string {
@@ -44,17 +44,13 @@ func detectXenVMFromSignals(evtchn, procXen, xvda1, xvda1Symlink bool) string {
 }
 
 func detectXenDomains(s *Session) []string {
-	return detectXenDomainsWithCommand(func(path string) bool {
-		return fileExistsWithHost(s.host, path)
-	}, s.commandOutput)
-}
-
-func detectXenDomainsWithCommand(exists func(string) bool, run commandRunner) []string {
-	bin := selectXenCommand(exists)
+	bin := selectXenCommand(func(path string) bool {
+		return fileExists(s.host, path)
+	})
 	if bin == "" {
 		return nil
 	}
-	out := run(bin, "list")
+	out := s.commandOutput(bin, "list")
 	if out == "" {
 		return nil
 	}

@@ -3,7 +3,6 @@ package engine
 import (
 	"bytes"
 	"io"
-	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -109,6 +108,6 @@ func windowsCodepageDecoder(codepage string) encoding.Encoding {
 // timezoneCoreFacts assembles the timezone category fact for the current host.
 func timezoneCoreFacts(s *Session) []ResolvedFact {
 	return []ResolvedFact{
-		{Name: "timezone", Value: currentTimezone(s, runtime.GOOS)},
+		{Name: "timezone", Value: currentTimezone(s, s.goos())},
 	}
 }

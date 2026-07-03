@@ -5,9 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"path/filepath"
 	"reflect"
-	"runtime"
 	"testing"
 	"time"
 )
@@ -304,38 +302,29 @@ func TestLinuxAWSCloudProviderRequiresVirtWhatAWSForRootKVM(t *testing.T) {
 }
 
 func TestFileExecutableRequiresRegularExecutableFile(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("POSIX executable mode bits are not portable on Windows")
+	host := &fakeHostOS{
+		stats: map[string]os.FileInfo{
+			"/bin/virt-what":      fakeFileInfo{name: "virt-what", mode: 0o700},
+			"/bin/not-executable": fakeFileInfo{name: "not-executable", mode: 0o600},
+			"/bin":                fakeFileInfo{name: "bin", mode: os.ModeDir | 0o755, isDir: true},
+		},
 	}
 
-	dir := t.TempDir()
-	executable := filepath.Join(dir, "virt-what")
-	if err := os.WriteFile(executable, []byte("#!/bin/sh\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chmod(executable, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if !fileExecutable(executable) {
+	if !fileExecutable(host, "/bin/virt-what") {
 		t.Fatal("fileExecutable(executable) = false, want true")
 	}
-
-	notExecutable := filepath.Join(dir, "not-executable")
-	if err := os.WriteFile(notExecutable, []byte("data"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if fileExecutable(notExecutable) {
+	if fileExecutable(host, "/bin/not-executable") {
 		t.Fatal("fileExecutable(non-executable) = true, want false")
 	}
-	if fileExecutable(dir) {
+	if fileExecutable(host, "/bin") {
 		t.Fatal("fileExecutable(directory) = true, want false")
 	}
-	if fileExecutable(filepath.Join(dir, "missing")) {
+	if fileExecutable(host, "/bin/missing") {
 		t.Fatal("fileExecutable(missing) = true, want false")
 	}
 }
 
-func TestGCEFacts_fetchesMetadataAndCloudProvider(t *testing.T) {
+func TestLinuxGCEFacts_fetchesMetadataAndCloudProvider(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("Metadata-Flavor"); got != "Google" {
 			t.Fatalf("Metadata-Flavor = %q, want Google", got)
@@ -349,7 +338,7 @@ func TestGCEFacts_fetchesMetadataAndCloudProvider(t *testing.T) {
 	}))
 	defer server.Close()
 
-	got := gceFacts(context.Background(), newGCEClient(server.URL+"/computeMetadata/v1", server.Client()))
+	got := linuxGCEFacts(context.Background(), "linux", "Google", newGCEClient(server.URL+"/computeMetadata/v1", server.Client()))
 	want := []ResolvedFact{
 		{Name: "gce", Value: map[string]any{
 			"instance": map[string]any{
@@ -364,6 +353,6 @@ func TestGCEFacts_fetchesMetadataAndCloudProvider(t *testing.T) {
 		{Name: "cloud.provider", Value: "gce"},
 	}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("gceFacts(context.Background(), ) = %#v, want %#v", got, want)
+		t.Fatalf("linuxGCEFacts(context.Background(), ) = %#v, want %#v", got, want)
 	}
 }

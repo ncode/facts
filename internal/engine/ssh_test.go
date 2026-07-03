@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -244,5 +245,63 @@ func TestParseSSHHostPublicKeyRejectsUnknownOrInvalidKeys(t *testing.T) {
 				t.Fatalf("parseSSHHostPublicKey(%q) = %#v, true; want false", line, entry)
 			}
 		})
+	}
+}
+
+// A fake windows host drives the full windows assembly path — ProgramData env
+// lookup (case-insensitive via the Session env seam), whoami privilege gate,
+// and backslash-joined host-key paths — from any development platform.
+func TestSSHCoreFactsFakeWindowsHostUsesProgramDataAndPrivilegeGate(t *testing.T) {
+	host := &fakeHostOS{
+		platform:       "windows",
+		environEntries: []string{`ProgramData=C:\ProgramData`},
+		runOutputs: map[string]string{
+			fakeRunKey("whoami"):            "corp\\admin\n",
+			fakeRunKey("whoami", "/groups"): `BUILTIN\Administrators S-1-5-32-544 Enabled group` + "\n",
+		},
+		files: map[string][]byte{
+			// Forward-slash key: production joins the windows path with
+			// backslashes, but fakeHostOS.readFile looks up through fakeHostPath
+			// (filepath.ToSlash), so the fixture must use slashes to match on a
+			// real Windows runner (on unix ToSlash is a no-op).
+			"C:/ProgramData/ssh/ssh_host_rsa_key.pub": []byte("ssh-rsa AAAA host\n"),
+		},
+	}
+	s := NewSessionContext(context.Background())
+	s.host = host
+
+	facts := sshCoreFacts(s)
+	if len(facts) != 1 || facts[0].Name != "ssh" {
+		t.Fatalf("sshCoreFacts() = %#v, want one ssh fact", facts)
+	}
+	structured, ok := facts[0].Value.(map[string]any)
+	if !ok || structured["rsa"] == nil {
+		t.Fatalf("ssh fact value = %#v, want structured rsa key", facts[0].Value)
+	}
+
+	// The same host without administrator membership must not discover keys.
+	unprivileged := &fakeHostOS{
+		platform:       "windows",
+		environEntries: []string{`ProgramData=C:\ProgramData`},
+		runOutputs: map[string]string{
+			fakeRunKey("whoami"):            "corp\\user\n",
+			fakeRunKey("whoami", "/groups"): "Everyone S-1-1-0 Mandatory group\n",
+		},
+		files: map[string][]byte{
+			// Forward-slash key: production joins the windows path with
+			// backslashes, but fakeHostOS.readFile looks up through fakeHostPath
+			// (filepath.ToSlash), so the fixture must use slashes to match on a
+			// real Windows runner (on unix ToSlash is a no-op).
+			"C:/ProgramData/ssh/ssh_host_rsa_key.pub": []byte("ssh-rsa AAAA host\n"),
+		},
+	}
+	s2 := NewSessionContext(context.Background())
+	s2.host = unprivileged
+	facts = sshCoreFacts(s2)
+	if len(facts) != 1 || facts[0].Value != nil {
+		t.Fatalf("unprivileged sshCoreFacts() = %#v, want nil ssh fact", facts)
+	}
+	if len(unprivileged.readFileCalls) != 0 {
+		t.Fatalf("unprivileged discovery read %v, want no host-key reads", unprivileged.readFileCalls)
 	}
 }

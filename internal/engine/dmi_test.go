@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -11,23 +12,17 @@ import (
 func TestCurrentWindowsDMIMatchesRubyResolvers(t *testing.T) {
 	t.Parallel()
 
-	run := func(name string, args ...string) string {
-		if name != "wmic" {
-			t.Fatalf("command = %q %v, want wmic", name, args)
-		}
-		query := strings.Join(args, " ")
-		switch query {
-		case "bios get Manufacturer,SerialNumber /value":
-			return "Manufacturer=VMware, Inc.\r\nSerialNumber=VMware-42 1a 38 c5 9d 35 5b f1-7a 62 4b 6e cb a0 79 de\r\n"
-		case "computersystemproduct get Name,UUID /value":
-			return "Name=VMware7,1\r\nUUID=C5381A42-359D-F15B-7A62-4B6ECBA079DE\r\n"
-		default:
-			t.Fatalf("wmic args = %q", query)
-		}
-		return ""
+	host := &fakeHostOS{
+		platform: "windows",
+		runOutputs: map[string]string{
+			fakeRunKey("wmic", "bios", "get", "Manufacturer,SerialNumber", "/value"):  "Manufacturer=VMware, Inc.\r\nSerialNumber=VMware-42 1a 38 c5 9d 35 5b f1-7a 62 4b 6e cb a0 79 de\r\n",
+			fakeRunKey("wmic", "computersystemproduct", "get", "Name,UUID", "/value"): "Name=VMware7,1\r\nUUID=C5381A42-359D-F15B-7A62-4B6ECBA079DE\r\n",
+		},
 	}
+	s := NewSessionContext(context.Background())
+	s.host = host
 
-	got := currentWindowsDMI("windows", run, discardLog())
+	got := currentWindowsDMI(s)
 	want := windowsDMI{
 		Manufacturer: "VMware, Inc.",
 		SerialNumber: "VMware-42 1a 38 c5 9d 35 5b f1-7a 62 4b 6e cb a0 79 de",
@@ -37,13 +32,23 @@ func TestCurrentWindowsDMIMatchesRubyResolvers(t *testing.T) {
 	if got != want {
 		t.Fatalf("currentWindowsDMI() = %#v, want %#v", got, want)
 	}
+	wantCalls := []fakeHostRunCall{
+		{name: "wmic", args: []string{"bios", "get", "Manufacturer,SerialNumber", "/value"}},
+		{name: "wmic", args: []string{"computersystemproduct", "get", "Name,UUID", "/value"}},
+	}
+	if !reflect.DeepEqual(host.runCalls, wantCalls) {
+		t.Fatalf("run calls = %#v, want %#v", host.runCalls, wantCalls)
+	}
 }
 
 func TestCurrentWindowsDMILogsNoResultDiagnosticsLikeRubyResolvers(t *testing.T) {
 	debugMessages := []string{}
-	logger := captureLogger(&debugMessages, nil, nil)
+	host := &fakeHostOS{platform: "windows", emptyRunDefault: true}
+	s := NewSessionContext(context.Background())
+	s.host = host
+	s.logger = captureLogger(&debugMessages, nil, nil)
 
-	got := currentWindowsDMI("windows", func(string, ...string) string { return "" }, logger)
+	got := currentWindowsDMI(s)
 	if got != (windowsDMI{}) {
 		t.Fatalf("currentWindowsDMI(empty WMI) = %#v, want empty DMI", got)
 	}
@@ -387,127 +392,137 @@ func TestCurrentBSDDMIFactsQueryPlatformSources(t *testing.T) {
 	t.Run("freebsd", func(t *testing.T) {
 		t.Parallel()
 
-		calls := map[string]bool{}
-		facts := currentFreeBSDDMIFactsForPlatform("freebsd", func(name string, args ...string) string {
-			if name != "/bin/kenv" || len(args) != 1 {
-				t.Fatalf("run(%q, %#v), want /bin/kenv <key>", name, args)
-			}
-			calls[args[0]] = true
-			if args[0] == "smbios.system.maker" {
-				return "FreeBSD Maker\n"
-			}
-			return ""
-		})
+		host := &fakeHostOS{
+			platform:        "freebsd",
+			emptyRunDefault: true,
+			runOutputs: map[string]string{
+				fakeRunKey("/bin/kenv", "smbios.system.maker"): "FreeBSD Maker\n",
+			},
+		}
+		s := NewSessionContext(context.Background())
+		s.host = host
+
+		facts := currentFreeBSDDMIFacts(s)
 		if got := Collection(facts)["dmi"].(map[string]any)["manufacturer"]; got != "FreeBSD Maker" {
 			t.Fatalf("freebsd manufacturer = %#v, want FreeBSD Maker", got)
 		}
+		wantCalls := make([]fakeHostRunCall, 0, len(freeBSDDMIKeys))
 		for _, key := range freeBSDDMIKeys {
-			if !calls[key] {
-				t.Fatalf("freebsd DMI did not query %s", key)
-			}
+			wantCalls = append(wantCalls, fakeHostRunCall{name: "/bin/kenv", args: []string{key}})
+		}
+		if !reflect.DeepEqual(host.runCalls, wantCalls) {
+			t.Fatalf("freebsd DMI run calls = %#v, want %#v", host.runCalls, wantCalls)
 		}
 	})
 
 	t.Run("dragonfly", func(t *testing.T) {
 		t.Parallel()
 
-		calls := map[string]bool{}
-		facts := currentDragonFlyDMIFactsForPlatform("dragonfly", func(name string, args ...string) string {
-			key := fakeRunKey(name, args...)
-			calls[key] = true
-			switch key {
-			case fakeRunKey("kenv", "smbios.system.maker"):
-				return "DragonFly Maker\n"
-			case fakeRunKey("/usr/local/sbin/dmidecode", "-t", "system"):
-				return "Manufacturer: fallback\n"
-			default:
-				return ""
-			}
-		})
+		host := &fakeHostOS{
+			platform:        "dragonfly",
+			emptyRunDefault: true,
+			runOutputs: map[string]string{
+				fakeRunKey("kenv", "smbios.system.maker"):               "DragonFly Maker\n",
+				fakeRunKey("/usr/local/sbin/dmidecode", "-t", "system"): "Manufacturer: fallback\n",
+			},
+		}
+		s := NewSessionContext(context.Background())
+		s.host = host
+
+		facts := currentDragonFlyDMIFacts(s)
 		if got := Collection(facts)["dmi"].(map[string]any)["manufacturer"]; got != "DragonFly Maker" {
 			t.Fatalf("dragonfly manufacturer = %#v, want DragonFly Maker", got)
 		}
-		if calls[fakeRunKey("/usr/local/sbin/dmidecode", "-t", "system")] {
-			t.Fatal("dragonfly DMI queried dmidecode despite kenv SMBIOS data")
-		}
-		for _, key := range freeBSDDMIKeys {
-			if !calls[fakeRunKey("kenv", key)] {
-				t.Fatalf("dragonfly DMI did not query %s", key)
+		for _, call := range host.runCalls {
+			if call.name == "/usr/local/sbin/dmidecode" {
+				t.Fatal("dragonfly DMI queried dmidecode despite kenv SMBIOS data")
 			}
+		}
+		wantCalls := make([]fakeHostRunCall, 0, len(freeBSDDMIKeys))
+		for _, key := range freeBSDDMIKeys {
+			wantCalls = append(wantCalls, fakeHostRunCall{name: "kenv", args: []string{key}})
+		}
+		if !reflect.DeepEqual(host.runCalls, wantCalls) {
+			t.Fatalf("dragonfly DMI run calls = %#v, want %#v", host.runCalls, wantCalls)
 		}
 	})
 
 	t.Run("openbsd", func(t *testing.T) {
 		t.Parallel()
 
-		calls := map[string]bool{}
-		facts := currentOpenBSDDMIFactsForPlatform("openbsd", func(name string, args ...string) string {
-			if name != "/sbin/sysctl" || len(args) != 2 || args[0] != "-n" {
-				t.Fatalf("run(%q, %#v), want /sbin/sysctl -n <key>", name, args)
-			}
-			calls[args[1]] = true
-			if args[1] == "hw.vendor" {
-				return "OpenBSD Vendor\n"
-			}
-			return ""
-		})
+		host := &fakeHostOS{
+			platform:        "openbsd",
+			emptyRunDefault: true,
+			runOutputs: map[string]string{
+				fakeRunKey("/sbin/sysctl", "-n", "hw.vendor"): "OpenBSD Vendor\n",
+			},
+		}
+		s := NewSessionContext(context.Background())
+		s.host = host
+
+		facts := currentOpenBSDDMIFacts(s)
 		if got := Collection(facts)["dmi"].(map[string]any)["manufacturer"]; got != "OpenBSD Vendor" {
 			t.Fatalf("openbsd manufacturer = %#v, want OpenBSD Vendor", got)
 		}
+		wantCalls := make([]fakeHostRunCall, 0, len(openBSDDMIKeys))
 		for _, key := range openBSDDMIKeys {
-			if !calls[key] {
-				t.Fatalf("openbsd DMI did not query %s", key)
-			}
+			wantCalls = append(wantCalls, fakeHostRunCall{name: "/sbin/sysctl", args: []string{"-n", key}})
+		}
+		if !reflect.DeepEqual(host.runCalls, wantCalls) {
+			t.Fatalf("openbsd DMI run calls = %#v, want %#v", host.runCalls, wantCalls)
 		}
 	})
 
 	t.Run("netbsd", func(t *testing.T) {
 		t.Parallel()
 
-		calls := map[string]bool{}
-		facts := currentNetBSDDMIFactsForPlatform("netbsd", func(name string, args ...string) string {
-			if name != "/sbin/sysctl" || len(args) != 2 || args[0] != "-n" {
-				t.Fatalf("run(%q, %#v), want /sbin/sysctl -n <key>", name, args)
-			}
-			calls[args[1]] = true
-			if args[1] == "machdep.dmi.system-vendor" {
-				return "NetBSD Vendor\n"
-			}
-			return ""
-		})
+		host := &fakeHostOS{
+			platform:        "netbsd",
+			emptyRunDefault: true,
+			runOutputs: map[string]string{
+				fakeRunKey("/sbin/sysctl", "-n", "machdep.dmi.system-vendor"): "NetBSD Vendor\n",
+			},
+		}
+		s := NewSessionContext(context.Background())
+		s.host = host
+
+		facts := currentNetBSDDMIFacts(s)
 		if got := Collection(facts)["dmi"].(map[string]any)["manufacturer"]; got != "NetBSD Vendor" {
 			t.Fatalf("netbsd manufacturer = %#v, want NetBSD Vendor", got)
 		}
+		wantCalls := make([]fakeHostRunCall, 0, len(netBSDDMIKeys))
 		for _, key := range netBSDDMIKeys {
-			if !calls[key] {
-				t.Fatalf("netbsd DMI did not query %s", key)
-			}
+			wantCalls = append(wantCalls, fakeHostRunCall{name: "/sbin/sysctl", args: []string{"-n", key}})
+		}
+		if !reflect.DeepEqual(host.runCalls, wantCalls) {
+			t.Fatalf("netbsd DMI run calls = %#v, want %#v", host.runCalls, wantCalls)
 		}
 	})
 
 	t.Run("illumos", func(t *testing.T) {
 		t.Parallel()
 
-		calls := map[string]bool{}
-		facts := currentIllumosDMIFactsForPlatform("illumos", func(name string, args ...string) string {
-			key := fakeRunKey(name, args...)
-			calls[key] = true
-			if key == fakeRunKey("/usr/sbin/smbios", "-t", "SMB_TYPE_SYSTEM") {
-				return "Manufacturer: illumos Maker\n"
-			}
-			return ""
-		})
+		host := &fakeHostOS{
+			platform:        "illumos",
+			emptyRunDefault: true,
+			runOutputs: map[string]string{
+				fakeRunKey("/usr/sbin/smbios", "-t", "SMB_TYPE_SYSTEM"): "Manufacturer: illumos Maker\n",
+			},
+		}
+		s := NewSessionContext(context.Background())
+		s.host = host
+
+		facts := currentIllumosDMIFacts(s)
 		if got := Collection(facts)["dmi"].(map[string]any)["manufacturer"]; got != "illumos Maker" {
 			t.Fatalf("illumos manufacturer = %#v, want illumos Maker", got)
 		}
-		for _, key := range []string{
-			fakeRunKey("/usr/sbin/smbios", "-t", "SMB_TYPE_BIOS"),
-			fakeRunKey("/usr/sbin/smbios", "-t", "SMB_TYPE_SYSTEM"),
-			fakeRunKey("/usr/sbin/smbios", "-t", "SMB_TYPE_CHASSIS"),
-		} {
-			if !calls[key] {
-				t.Fatalf("illumos DMI did not query %q", key)
-			}
+		wantCalls := []fakeHostRunCall{
+			{name: "/usr/sbin/smbios", args: []string{"-t", "SMB_TYPE_BIOS"}},
+			{name: "/usr/sbin/smbios", args: []string{"-t", "SMB_TYPE_SYSTEM"}},
+			{name: "/usr/sbin/smbios", args: []string{"-t", "SMB_TYPE_CHASSIS"}},
+		}
+		if !reflect.DeepEqual(host.runCalls, wantCalls) {
+			t.Fatalf("illumos DMI run calls = %#v, want %#v", host.runCalls, wantCalls)
 		}
 	})
 }
@@ -515,24 +530,27 @@ func TestCurrentBSDDMIFactsQueryPlatformSources(t *testing.T) {
 func TestCurrentPlatformDMIFactsSkipOtherPlatforms(t *testing.T) {
 	t.Parallel()
 
-	run := func(string, ...string) string {
-		t.Fatal("DMI platform helper ran command for non-matching platform")
-		return ""
+	host := &fakeHostOS{platform: "linux", emptyRunDefault: true}
+	s := NewSessionContext(context.Background())
+	s.host = host
+
+	if got := currentFreeBSDDMIFacts(s); got != nil {
+		t.Fatalf("currentFreeBSDDMIFacts(linux) = %#v, want nil", got)
 	}
-	if got := currentFreeBSDDMIFactsForPlatform("linux", run); got != nil {
-		t.Fatalf("currentFreeBSDDMIFactsForPlatform(linux) = %#v, want nil", got)
+	if got := currentDragonFlyDMIFacts(s); got != nil {
+		t.Fatalf("currentDragonFlyDMIFacts(linux) = %#v, want nil", got)
 	}
-	if got := currentDragonFlyDMIFactsForPlatform("linux", run); got != nil {
-		t.Fatalf("currentDragonFlyDMIFactsForPlatform(linux) = %#v, want nil", got)
+	if got := currentOpenBSDDMIFacts(s); got != nil {
+		t.Fatalf("currentOpenBSDDMIFacts(linux) = %#v, want nil", got)
 	}
-	if got := currentOpenBSDDMIFactsForPlatform("linux", run); got != nil {
-		t.Fatalf("currentOpenBSDDMIFactsForPlatform(linux) = %#v, want nil", got)
+	if got := currentNetBSDDMIFacts(s); got != nil {
+		t.Fatalf("currentNetBSDDMIFacts(linux) = %#v, want nil", got)
 	}
-	if got := currentNetBSDDMIFactsForPlatform("linux", run); got != nil {
-		t.Fatalf("currentNetBSDDMIFactsForPlatform(linux) = %#v, want nil", got)
+	if got := currentIllumosDMIFacts(s); got != nil {
+		t.Fatalf("currentIllumosDMIFacts(linux) = %#v, want nil", got)
 	}
-	if got := currentIllumosDMIFactsForPlatform("linux", run); got != nil {
-		t.Fatalf("currentIllumosDMIFactsForPlatform(linux) = %#v, want nil", got)
+	if len(host.runCalls) != 0 {
+		t.Fatalf("DMI platform helper ran command for non-matching platform: %#v", host.runCalls)
 	}
 }
 
@@ -679,19 +697,18 @@ func TestMacOSDMIFacts_skipsEmptyProductName(t *testing.T) {
 }
 
 func TestCurrentLinuxDistro_mapsAmazonAMISystemReleaseIDAndMissingCodename(t *testing.T) {
-	files := map[string]string{
-		"/etc/os-release":     "ID=amzn\nVERSION_ID=2017.03\n",
-		"/etc/system-release": "Amazon Linux AMI release 2017.03\n",
+	host := &fakeHostOS{
+		platform:        "linux",
+		emptyRunDefault: true,
+		files: map[string][]byte{
+			"/etc/os-release":     []byte("ID=amzn\nVERSION_ID=2017.03\n"),
+			"/etc/system-release": []byte("Amazon Linux AMI release 2017.03\n"),
+		},
 	}
-	readFile := func(path string) ([]byte, error) {
-		value, ok := files[path]
-		if !ok {
-			return nil, os.ErrNotExist
-		}
-		return []byte(value), nil
-	}
+	s := NewSessionContext(t.Context())
+	s.host = host
 
-	got := currentLinuxDistro("linux", func(string) (string, error) { return "", os.ErrNotExist }, func(string, ...string) string { return "" }, readFile)
+	got := currentLinuxDistro(s, func(string) (string, error) { return "", os.ErrNotExist })
 	want := linuxDistro{
 		ID:           "AmazonAMI",
 		Description:  "Amazon Linux AMI release 2017.03",

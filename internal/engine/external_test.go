@@ -16,6 +16,23 @@ import (
 	"time"
 )
 
+// loadExternalFactsForTest mirrors the deleted LoadExternalFacts facade
+// field-for-field (CLI mode, env included, default host) so these tests keep
+// exercising the CLI loader path through a stable in-package entry point.
+func loadExternalFactsForTest(s *Session, dirs []string) ([]ResolvedFact, error) {
+	return loadExternalFactsForTestWithBlocklist(s, dirs, nil)
+}
+
+func loadExternalFactsForTestWithBlocklist(s *Session, dirs []string, blocked map[string]bool) ([]ResolvedFact, error) {
+	return externalFactLoader{
+		s:          s,
+		mode:       externalFactLoaderCLI,
+		dirs:       dirs,
+		blocked:    blocked,
+		includeEnv: true,
+	}.load()
+}
+
 type fakeExternalFactLoaderHost struct {
 	externalFactOSHost
 
@@ -385,7 +402,7 @@ func TestLoadExternalFacts_txtFacts(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := LoadExternalFacts(testSession, []string{dir})
+	got, err := loadExternalFactsForTest(testSession, []string{dir})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -394,11 +411,11 @@ func TestLoadExternalFacts_txtFacts(t *testing.T) {
 		{Name: "three", Value: "four=five", Type: "external"},
 	}
 	if len(got) != len(want) {
-		t.Fatalf("LoadExternalFacts(testSession) len = %d, want %d: %#v", len(got), len(want), got)
+		t.Fatalf("loadExternalFactsForTest(testSession) len = %d, want %d: %#v", len(got), len(want), got)
 	}
 	for i := range want {
 		if got[i] != want[i] {
-			t.Fatalf("LoadExternalFacts(testSession)[%d] = %#v, want %#v", i, got[i], want[i])
+			t.Fatalf("loadExternalFactsForTest(testSession)[%d] = %#v, want %#v", i, got[i], want[i])
 		}
 	}
 }
@@ -412,7 +429,7 @@ func TestLoadExternalFacts_processesDirectoryEntriesInReverseLexicographicOrderL
 		t.Fatal(err)
 	}
 
-	got, err := LoadExternalFacts(testSession, []string{dir})
+	got, err := loadExternalFactsForTest(testSession, []string{dir})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -421,7 +438,7 @@ func TestLoadExternalFacts_processesDirectoryEntriesInReverseLexicographicOrderL
 		{Name: "first", Value: "a", Type: "external"},
 	}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("LoadExternalFacts(testSession) = %#v, want %#v", got, want)
+		t.Fatalf("loadExternalFactsForTest(testSession) = %#v, want %#v", got, want)
 	}
 }
 
@@ -438,13 +455,13 @@ func TestLoadExternalFacts_reportsBlockedFilesLikeRubyDirectoryLoader(t *testing
 	s := NewSession()
 	s.logger = captureLogger(&debugMessages, nil, nil)
 
-	got, err := LoadExternalFactsWithBlocklist(s, []string{dir}, map[string]bool{"data.yaml": true})
+	got, err := loadExternalFactsForTestWithBlocklist(s, []string{dir}, map[string]bool{"data.yaml": true})
 	if err != nil {
 		t.Fatal(err)
 	}
 	wantFacts := []ResolvedFact{{Name: "f3", Value: "three", Type: "external"}}
 	if !reflect.DeepEqual(got, wantFacts) {
-		t.Fatalf("LoadExternalFactsWithBlocklist(testSession) = %#v, want %#v", got, wantFacts)
+		t.Fatalf("loadExternalFactsForTestWithBlocklist(testSession) = %#v, want %#v", got, wantFacts)
 	}
 	wantDebug := []string{"External fact file data.yaml blocked."}
 	if !reflect.DeepEqual(debugMessages, wantDebug) {
@@ -464,12 +481,12 @@ func TestLoadExternalFacts_reportsIgnoredBackupFilesLikeRubyDirectoryLoader(t *t
 	s := NewSession()
 	s.logger = captureLogger(&debugMessages, nil, nil)
 
-	got, err := LoadExternalFacts(s, []string{dir})
+	got, err := loadExternalFactsForTest(s, []string{dir})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(got) != 0 {
-		t.Fatalf("LoadExternalFacts(testSession) = %#v, want no facts", got)
+		t.Fatalf("loadExternalFactsForTest(testSession) = %#v, want no facts", got)
 	}
 	for _, ext := range []string{"orig", "bak"} {
 		found := false
@@ -488,25 +505,25 @@ func TestLoadExternalFacts_reportsIgnoredBackupFilesLikeRubyDirectoryLoader(t *t
 func TestLoadExternalFacts_ignoresMissingDirectories(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "missing")
 
-	got, err := LoadExternalFacts(testSession, []string{dir})
+	got, err := loadExternalFactsForTest(testSession, []string{dir})
 	if err != nil {
-		t.Fatalf("LoadExternalFacts(testSession) err = %v, want nil", err)
+		t.Fatalf("loadExternalFactsForTest(testSession) err = %v, want nil", err)
 	}
 	if len(got) != 0 {
-		t.Fatalf("LoadExternalFacts(testSession) = %#v, want no facts", got)
+		t.Fatalf("loadExternalFactsForTest(testSession) = %#v, want no facts", got)
 	}
 }
 
 func TestLoadExternalFacts_loadsEnvironmentFactsWithoutUnderscore(t *testing.T) {
 	t.Setenv("FACTERsite_location", "lab")
 
-	got, err := LoadExternalFacts(testSession, nil)
+	got, err := loadExternalFactsForTest(testSession, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := []ResolvedFact{{Name: "site_location", Value: "lab", Type: "external"}}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("LoadExternalFacts(testSession) = %#v, want %#v", got, want)
+		t.Fatalf("loadExternalFactsForTest(testSession) = %#v, want %#v", got, want)
 	}
 }
 
@@ -626,7 +643,7 @@ func TestLoadExternalFacts_jsonFacts(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := LoadExternalFacts(testSession, []string{dir})
+	got, err := loadExternalFactsForTest(testSession, []string{dir})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -636,7 +653,7 @@ func TestLoadExternalFacts_jsonFacts(t *testing.T) {
 		"site":     "lab",
 	}
 	if len(got) != len(want) {
-		t.Fatalf("LoadExternalFacts(testSession) len = %d, want %d: %#v", len(got), len(want), got)
+		t.Fatalf("loadExternalFactsForTest(testSession) len = %d, want %d: %#v", len(got), len(want), got)
 	}
 	for _, fact := range got {
 		if fact.Type != "external" {
@@ -658,12 +675,12 @@ func TestLoadExternalFacts_ignoresJSONWithTrailingTokens(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := LoadExternalFacts(testSession, []string{dir})
+	got, err := loadExternalFactsForTest(testSession, []string{dir})
 	if err != nil {
-		t.Fatalf("LoadExternalFacts(testSession) err = %v, want nil for malformed structured file", err)
+		t.Fatalf("loadExternalFactsForTest(testSession) err = %v, want nil for malformed structured file", err)
 	}
 	if len(got) != 0 {
-		t.Fatalf("LoadExternalFacts(testSession) = %#v, want no facts", got)
+		t.Fatalf("loadExternalFactsForTest(testSession) = %#v, want no facts", got)
 	}
 }
 
@@ -673,13 +690,13 @@ func TestLoadExternalFacts_preservesLargeJSONIntegerAsInt64(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := LoadExternalFacts(testSession, []string{dir})
+	got, err := loadExternalFactsForTest(testSession, []string{dir})
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := []ResolvedFact{{Name: "big", Value: int64(2147483648), Type: "external"}}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("LoadExternalFacts(testSession) = %#v, want %#v", got, want)
+		t.Fatalf("loadExternalFactsForTest(testSession) = %#v, want %#v", got, want)
 	}
 }
 
@@ -690,7 +707,7 @@ func TestLoadExternalFacts_yamlFacts(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := LoadExternalFacts(testSession, []string{dir})
+	got, err := loadExternalFactsForTest(testSession, []string{dir})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -701,7 +718,7 @@ func TestLoadExternalFacts_yamlFacts(t *testing.T) {
 		"site":     "lab",
 	}
 	if len(got) != len(want) {
-		t.Fatalf("LoadExternalFacts(testSession) len = %d, want %d: %#v", len(got), len(want), got)
+		t.Fatalf("loadExternalFactsForTest(testSession) len = %d, want %d: %#v", len(got), len(want), got)
 	}
 	for _, fact := range got {
 		if fact.Type != "external" {
@@ -745,13 +762,13 @@ func TestLoadExternalFacts_acceptsLongKeyValueLineWithinLimit(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := LoadExternalFacts(testSession, []string{dir})
+	got, err := loadExternalFactsForTest(testSession, []string{dir})
 	if err != nil {
-		t.Fatalf("LoadExternalFacts(testSession) err = %v, want nil", err)
+		t.Fatalf("loadExternalFactsForTest(testSession) err = %v, want nil", err)
 	}
 	want := []ResolvedFact{{Name: "site", Value: value, Type: "external"}}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("LoadExternalFacts(testSession) = %#v, want long site fact", got)
+		t.Fatalf("loadExternalFactsForTest(testSession) = %#v, want long site fact", got)
 	}
 }
 
@@ -762,7 +779,7 @@ func TestLoadExternalFacts_yamlTimestampValuesStayStrings(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := LoadExternalFacts(testSession, []string{dir})
+	got, err := loadExternalFactsForTest(testSession, []string{dir})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -770,7 +787,7 @@ func TestLoadExternalFacts_yamlTimestampValuesStayStrings(t *testing.T) {
 		{Name: "testsfact", Value: map[string]any{"time": "2020-04-28 01:44:08.148119000 +01:01"}, Type: "external"},
 	}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("LoadExternalFacts(testSession) = %#v, want %#v", got, want)
+		t.Fatalf("loadExternalFactsForTest(testSession) = %#v, want %#v", got, want)
 	}
 }
 
@@ -781,7 +798,7 @@ func TestLoadExternalFacts_yamlTimestampWithoutZoneStaysString(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := LoadExternalFacts(testSession, []string{dir})
+	got, err := loadExternalFactsForTest(testSession, []string{dir})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -789,7 +806,7 @@ func TestLoadExternalFacts_yamlTimestampWithoutZoneStaysString(t *testing.T) {
 		{Name: "testsfact", Value: map[string]any{"time": "2020-04-28 01:44:08.148119000"}, Type: "external"},
 	}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("LoadExternalFacts(testSession) = %#v, want %#v", got, want)
+		t.Fatalf("loadExternalFactsForTest(testSession) = %#v, want %#v", got, want)
 	}
 }
 
@@ -800,7 +817,7 @@ func TestLoadExternalFacts_yamlDateLoadsAsDateLikeRubyParser(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := LoadExternalFacts(testSession, []string{dir})
+	got, err := loadExternalFactsForTest(testSession, []string{dir})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -808,7 +825,7 @@ func TestLoadExternalFacts_yamlDateLoadsAsDateLikeRubyParser(t *testing.T) {
 		{Name: "testsfact", Value: map[string]any{"date": time.Date(2020, 4, 28, 0, 0, 0, 0, time.UTC)}, Type: "external"},
 	}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("LoadExternalFacts(testSession) = %#v, want %#v", got, want)
+		t.Fatalf("loadExternalFactsForTest(testSession) = %#v, want %#v", got, want)
 	}
 }
 
@@ -819,7 +836,7 @@ func TestLoadExternalFacts_yamlAnchors(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := LoadExternalFacts(testSession, []string{dir})
+	got, err := loadExternalFactsForTest(testSession, []string{dir})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -828,7 +845,7 @@ func TestLoadExternalFacts_yamlAnchors(t *testing.T) {
 		{Name: "two", Value: map[string]any{"TEST": map[string]any{"a": []any{"foo"}}}, Type: "external"},
 	}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("LoadExternalFacts(testSession) = %#v, want %#v", got, want)
+		t.Fatalf("loadExternalFactsForTest(testSession) = %#v, want %#v", got, want)
 	}
 }
 
@@ -845,12 +862,12 @@ func TestLoadExternalFacts_ignoresStructuredFilesWithoutKeyValueData(t *testing.
 		}
 	}
 
-	got, err := LoadExternalFacts(testSession, []string{dir})
+	got, err := loadExternalFactsForTest(testSession, []string{dir})
 	if err != nil {
-		t.Fatalf("LoadExternalFacts(testSession) err = %v, want nil", err)
+		t.Fatalf("loadExternalFactsForTest(testSession) err = %v, want nil", err)
 	}
 	if len(got) != 0 {
-		t.Fatalf("LoadExternalFacts(testSession) = %#v, want no facts", got)
+		t.Fatalf("loadExternalFactsForTest(testSession) = %#v, want no facts", got)
 	}
 }
 
@@ -870,12 +887,12 @@ func TestLoadExternalFacts_reportsStructuredFilesWithoutKeyValueData(t *testing.
 	s := NewSession()
 	s.logger = captureLogger(nil, nil, &messages)
 
-	got, err := LoadExternalFacts(s, []string{dir})
+	got, err := loadExternalFactsForTest(s, []string{dir})
 	if err != nil {
-		t.Fatalf("LoadExternalFacts(testSession) err = %v, want nil", err)
+		t.Fatalf("loadExternalFactsForTest(testSession) err = %v, want nil", err)
 	}
 	if len(got) != 0 {
-		t.Fatalf("LoadExternalFacts(testSession) = %#v, want no facts", got)
+		t.Fatalf("loadExternalFactsForTest(testSession) = %#v, want no facts", got)
 	}
 	want := []string{
 		fmt.Sprintf("Structured data fact file %s was parsed but no key=>value data was returned.", filepath.Join(dir, "scalar.yaml")),
@@ -902,12 +919,12 @@ func TestLoadExternalFacts_reportsEmptyStructuredFilesLikeRubyDirectoryLoader(t 
 	s := NewSession()
 	s.logger = captureLogger(&messages, nil, nil)
 
-	got, err := LoadExternalFacts(s, []string{dir})
+	got, err := loadExternalFactsForTest(s, []string{dir})
 	if err != nil {
-		t.Fatalf("LoadExternalFacts(testSession) err = %v, want nil", err)
+		t.Fatalf("loadExternalFactsForTest(testSession) err = %v, want nil", err)
 	}
 	if len(got) != 0 {
-		t.Fatalf("LoadExternalFacts(testSession) = %#v, want no facts", got)
+		t.Fatalf("loadExternalFactsForTest(testSession) = %#v, want no facts", got)
 	}
 	want := []string{
 		fmt.Sprintf("Structured data fact file %s was parsed but was either empty or an invalid filetype (valid filetypes are .yaml, .json, and .txt).", filepath.Join(dir, "empty.yaml")),
@@ -929,12 +946,12 @@ func TestLoadExternalFacts_reportsUnsupportedVisibleFilesLikeRubyDirectoryLoader
 	s := NewSession()
 	s.logger = captureLogger(&messages, nil, nil)
 
-	got, err := LoadExternalFacts(s, []string{dir})
+	got, err := loadExternalFactsForTest(s, []string{dir})
 	if err != nil {
-		t.Fatalf("LoadExternalFacts(testSession) err = %v, want nil", err)
+		t.Fatalf("loadExternalFactsForTest(testSession) err = %v, want nil", err)
 	}
 	if len(got) != 0 {
-		t.Fatalf("LoadExternalFacts(testSession) = %#v, want no facts", got)
+		t.Fatalf("loadExternalFactsForTest(testSession) = %#v, want no facts", got)
 	}
 	want := []string{
 		fmt.Sprintf("Structured data fact file %s was parsed but was either empty or an invalid filetype (valid filetypes are .yaml, .json, and .txt).", path),
@@ -955,12 +972,12 @@ func TestLoadExternalFacts_skipsRubyFactFileWithWarningNamingTheFile(t *testing.
 	s := NewSession()
 	s.logger = captureLogger(nil, &warnings, nil)
 
-	got, err := LoadExternalFacts(s, []string{dir})
+	got, err := loadExternalFactsForTest(s, []string{dir})
 	if err != nil {
-		t.Fatalf("LoadExternalFacts(testSession) err = %v, want nil", err)
+		t.Fatalf("loadExternalFactsForTest(testSession) err = %v, want nil", err)
 	}
 	if len(got) != 0 {
-		t.Fatalf("LoadExternalFacts(testSession) = %#v, want Ruby fact file unread", got)
+		t.Fatalf("loadExternalFactsForTest(testSession) = %#v, want Ruby fact file unread", got)
 	}
 	want := []string{
 		fmt.Sprintf("Ruby fact files are not supported by the Go port; skipping %s. Rewrite it as an executable external fact (see docs/CUSTOM_FACT_MIGRATION.md).", path),
@@ -1002,11 +1019,11 @@ func TestLoadExternalFacts_ignoresUnreadableStaticFactFiles(t *testing.T) {
 		includeEnv: true,
 	}.load()
 	if err != nil {
-		t.Fatalf("LoadExternalFacts(testSession) err = %v, want nil", err)
+		t.Fatalf("loadExternalFactsForTest(testSession) err = %v, want nil", err)
 	}
 	want := []ResolvedFact{{Name: "site", Value: "lab", Type: "external"}}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("LoadExternalFacts(testSession) = %#v, want %#v", got, want)
+		t.Fatalf("loadExternalFactsForTest(testSession) = %#v, want %#v", got, want)
 	}
 }
 
@@ -1023,13 +1040,13 @@ func TestLoadExternalFacts_ignoresMalformedStructuredFiles(t *testing.T) {
 		}
 	}
 
-	got, err := LoadExternalFacts(testSession, []string{dir})
+	got, err := loadExternalFactsForTest(testSession, []string{dir})
 	if err != nil {
-		t.Fatalf("LoadExternalFacts(testSession) err = %v, want nil for malformed structured files", err)
+		t.Fatalf("loadExternalFactsForTest(testSession) err = %v, want nil for malformed structured files", err)
 	}
 	want := []ResolvedFact{{Name: "site", Value: "lab", Type: "external"}}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("LoadExternalFacts(testSession) = %#v, want %#v", got, want)
+		t.Fatalf("loadExternalFactsForTest(testSession) = %#v, want %#v", got, want)
 	}
 }
 
@@ -1047,7 +1064,7 @@ func TestLoadExternalFacts_matchesExtensionsCaseInsensitively(t *testing.T) {
 		}
 	}
 
-	got, err := LoadExternalFacts(testSession, []string{dir})
+	got, err := loadExternalFactsForTest(testSession, []string{dir})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1058,7 +1075,7 @@ func TestLoadExternalFacts_matchesExtensionsCaseInsensitively(t *testing.T) {
 		"yml_fact":  "loaded",
 	}
 	if len(got) != len(want) {
-		t.Fatalf("LoadExternalFacts(testSession) len = %d, want %d: %#v", len(got), len(want), got)
+		t.Fatalf("loadExternalFactsForTest(testSession) len = %d, want %d: %#v", len(got), len(want), got)
 	}
 	for _, fact := range got {
 		if fact.Type != "external" {
@@ -1089,13 +1106,13 @@ func TestLoadExternalFacts_ignoresHiddenAndBackupFiles(t *testing.T) {
 		}
 	}
 
-	got, err := LoadExternalFacts(testSession, []string{dir})
+	got, err := loadExternalFactsForTest(testSession, []string{dir})
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := []ResolvedFact{{Name: "visible", Value: "true", Type: "external"}}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("LoadExternalFacts(testSession) = %#v, want %#v", got, want)
+		t.Fatalf("loadExternalFactsForTest(testSession) = %#v, want %#v", got, want)
 	}
 }
 
@@ -1106,7 +1123,7 @@ func TestLoadExternalFacts_txtFactsNormalizeNamesAndPreserveValueWhitespace(t *t
 		t.Fatal(err)
 	}
 
-	got, err := LoadExternalFacts(testSession, []string{dir})
+	got, err := loadExternalFactsForTest(testSession, []string{dir})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1115,7 +1132,7 @@ func TestLoadExternalFacts_txtFactsNormalizeNamesAndPreserveValueWhitespace(t *t
 		{Name: "owner", Value: " platform team", Type: "external"},
 	}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("LoadExternalFacts(testSession) = %#v, want %#v", got, want)
+		t.Fatalf("loadExternalFactsForTest(testSession) = %#v, want %#v", got, want)
 	}
 }
 
@@ -1126,13 +1143,13 @@ func TestLoadExternalFacts_txtFactsPreserveValueWhitespaceLikeRubyParser(t *test
 		t.Fatal(err)
 	}
 
-	got, err := LoadExternalFacts(testSession, []string{dir})
+	got, err := loadExternalFactsForTest(testSession, []string{dir})
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := []ResolvedFact{{Name: "site", Value: " lab ", Type: "external"}}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("LoadExternalFacts(testSession) = %#v, want %#v", got, want)
+		t.Fatalf("loadExternalFactsForTest(testSession) = %#v, want %#v", got, want)
 	}
 }
 
@@ -1143,7 +1160,7 @@ func TestLoadExternalFacts_txtFactsIgnoreUTF8BOM(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := LoadExternalFacts(testSession, []string{dir})
+	got, err := loadExternalFactsForTest(testSession, []string{dir})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1152,7 +1169,7 @@ func TestLoadExternalFacts_txtFactsIgnoreUTF8BOM(t *testing.T) {
 		{Name: "owner", Value: "platform", Type: "external"},
 	}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("LoadExternalFacts(testSession) = %#v, want %#v", got, want)
+		t.Fatalf("loadExternalFactsForTest(testSession) = %#v, want %#v", got, want)
 	}
 }
 
@@ -1166,7 +1183,7 @@ func TestLoadExternalFacts_executableKeyValueFacts(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := LoadExternalFacts(testSession, []string{dir})
+	got, err := loadExternalFactsForTest(testSession, []string{dir})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1175,7 +1192,7 @@ func TestLoadExternalFacts_executableKeyValueFacts(t *testing.T) {
 		{Name: "script_three", Value: "four=five", Type: "external"},
 	}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("LoadExternalFacts(testSession) = %#v, want %#v", got, want)
+		t.Fatalf("loadExternalFactsForTest(testSession) = %#v, want %#v", got, want)
 	}
 }
 
@@ -1212,7 +1229,7 @@ func TestLoadExternalFacts_executableScriptPathWithSpacesMatchesRubyParser(t *te
 	}
 	want := []ResolvedFact{{Name: "script_fact", Value: "loaded", Type: "external"}}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("LoadExternalFacts(testSession) = %#v, want %#v", got, want)
+		t.Fatalf("loadExternalFactsForTest(testSession) = %#v, want %#v", got, want)
 	}
 	wantName := `"` + path + `"`
 	if gotName := host.runCommandNames[0]; gotName != wantName {
@@ -1233,12 +1250,12 @@ func TestLoadExternalFacts_skipsWindowsExecutableExtensionsOnNonWindows(t *testi
 		}
 	}
 
-	got, err := LoadExternalFacts(testSession, []string{dir})
+	got, err := loadExternalFactsForTest(testSession, []string{dir})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(got) != 0 {
-		t.Fatalf("LoadExternalFacts(testSession) = %#v, want no facts from Windows executable extensions", got)
+		t.Fatalf("loadExternalFactsForTest(testSession) = %#v, want no facts from Windows executable extensions", got)
 	}
 }
 
@@ -1272,7 +1289,7 @@ func TestLoadExternalFacts_windowsScriptExtensionsDoNotRequireUnixExecutableBit(
 	}
 	want := []ResolvedFact{{Name: "win_fact", Value: "loaded", Type: "external"}}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("LoadExternalFacts(testSession) = %#v, want %#v", got, want)
+		t.Fatalf("loadExternalFactsForTest(testSession) = %#v, want %#v", got, want)
 	}
 	if gotName := host.runCommandNames[0]; gotName != path {
 		t.Fatalf("script command = %q, want %q", gotName, path)
@@ -1307,7 +1324,7 @@ func TestLoadExternalFacts_windowsPowerShellFacts(t *testing.T) {
 	}
 	want := []ResolvedFact{{Name: "ps_fact", Value: "loaded", Type: "external"}}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("LoadExternalFacts(testSession) = %#v, want %#v", got, want)
+		t.Fatalf("loadExternalFactsForTest(testSession) = %#v, want %#v", got, want)
 	}
 	if gotName := host.runCommandNames[0]; gotName != "powershell.exe" {
 		t.Fatalf("PowerShell command = %q, want powershell.exe", gotName)
@@ -1346,7 +1363,7 @@ func TestLoadExternalFacts_windowsPowerShellExtensionIsCaseInsensitiveLikeRubyPa
 	}
 	want := []ResolvedFact{{Name: "ps_fact", Value: "loaded", Type: "external"}}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("LoadExternalFacts(testSession) = %#v, want %#v", got, want)
+		t.Fatalf("loadExternalFactsForTest(testSession) = %#v, want %#v", got, want)
 	}
 	wantArgs := []string{"-NoProfile", "-NonInteractive", "-NoLogo", "-ExecutionPolicy", "Bypass", "-File", path}
 	if gotName := host.runCommandNames[0]; gotName != "powershell.exe" {
@@ -1384,7 +1401,7 @@ func TestLoadExternalFacts_windowsPowerShellSkipsDirectories(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(got) != 0 {
-		t.Fatalf("LoadExternalFacts(testSession) = %#v, want no facts from PowerShell directory", got)
+		t.Fatalf("loadExternalFactsForTest(testSession) = %#v, want no facts from PowerShell directory", got)
 	}
 }
 
@@ -1419,7 +1436,7 @@ func TestLoadExternalFacts_windowsPowerShellWarnsWithRubyCommand(t *testing.T) {
 	}
 	want := []ResolvedFact{{Name: "ps_fact", Value: "loaded", Type: "external"}}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("LoadExternalFacts(testSession) = %#v, want %#v", got, want)
+		t.Fatalf("loadExternalFactsForTest(testSession) = %#v, want %#v", got, want)
 	}
 	wantWarning := "Command \"powershell.exe\" -NoProfile -NonInteractive -NoLogo -ExecutionPolicy Bypass -File \"" + path + "\" completed with the following stderr message: some error"
 	if !reflect.DeepEqual(warnings, []string{wantWarning}) {
@@ -1469,12 +1486,12 @@ func TestLoadExternalFacts_executableInvalidOrEmptyOutputReturnsNoFacts(t *testi
 				t.Fatal(err)
 			}
 
-			got, err := LoadExternalFacts(testSession, []string{dir})
+			got, err := loadExternalFactsForTest(testSession, []string{dir})
 			if err != nil {
 				t.Fatal(err)
 			}
 			if len(got) != 0 {
-				t.Fatalf("LoadExternalFacts(testSession) = %#v, want no facts", got)
+				t.Fatalf("loadExternalFactsForTest(testSession) = %#v, want no facts", got)
 			}
 		})
 	}
@@ -1494,13 +1511,13 @@ func TestLoadExternalFacts_executableWarnsWhenCommandWritesStderr(t *testing.T) 
 	s := NewSession()
 	s.logger = captureLogger(nil, &warnings, nil)
 
-	got, err := LoadExternalFacts(s, []string{dir})
+	got, err := loadExternalFactsForTest(s, []string{dir})
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := []ResolvedFact{{Name: "script_one", Value: "two", Type: "external"}}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("LoadExternalFacts(testSession) = %#v, want %#v", got, want)
+		t.Fatalf("loadExternalFactsForTest(testSession) = %#v, want %#v", got, want)
 	}
 	if len(warnings) != 1 {
 		t.Fatalf("warnings = %#v, want one warning", warnings)
@@ -1520,13 +1537,13 @@ func TestLoadExternalFacts_ignoresFailedExecutableFact(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := LoadExternalFacts(testSession, []string{dir})
+	got, err := loadExternalFactsForTest(testSession, []string{dir})
 	if err != nil {
-		t.Fatalf("LoadExternalFacts(testSession) err = %v, want nil for failed executable fact", err)
+		t.Fatalf("loadExternalFactsForTest(testSession) err = %v, want nil for failed executable fact", err)
 	}
 	want := []ResolvedFact{{Name: "site", Value: "lab", Type: "external"}}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("LoadExternalFacts(testSession) = %#v, want %#v", got, want)
+		t.Fatalf("loadExternalFactsForTest(testSession) = %#v, want %#v", got, want)
 	}
 }
 
@@ -1544,13 +1561,13 @@ func TestLoadExternalFacts_timesOutHungExecutableFact(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := LoadExternalFacts(testSession, []string{dir})
+	got, err := loadExternalFactsForTest(testSession, []string{dir})
 	if err != nil {
-		t.Fatalf("LoadExternalFacts(testSession) err = %v, want nil for timed out executable fact", err)
+		t.Fatalf("loadExternalFactsForTest(testSession) err = %v, want nil for timed out executable fact", err)
 	}
 	want := []ResolvedFact{{Name: "site", Value: "lab", Type: "external"}}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("LoadExternalFacts(testSession) = %#v, want %#v", got, want)
+		t.Fatalf("loadExternalFactsForTest(testSession) = %#v, want %#v", got, want)
 	}
 }
 
@@ -1720,7 +1737,7 @@ func TestLoadExternalFacts_executableYAMLFacts(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := LoadExternalFacts(testSession, []string{dir})
+	got, err := loadExternalFactsForTest(testSession, []string{dir})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1729,7 +1746,7 @@ func TestLoadExternalFacts_executableYAMLFacts(t *testing.T) {
 		{Name: "script_three", Value: "four", Type: "external"},
 	}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("LoadExternalFacts(testSession) = %#v, want %#v", got, want)
+		t.Fatalf("loadExternalFactsForTest(testSession) = %#v, want %#v", got, want)
 	}
 }
 
@@ -1743,7 +1760,7 @@ func TestLoadExternalFacts_executableYAMLSymbolFacts(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := LoadExternalFacts(testSession, []string{dir})
+	got, err := loadExternalFactsForTest(testSession, []string{dir})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1752,7 +1769,7 @@ func TestLoadExternalFacts_executableYAMLSymbolFacts(t *testing.T) {
 		{Name: "script_three", Value: "four", Type: "external"},
 	}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("LoadExternalFacts(testSession) = %#v, want %#v", got, want)
+		t.Fatalf("loadExternalFactsForTest(testSession) = %#v, want %#v", got, want)
 	}
 }
 
@@ -1766,13 +1783,13 @@ func TestLoadExternalFacts_executableYAMLTimestampNormalizesLikeRubyParser(t *te
 		t.Fatal(err)
 	}
 
-	got, err := LoadExternalFacts(testSession, []string{dir})
+	got, err := loadExternalFactsForTest(testSession, []string{dir})
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := []ResolvedFact{{Name: "first", Value: "2020-07-15T05:38:12Z", Type: "external"}}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("LoadExternalFacts(testSession) = %#v, want %#v", got, want)
+		t.Fatalf("loadExternalFactsForTest(testSession) = %#v, want %#v", got, want)
 	}
 }
 
@@ -1831,7 +1848,7 @@ func TestLoadExternalFacts_executableJSONFacts(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := LoadExternalFacts(testSession, []string{dir})
+	got, err := loadExternalFactsForTest(testSession, []string{dir})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1840,7 +1857,7 @@ func TestLoadExternalFacts_executableJSONFacts(t *testing.T) {
 		{Name: "script_one", Value: "two", Type: "external"},
 	}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("LoadExternalFacts(testSession) = %#v, want %#v", got, want)
+		t.Fatalf("loadExternalFactsForTest(testSession) = %#v, want %#v", got, want)
 	}
 }
 
@@ -1856,13 +1873,13 @@ func TestLoadExternalFacts_skipsExecutableFactsDuringRecursiveResolution(t *test
 		t.Fatal(err)
 	}
 
-	got, err := LoadExternalFacts(testSession, []string{dir})
+	got, err := loadExternalFactsForTest(testSession, []string{dir})
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := []ResolvedFact{{Name: "static", Value: "true", Type: "external"}}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("LoadExternalFacts(testSession) = %#v, want %#v", got, want)
+		t.Fatalf("loadExternalFactsForTest(testSession) = %#v, want %#v", got, want)
 	}
 }
 
@@ -1893,9 +1910,9 @@ func TestLoadExternalFacts_rejectsNullBytes(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			_, err := LoadExternalFacts(testSession, []string{dir})
+			_, err := loadExternalFactsForTest(testSession, []string{dir})
 			if !errors.Is(err, ErrNullByte) {
-				t.Fatalf("LoadExternalFacts(testSession) err = %v, want ErrNullByte", err)
+				t.Fatalf("loadExternalFactsForTest(testSession) err = %v, want ErrNullByte", err)
 			}
 		})
 	}
@@ -1973,7 +1990,7 @@ func TestExternalFactGroupsSkipsMissingDirectories(t *testing.T) {
 	}
 }
 
-func BenchmarkLoadExternalFacts(b *testing.B) {
+func BenchmarkLoadExternalFactsForTest(b *testing.B) {
 	dir := b.TempDir()
 	files := map[string]string{
 		"site.txt":      "site=lab\nowner=platform=team\n",
@@ -1989,12 +2006,12 @@ func BenchmarkLoadExternalFacts(b *testing.B) {
 
 	b.ReportAllocs()
 	for b.Loop() {
-		facts, err := LoadExternalFacts(testSession, []string{dir})
+		facts, err := loadExternalFactsForTest(testSession, []string{dir})
 		if err != nil {
 			b.Fatal(err)
 		}
 		if len(facts) != 7 {
-			b.Fatalf("LoadExternalFacts(testSession) len = %d, want 7", len(facts))
+			b.Fatalf("loadExternalFactsForTest(testSession) len = %d, want 7", len(facts))
 		}
 	}
 }

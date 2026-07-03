@@ -3,7 +3,6 @@ package engine
 import (
 	"context"
 	"os"
-	"path/filepath"
 	"reflect"
 	"runtime"
 	"testing"
@@ -700,22 +699,20 @@ func TestCurrentLinuxVirtualizationInputReadsHostSignals(t *testing.T) {
 }
 
 func TestProcVZEntryCountMatchesRubyResolverOffset(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "veinfo"), []byte(""), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "vestat"), []byte(""), 0o600); err != nil {
-		t.Fatal(err)
+	host := &fakeHostOS{
+		dirs: map[string][]os.DirEntry{
+			"/proc/vz":       fakeFileEntries("veinfo", "vestat"),
+			"/proc/vz-empty": {},
+		},
 	}
 
-	if got := procVZEntryCount(dir); got != 4 {
+	if got := procVZEntryCount(host, "/proc/vz"); got != 4 {
 		t.Fatalf("procVZEntryCount() = %d, want entries plus resolver offset 4", got)
 	}
-	emptyDir := t.TempDir()
-	if got := procVZEntryCount(emptyDir); got != 2 {
+	if got := procVZEntryCount(host, "/proc/vz-empty"); got != 2 {
 		t.Fatalf("procVZEntryCount(empty) = %d, want resolver offset 2", got)
 	}
-	if got := procVZEntryCount(filepath.Join(dir, "missing")); got != 0 {
+	if got := procVZEntryCount(host, "/proc/vz/missing"); got != 0 {
 		t.Fatalf("procVZEntryCount(missing) = %d, want 0", got)
 	}
 }
@@ -1485,10 +1482,11 @@ func TestLinuxHypervisorFactsReturnsNilContainerFactsWhenAbsent(t *testing.T) {
 }
 
 func TestCurrentLinuxVirtualizationInputReadsDMIDecodeMetadata(t *testing.T) {
-	got := currentLinuxVirtualizationInputWithCommands(testSession, func(name string, args ...string) string {
-		switch name {
-		case "dmidecode":
-			return `BIOS Information
+	host := &fakeHostOS{
+		platform:        "linux",
+		emptyRunDefault: true,
+		runOutputs: map[string]string{
+			fakeRunKey("dmidecode"): `BIOS Information
 	Vendor: innotek GmbH
 	Version: VirtualBox
 	Address: 0xE0000
@@ -1496,21 +1494,15 @@ func TestCurrentLinuxVirtualizationInputReadsDMIDecodeMetadata(t *testing.T) {
 OEM Strings
 	String 1: vboxVer_6.1.4
 	String 2: vboxRev_136177
-`
-		case "lspci":
-			return ""
-		case "virt-what":
-			return "kvm"
-		case "vmware":
-			if len(args) != 1 || args[0] != "-v" {
-				t.Fatalf("vmware args = %#v, want [-v]", args)
-			}
-			return ""
-		default:
-			t.Fatalf("unexpected command = %q", name)
-			return ""
-		}
-	})
+`,
+			fakeRunKey("virt-what"):    "kvm",
+			fakeRunKey("vmware", "-v"): "",
+		},
+	}
+	s := NewSessionContext(context.Background())
+	s.host = host
+
+	got := currentLinuxVirtualizationInput(s)
 
 	want := dmiDecodeHypervisorInfo{VirtualBoxVersion: "6.1.4", VirtualBoxRevision: "136177"}
 	if got.DMIDecodeInfo != want {
@@ -1631,4 +1623,62 @@ func mapsEqual(got, want map[string]any) bool {
 		}
 	}
 	return true
+}
+
+// One discovery must gather the virtualization signals exactly once, however
+// many consumers read them: the virtual/is_virtual facts, the hypervisors
+// tree, and the uptime container gate all share the Session memo.
+func TestBuildCoreFactsGathersVirtualizationOncePerDiscovery(t *testing.T) {
+	t.Run("linux", func(t *testing.T) {
+		// Gather outputs pinned empty so classification is physical — the
+		// assertion is about probe count, not classification.
+		host := &fakeHostOS{
+			platform:        "linux",
+			emptyRunDefault: true,
+			runOutputs:      map[string]string{fakeRunKey("uname", "-r"): "6.1.0-generic\n"},
+		}
+		s := NewSessionContext(context.Background())
+		s.host = host
+
+		buildCoreFacts(s, nil)
+
+		counts := map[string]int{}
+		for _, call := range host.runCalls {
+			counts[fakeRunKey(call.name, call.args...)]++
+		}
+		for _, cmd := range []string{
+			fakeRunKey("dmidecode"),
+			fakeRunKey("virt-what"),
+			fakeRunKey("vmware", "-v"),
+			fakeRunKey("lspci"),
+		} {
+			if counts[cmd] != 1 {
+				t.Fatalf("command %q ran %d times across virtual+hypervisors+uptime, want exactly 1", cmd, counts[cmd])
+			}
+		}
+	})
+
+	t.Run("windows", func(t *testing.T) {
+		host := &fakeHostOS{
+			platform:        "windows",
+			emptyRunDefault: true,
+			runOutputs: map[string]string{
+				fakeRunKey("wmic", "computersystem", "get", "Manufacturer,Model,OEMStringArray", "/value"): "Manufacturer=Fake Inc.\nModel=FakeStation\nOEMStringArray={}\n",
+				fakeRunKey("wmic", "bios", "get", "Manufacturer", "/value"):                                "Manufacturer=FakeBIOS\n",
+			},
+		}
+		s := NewSessionContext(context.Background())
+		s.host = host
+
+		buildCoreFacts(s, nil)
+
+		counts := map[string]int{}
+		for _, call := range host.runCalls {
+			counts[fakeRunKey(call.name, call.args...)]++
+		}
+		gather := fakeRunKey("wmic", "computersystem", "get", "Manufacturer,Model,OEMStringArray", "/value")
+		if counts[gather] != 1 {
+			t.Fatalf("windows wmic gather ran %d times across virtual+hypervisors, want exactly 1", counts[gather])
+		}
+	})
 }

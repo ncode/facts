@@ -6,9 +6,32 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 )
+
+// newLeaseDirHost builds a fakeHostOS that exposes dir as a directory of plain
+// lease files, sorted like os.ReadDir so lease-iteration-order assertions hold.
+// It replaces the former t.TempDir lease fixtures with the Session host seam.
+func newLeaseDirHost(dir string, files map[string]string) *fakeHostOS {
+	names := make([]string, 0, len(files))
+	blobs := make(map[string][]byte, len(files))
+	for name, content := range files {
+		names = append(names, name)
+		// Key by forward slash: production joins with filepath.Join (backslash on
+		// Windows) but fakeHostOS.readFile normalizes lookups through
+		// fakeHostPath (filepath.ToSlash), so fixtures must use slashes to match
+		// on Windows as well as unix.
+		blobs[dir+"/"+name] = []byte(content)
+	}
+	sort.Strings(names)
+	return &fakeHostOS{
+		emptyRunDefault: true,
+		dirs:            map[string][]os.DirEntry{dir: fakeFileEntries(names...)},
+		files:           blobs,
+	}
+}
 
 func TestNetworkingDHCPFactUsesPrimaryInterfaceDHCPValue(t *testing.T) {
 	t.Parallel()
@@ -802,20 +825,23 @@ func TestAddLinuxIfInet6FlagsIgnoresMalformedInterfacesAndBindings(t *testing.T)
 func TestAddLinuxInterfaceMetadata_matchesRubyNetworkingResolver(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "sys/class/net/lo/operstate"), "unknown\n")
-	writeFile(t, filepath.Join(root, "sys/class/net/ens160/operstate"), "up\n")
-	writeFile(t, filepath.Join(root, "sys/class/net/ens160/speed"), "1000\n")
-	writeFile(t, filepath.Join(root, "sys/class/net/ens160/duplex"), "full\n")
-	if err := os.MkdirAll(filepath.Join(root, "sys/class/net/ens160/device"), 0o755); err != nil {
-		t.Fatal(err)
+	host := &fakeHostOS{
+		files: map[string][]byte{
+			"/sys/class/net/lo/operstate":     []byte("unknown\n"),
+			"/sys/class/net/ens160/operstate": []byte("up\n"),
+			"/sys/class/net/ens160/speed":     []byte("1000\n"),
+			"/sys/class/net/ens160/duplex":    []byte("full\n"),
+		},
+		stats: map[string]os.FileInfo{
+			"/sys/class/net/ens160/device": fakeFileInfo{name: "device", isDir: true},
+		},
 	}
 	interfaces := map[string]any{
 		"lo":     map[string]any{"mtu": 65536},
 		"ens160": map[string]any{"mtu": 1500},
 	}
 
-	addLinuxInterfaceMetadataFromRoot(root, interfaces)
+	addLinuxInterfaceMetadata(interfaces, host)
 
 	lo := interfaces["lo"].(map[string]any)
 	if got := lo["operational_state"]; got != "unknown" {
@@ -1688,29 +1714,43 @@ func TestCurrentNetworkingDataIgnoresInvalidDarwinDHCPServer(t *testing.T) {
 func TestLinuxDHCPServerReadsSystemdNetifLease(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "run/systemd/netif/leases/2"), "CLIENT_ID=01:23\nSERVER_ADDRESS=10.16.122.163\n")
+	host := &fakeHostOS{
+		files: map[string][]byte{
+			"/run/systemd/netif/leases/2": []byte("CLIENT_ID=01:23\nSERVER_ADDRESS=10.16.122.163\n"),
+		},
+	}
+	s := NewSession()
+	s.host = host
 
-	if got, want := linuxDHCPServerFromRoot(testSession, root, "eth0", 2), "10.16.122.163"; got != want {
-		t.Fatalf("linuxDHCPServerFromRoot(testSession) = %q, want %q", got, want)
+	if got, want := linuxDHCPServer(s, "eth0", 2), "10.16.122.163"; got != want {
+		t.Fatalf("linuxDHCPServer() = %q, want %q", got, want)
 	}
 }
 
 func TestLinuxDHCPServerReadsDHClientLeaseForInterface(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "var/lib/dhcp/dhclient.eth0.lease"), `lease {
+	host := &fakeHostOS{
+		emptyRunDefault: true,
+		dirs: map[string][]os.DirEntry{
+			"/var/lib/dhcp": fakeFileEntries("dhclient.en1.lease", "dhclient.eth0.lease"),
+		},
+		files: map[string][]byte{
+			"/var/lib/dhcp/dhclient.eth0.lease": []byte(`lease {
   interface "eth0";
   option dhcp-server-identifier 10.32.10.163;
-}`)
-	writeFile(t, filepath.Join(root, "var/lib/dhcp/dhclient.en1.lease"), `lease {
+}`),
+			"/var/lib/dhcp/dhclient.en1.lease": []byte(`lease {
   interface "en1";
   option dhcp-server-identifier 10.99.99.99;
-}`)
+}`),
+		},
+	}
+	s := NewSession()
+	s.host = host
 
-	if got, want := linuxDHCPServerFromRoot(testSession, root, "eth0", 0), "10.32.10.163"; got != want {
-		t.Fatalf("linuxDHCPServerFromRoot(testSession) = %q, want %q", got, want)
+	if got, want := linuxDHCPServer(s, "eth0", 0), "10.32.10.163"; got != want {
+		t.Fatalf("linuxDHCPServer() = %q, want %q", got, want)
 	}
 }
 
@@ -1733,12 +1773,13 @@ func TestLinuxDHCPCDDHCPServer(t *testing.T) {
 func TestLinuxDHCPServerFromLeaseDirReadsMatchingLease(t *testing.T) {
 	t.Parallel()
 
-	dir := t.TempDir()
-	writeFile(t, filepath.Join(dir, "00-commented.lease"), `lease {
+	dir := "/var/lib/dhcp"
+	host := newLeaseDirHost(dir, map[string]string{
+		"00-commented.lease": `lease {
   # interface "eth0";
   option dhcp-server-identifier 10.66.66.66;
-}`)
-	writeFile(t, filepath.Join(dir, "dhclient.leases"), `lease {
+}`,
+		"dhclient.leases": `lease {
   interface "eth0-backup";
   option dhcp-server-identifier 10.99.99.98;
 }
@@ -1749,17 +1790,18 @@ lease {
 lease {
   interface "eth0.100";
   option dhcp-server-identifier 10.99.99.97;
-}`)
-	writeFile(t, filepath.Join(dir, "dhclient.en1.lease"), `lease {
+}`,
+		"dhclient.en1.lease": `lease {
   interface "en1";
   option dhcp-server-identifier 10.99.99.99;
-}`)
-	writeFile(t, filepath.Join(dir, "not-a-lease.txt"), `SERVER_ADDRESS=192.0.2.1`)
+}`,
+		"not-a-lease.txt": `SERVER_ADDRESS=192.0.2.1`,
+	})
 
-	if got, want := linuxDHCPServerFromLeaseDir(dir, "eth0"), "10.32.10.163"; got != want {
+	if got, want := linuxDHCPServerFromLeaseDir(dir, "eth0", host), "10.32.10.163"; got != want {
 		t.Fatalf("linuxDHCPServerFromLeaseDir() = %q, want %q", got, want)
 	}
-	if got, want := linuxDHCPServerFromLeaseDir(dir, "eth0-backup"), "10.99.99.98"; got != want {
+	if got, want := linuxDHCPServerFromLeaseDir(dir, "eth0-backup", host), "10.99.99.98"; got != want {
 		t.Fatalf("linuxDHCPServerFromLeaseDir(eth0-backup) = %q, want %q", got, want)
 	}
 }
@@ -1767,14 +1809,16 @@ lease {
 func TestLinuxDHCPServerFromLeaseDirUsesFilenameFallbackWhenInterfaceValueMalformed(t *testing.T) {
 	t.Parallel()
 
-	dir := t.TempDir()
-	writeFile(t, filepath.Join(dir, "dhclient.eth0.lease"), `lease {
+	dir := "/var/lib/dhcp"
+	host := newLeaseDirHost(dir, map[string]string{
+		"dhclient.eth0.lease": `lease {
   interface "broken
   option host-name "router";
   option dhcp-server-identifier 10.32.10.163;
-}`)
+}`,
+	})
 
-	if got, want := linuxDHCPServerFromLeaseDir(dir, "eth0"), "10.32.10.163"; got != want {
+	if got, want := linuxDHCPServerFromLeaseDir(dir, "eth0", host), "10.32.10.163"; got != want {
 		t.Fatalf("linuxDHCPServerFromLeaseDir() = %q, want filename fallback server %q", got, want)
 	}
 }
@@ -1782,13 +1826,15 @@ func TestLinuxDHCPServerFromLeaseDirUsesFilenameFallbackWhenInterfaceValueMalfor
 func TestLinuxDHCPServerFromLeaseDirDoesNotUseFilenameFallbackForUnrelatedExplicitInterface(t *testing.T) {
 	t.Parallel()
 
-	dir := t.TempDir()
-	writeFile(t, filepath.Join(dir, "dhclient.eth0.lease"), `lease {
+	dir := "/var/lib/dhcp"
+	host := newLeaseDirHost(dir, map[string]string{
+		"dhclient.eth0.lease": `lease {
   interface "eth1";
   option dhcp-server-identifier 10.99.99.99;
-}`)
+}`,
+	})
 
-	if got := linuxDHCPServerFromLeaseDir(dir, "eth0"); got != "" {
+	if got := linuxDHCPServerFromLeaseDir(dir, "eth0", host); got != "" {
 		t.Fatalf("linuxDHCPServerFromLeaseDir() = %q, want empty for explicit non-matching interface", got)
 	}
 }
@@ -1796,18 +1842,20 @@ func TestLinuxDHCPServerFromLeaseDirDoesNotUseFilenameFallbackForUnrelatedExplic
 func TestLinuxDHCPServerFromLeaseDirStopsAtMatchingLeaseWithoutServer(t *testing.T) {
 	t.Parallel()
 
-	dir := t.TempDir()
-	writeFile(t, filepath.Join(dir, "dhclient.eth0.lease"), `lease {
+	dir := "/var/lib/dhcp"
+	host := newLeaseDirHost(dir, map[string]string{
+		"dhclient.eth0.lease": `lease {
   interface "eth0";
   option host-name "dhcp-server-identifier 10.88.88.88";
   # option dhcp-server-identifier 10.99.99.99;
-}`)
-	writeFile(t, filepath.Join(dir, "zz-dhclient.eth0.lease"), `lease {
+}`,
+		"zz-dhclient.eth0.lease": `lease {
   interface "eth0";
   option dhcp-server-identifier 10.32.10.163;
-}`)
+}`,
+	})
 
-	if got := linuxDHCPServerFromLeaseDir(dir, "eth0"); got != "" {
+	if got := linuxDHCPServerFromLeaseDir(dir, "eth0", host); got != "" {
 		t.Fatalf("linuxDHCPServerFromLeaseDir() = %q, want empty latest matching lease server", got)
 	}
 }
@@ -2078,16 +2126,19 @@ lease {
 func TestLinuxDHCPServerReadsNetworkManagerInternalLeaseForInterface(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "var/lib/NetworkManager/internal-fdgh45-345356fg-dfg-dsfge5er4-sdfghgf45ty-lo.lease"), `# This is private data. Do not parse.
+	host := newLeaseDirHost("/var/lib/NetworkManager", map[string]string{
+		"internal-fdgh45-345356fg-dfg-dsfge5er4-sdfghgf45ty-lo.lease": `# This is private data. Do not parse.
 ADDRESS=11.22.36.241
 SERVER_ADDRESS=35.32.82.9
-`)
-	writeFile(t, filepath.Join(root, "var/lib/NetworkManager/internal-fdgh45-345356fg-dfg-dsfge5er4-sdfghgf45ty-eth0.lease"), `SERVER_ADDRESS=10.99.99.99
-`)
+`,
+		"internal-fdgh45-345356fg-dfg-dsfge5er4-sdfghgf45ty-eth0.lease": `SERVER_ADDRESS=10.99.99.99
+`,
+	})
+	s := NewSession()
+	s.host = host
 
-	if got, want := linuxDHCPServerFromRoot(testSession, root, "lo", 1), "35.32.82.9"; got != want {
-		t.Fatalf("linuxDHCPServerFromRoot(testSession) = %q, want %q", got, want)
+	if got, want := linuxDHCPServer(s, "lo", 1), "35.32.82.9"; got != want {
+		t.Fatalf("linuxDHCPServer() = %q, want %q", got, want)
 	}
 }
 
@@ -2124,20 +2175,27 @@ func TestAddLinuxDHCPServersFromSnapshotsAddsInterfaceDHCP(t *testing.T) {
 func TestLinuxDHCPServerFallsBackToDHCPCDCommand(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
-	run := func(name string, args ...string) string {
-		if name != "dhcpcd" || !reflect.DeepEqual(args, []string{"-U", "ens160"}) {
-			t.Fatalf("run(%q, %#v), want dhcpcd -U ens160", name, args)
-		}
-		return strings.Join([]string{
-			"broadcast_address='10.16.127.255'",
-			"dhcp_server_identifier='10.32.22.9'",
-			"domain_name='delivery.puppetlabs.net'",
-		}, "\n")
+	host := &fakeHostOS{
+		emptyRunDefault: true,
+		runOutputs: map[string]string{
+			fakeRunKey("dhcpcd", "-U", "ens160"): strings.Join([]string{
+				"broadcast_address='10.16.127.255'",
+				"dhcp_server_identifier='10.32.22.9'",
+				"domain_name='delivery.puppetlabs.net'",
+			}, "\n"),
+		},
 	}
+	s := NewSession()
+	s.host = host
 
-	if got, want := linuxDHCPServerFromRootWithRunner(root, "ens160", 1, run), "10.32.22.9"; got != want {
-		t.Fatalf("linuxDHCPServerFromRootWithRunner() = %q, want %q", got, want)
+	if got, want := linuxDHCPServer(s, "ens160", 1), "10.32.22.9"; got != want {
+		t.Fatalf("linuxDHCPServer() = %q, want %q", got, want)
+	}
+	// The server is derivable only from the dhcpcd fallback, so it must have
+	// run with exactly the interface flag.
+	wantCall := fakeHostRunCall{name: "dhcpcd", args: []string{"-U", "ens160"}}
+	if len(host.runCalls) != 1 || !reflect.DeepEqual(host.runCalls[0], wantCall) {
+		t.Fatalf("run calls = %#v, want exactly %#v", host.runCalls, wantCall)
 	}
 }
 

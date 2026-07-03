@@ -4,7 +4,6 @@ import (
 	"math"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -58,13 +57,14 @@ func disabledFingerprint(disabled map[string]bool) string {
 // the composition order does not affect the resolved output; it mirrors the
 // historical assembly order for reviewability.
 func buildCoreFacts(s *Session, disabled map[string]bool) []ResolvedFact {
+	goos := s.goos()
 	virtualization := detectVirtualization(s)
 	virtualFact, isVirtualFact := virtualizationFactValues(virtualization)
 	dmi := s.cachedDMI()
 	facts := []ResolvedFact{
 		{Name: "facterversion", Value: Version},
 		{Name: "is_virtual", Value: isVirtualFact},
-		{Name: "path", Value: currentPathEntries(runtime.GOOS, os.Getenv)},
+		{Name: "path", Value: currentPathEntries(goos, s.getenv)},
 		{Name: "virtual", Value: virtualFact},
 	}
 	// gate skips a single-output category whose only top-level fact name is
@@ -100,13 +100,13 @@ func buildCoreFacts(s *Session, disabled map[string]bool) []ResolvedFact {
 	facts = append(facts, currentWindowsHypervisorFacts(s)...)
 	facts = append(facts, azureFacts(s.Context(), newAzureClient(azureMetadataBaseURL, nil), virtualization)...)
 	facts = append(facts, ec2Facts(s, newEC2Client(ec2MetadataBaseURL, nil), virtualization)...)
-	facts = append(facts, platformGCEFacts(s.Context(), runtime.GOOS, virtualization, dmiBIOSVendor(dmi), newGCEClient(gceMetadataBaseURL, nil))...)
+	facts = append(facts, platformGCEFacts(s.Context(), goos, virtualization, dmiBIOSVendor(dmi), newGCEClient(gceMetadataBaseURL, nil))...)
 	return facts
 }
 
 func currentPathEntries(goos string, getenv func(string) string) []string {
 	key := "PATH"
-	separator := string(os.PathListSeparator)
+	separator := corePathListSeparator(goos)
 	if goos == "plan9" {
 		key = "path"
 		separator = "\x00"
@@ -155,11 +155,7 @@ func readOptionalText(path string, readFile fileReader) any {
 	return strings.TrimSpace(string(data))
 }
 
-func readFileString(path string, readFiles ...fileReader) string {
-	readFile := osHost{}.readFile
-	if len(readFiles) > 0 && readFiles[0] != nil {
-		readFile = readFiles[0]
-	}
+func readFileString(path string, readFile fileReader) string {
 	data, err := readFile(path)
 	if err != nil {
 		return ""
@@ -167,11 +163,7 @@ func readFileString(path string, readFiles ...fileReader) string {
 	return string(data)
 }
 
-func isSymlink(path string, lstats ...func(string) (os.FileInfo, error)) bool {
-	lstat := osHost{}.lstat
-	if len(lstats) > 0 && lstats[0] != nil {
-		lstat = lstats[0]
-	}
+func isSymlink(path string, lstat func(string) (os.FileInfo, error)) bool {
 	info, err := lstat(path)
 	if err != nil {
 		return false
@@ -179,11 +171,7 @@ func isSymlink(path string, lstats ...func(string) (os.FileInfo, error)) bool {
 	return info.Mode()&os.ModeSymlink != 0
 }
 
-func readSysfsString(root, device, name string, readFiles ...fileReader) string {
-	readFile := osHost{}.readFile
-	if len(readFiles) > 0 && readFiles[0] != nil {
-		readFile = readFiles[0]
-	}
+func readSysfsString(root, device, name string, readFile fileReader) string {
 	data, err := readFile(filepath.Join(root, device, name))
 	if err != nil {
 		return ""
@@ -191,11 +179,7 @@ func readSysfsString(root, device, name string, readFiles ...fileReader) string 
 	return strings.TrimSpace(string(data))
 }
 
-func readDMIString(root, name string, readFiles ...fileReader) string {
-	readFile := osHost{}.readFile
-	if len(readFiles) > 0 && readFiles[0] != nil {
-		readFile = readFiles[0]
-	}
+func readDMIString(root, name string, readFile fileReader) string {
 	data, err := readFile(filepath.Join(root, name))
 	if err != nil {
 		return ""

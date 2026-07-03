@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"os"
 	"reflect"
 	"testing"
 )
@@ -34,45 +35,45 @@ func TestAugeasVersionFacts_omittedWhenAugparseUnavailable(t *testing.T) {
 }
 
 func TestCurrentAugeasVersion_prefersPuppetAgentAugparse(t *testing.T) {
-	var gotName string
-	var gotArgs []string
-
-	got := currentAugeasVersion(
-		func(path string) bool { return path == "/opt/puppetlabs/puppet/bin/augparse" },
-		func(name string, args ...string) string {
-			gotName = name
-			gotArgs = args
-			return "augparse 1.12.0 <http://augeas.net/>"
+	host := &fakeHostOS{
+		emptyRunDefault: true,
+		stats:           map[string]os.FileInfo{"/opt/puppetlabs/puppet/bin/augparse": fakeFileInfo{name: "augparse"}},
+		runOutputs: map[string]string{
+			fakeRunKey("/opt/puppetlabs/puppet/bin/augparse", "--version"): "augparse 1.12.0 <http://augeas.net/>",
 		},
-	)
+	}
+	s := NewSession()
+	s.host = host
+
+	got := currentAugeasVersion(s)
 
 	if got != "1.12.0" {
 		t.Fatalf("currentAugeasVersion() = %q, want 1.12.0", got)
 	}
-	if gotName != "/opt/puppetlabs/puppet/bin/augparse" {
-		t.Fatalf("augparse command = %q, want puppet-agent augparse", gotName)
-	}
-	if !reflect.DeepEqual(gotArgs, []string{"--version"}) {
-		t.Fatalf("augparse args = %#v, want --version", gotArgs)
+	want := []fakeHostRunCall{{name: "/opt/puppetlabs/puppet/bin/augparse", args: []string{"--version"}}}
+	if !reflect.DeepEqual(host.runCalls, want) {
+		t.Fatalf("commands = %#v, want puppet-agent augparse --version", host.runCalls)
 	}
 }
 
 func TestCurrentAugeasVersion_usesPathAugparseWhenPuppetAgentAugparseIsAbsent(t *testing.T) {
-	var gotName string
-
-	got := currentAugeasVersion(
-		func(string) bool { return false },
-		func(name string, args ...string) string {
-			gotName = name
-			return "augparse 1.14.1 <http://augeas.net/>"
+	host := &fakeHostOS{
+		emptyRunDefault: true,
+		runOutputs: map[string]string{
+			fakeRunKey("augparse", "--version"): "augparse 1.14.1 <http://augeas.net/>",
 		},
-	)
+	}
+	s := NewSession()
+	s.host = host
+
+	got := currentAugeasVersion(s)
 
 	if got != "1.14.1" {
 		t.Fatalf("currentAugeasVersion() = %q, want 1.14.1", got)
 	}
-	if gotName != "augparse" {
-		t.Fatalf("augparse command = %q, want path augparse", gotName)
+	want := []fakeHostRunCall{{name: "augparse", args: []string{"--version"}}}
+	if !reflect.DeepEqual(host.runCalls, want) {
+		t.Fatalf("commands = %#v, want path augparse --version", host.runCalls)
 	}
 }
 

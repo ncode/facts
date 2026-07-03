@@ -2,7 +2,6 @@ package engine
 
 import (
 	"context"
-	"runtime"
 	"strings"
 	"testing"
 )
@@ -113,8 +112,8 @@ func TestBuildCoreFacts_keptCategoriesUnaffectedByGate(t *testing.T) {
 // on s.goos() take a path reading a distinctive marker file; the readFile/run
 // spies then record whether each resolver actually ran. A Linux fake is used
 // regardless of the test host so the s.goos()-keyed categories
-// (networking/processors/memory/xen) are observable on darwin, linux, and
-// Windows CI alike.
+// (networking/processors/memory/xen/fips_enabled) are observable on darwin,
+// linux, and Windows CI alike.
 func newGatingProbeHost() *fakeHostOS {
 	return &fakeHostOS{platform: "linux"}
 }
@@ -151,10 +150,8 @@ func hostReadFileMatching(h *fakeHostOS, substr string) bool {
 // resolution-gating from output filtering (ADR-0015).
 func TestBuildCoreFacts_resolutionGatingSkipsProbeWork(t *testing.T) {
 	markers := []struct {
-		category   string
-		probed     func(h *fakeHostOS) bool
-		skip       func() bool
-		skipReason string
+		category string
+		probed   func(h *fakeHostOS) bool
 	}{
 		{
 			category: "networking",
@@ -179,23 +176,14 @@ func TestBuildCoreFacts_resolutionGatingSkipsProbeWork(t *testing.T) {
 			probed:   func(h *fakeHostOS) bool { return hostRanCommand(h, "augparse") },
 		},
 		{
-			// ssh reads ssh_host_*_key.pub via readFile on every non-Windows host;
-			// the path set keys off runtime.GOOS, which the fake cannot override,
-			// so the Windows path (programdata + a different seam) is skipped.
-			category:   "ssh",
-			probed:     func(h *fakeHostOS) bool { return hostReadFileMatching(h, "ssh_host_rsa_key.pub") },
-			skip:       func() bool { return runtime.GOOS == "windows" },
-			skipReason: "ssh host-key paths key off runtime.GOOS; the Windows path uses a different seam",
+			// ssh reads ssh_host_*_key.pub via readFile; the path set keys off
+			// s.goos(), so the fake Linux host drives the unix path on any test host.
+			category: "ssh",
+			probed:   func(h *fakeHostOS) bool { return hostReadFileMatching(h, "ssh_host_rsa_key.pub") },
 		},
 		{
-			// fips_enabled reads /proc/sys/crypto/fips_enabled only when
-			// runtime.GOOS is linux (Windows uses a reg query); elsewhere the
-			// resolver returns nil before any host call, so there is nothing to
-			// observe on this host.
-			category:   "fips_enabled",
-			probed:     func(h *fakeHostOS) bool { return hostReadFileMatching(h, "/proc/sys/crypto/fips_enabled") },
-			skip:       func() bool { return runtime.GOOS != "linux" },
-			skipReason: "fips_enabled probes only on linux/windows; runtime.GOOS gates the probe away here",
+			category: "fips_enabled",
+			probed:   func(h *fakeHostOS) bool { return hostReadFileMatching(h, "/proc/sys/crypto/fips_enabled") },
 		},
 		// timezone is intentionally omitted: on every non-Windows host it derives
 		// the zone from Go's time.Now().Format("MST") with no host probe at all,
@@ -205,10 +193,6 @@ func TestBuildCoreFacts_resolutionGatingSkipsProbeWork(t *testing.T) {
 
 	for _, m := range markers {
 		t.Run(m.category, func(t *testing.T) {
-			if m.skip != nil && m.skip() {
-				t.Skipf("%s probe unobservable on %s: %s", m.category, runtime.GOOS, m.skipReason)
-			}
-
 			enabled := newGatingProbeHost()
 			buildCoreFacts(gatingProbeSession(enabled), nil)
 			if !m.probed(enabled) {

@@ -2,7 +2,6 @@ package engine
 
 import (
 	"path/filepath"
-	"runtime"
 	"strings"
 )
 
@@ -105,5 +104,5 @@ func readSELinuxEnforce(path string, readFile fileReader) (bool, bool) {
 // selinuxCoreFacts assembles the selinux category facts (os.selinux), emitted
 // only on Linux.
 func selinuxCoreFacts(s *Session) []ResolvedFact {
-	return selinuxFactsForPlatform(runtime.GOOS, "/proc/self/mounts", "/etc/selinux/config", s.readFile)
+	return selinuxFactsForPlatform(s.goos(), "/proc/self/mounts", "/etc/selinux/config", s.readFile)
 }

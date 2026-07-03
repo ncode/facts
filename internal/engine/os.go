@@ -2,7 +2,6 @@ package engine
 
 import (
 	"log/slog"
-	"os"
 	"os/exec"
 	"regexp"
 	"runtime"
@@ -187,14 +186,10 @@ func probeHardwareModel(s *Session) string {
 }
 
 func probeMacOSModel(s *Session) string {
-	return currentMacOSModel(s.goos(), s.commandOutput)
-}
-
-func currentMacOSModel(goos string, run commandRunner) string {
-	if goos != "darwin" {
+	if s.goos() != "darwin" {
 		return ""
 	}
-	return strings.TrimSpace(run("sysctl", "-n", "hw.model"))
+	return strings.TrimSpace(s.commandOutput("sysctl", "-n", "hw.model"))
 }
 
 func probeOSRelease(s *Session) any {
@@ -205,7 +200,7 @@ func probeOSRelease(s *Session) any {
 		}
 		return nil
 	}
-	return currentOSRelease(s, goos, s.readFile, s.commandOutput)
+	return currentOSRelease(s)
 }
 
 func probeWindowsOSVersionInput(s *Session) string {
@@ -215,19 +210,20 @@ func probeWindowsOSVersionInput(s *Session) string {
 	return windowsWMIOutput(s.commandOutput, "os", "OtherTypeDescription,ProductType,Version")
 }
 
-func currentOSRelease(s *Session, goos string, readFile fileReader, run commandRunner) any {
+func currentOSRelease(s *Session) any {
+	goos := s.goos()
 	profile, ok := targets.Lookup(goos)
 	if !ok || !profile.Capabilities.OSRelease {
 		return nil
 	}
 	switch goos {
 	case "linux":
-		data, err := readFile("/etc/os-release")
+		data, err := s.readFile("/etc/os-release")
 		if err != nil {
 			return s.cachedKernelRelease()
 		}
 		id := linuxOSReleaseID(string(data))
-		if release := specificLinuxOSRelease(id, readFile, run); len(release) > 0 {
+		if release := specificLinuxOSRelease(id, s.readFile, s.commandOutput); len(release) > 0 {
 			return release
 		}
 		if release := parseLinuxOSRelease(string(data)); len(release) > 0 {
@@ -235,26 +231,26 @@ func currentOSRelease(s *Session, goos string, readFile fileReader, run commandR
 		}
 		return nil
 	case "freebsd":
-		versions := parseFreeBSDVersions(run("/bin/freebsd-version", "-k"), run("/bin/freebsd-version", "-ru"))
+		versions := parseFreeBSDVersions(s.commandOutput("/bin/freebsd-version", "-k"), s.commandOutput("/bin/freebsd-version", "-ru"))
 		if versions.InstalledUserland != "" {
 			return parseFreeBSDOSRelease(versions.InstalledUserland)
 		}
 	case "openbsd":
-		return parseOpenBSDOSRelease(run("uname", "-r"))
+		return parseOpenBSDOSRelease(s.commandOutput("uname", "-r"))
 	case "netbsd":
-		return parseOpenBSDOSRelease(run("uname", "-r"))
+		return parseOpenBSDOSRelease(s.commandOutput("uname", "-r"))
 	case "dragonfly":
-		return parseOpenBSDOSRelease(run("uname", "-r"))
+		return parseOpenBSDOSRelease(s.commandOutput("uname", "-r"))
 	case "illumos":
-		if release := parseIllumosRelease(readFileString("/etc/release", readFile)).Release; len(release) > 0 {
+		if release := parseIllumosRelease(readFileString("/etc/release", s.readFile)).Release; len(release) > 0 {
 			return release
 		}
 	case "plan9":
 		return nil
 	case "darwin":
-		return parseDarwinOSRelease(run("uname", "-r"))
+		return parseDarwinOSRelease(s.commandOutput("uname", "-r"))
 	case "windows":
-		if release := currentWindowsOSRelease(windowsWMIOutput(run, "os", "OtherTypeDescription,ProductType,Version")); len(release) > 0 {
+		if release := currentWindowsOSRelease(windowsWMIOutput(s.commandOutput, "os", "OtherTypeDescription,ProductType,Version")); len(release) > 0 {
 			return release
 		}
 		return nil
@@ -751,14 +747,10 @@ type macOSInfo struct {
 }
 
 func probeMacOSInfo(s *Session) macOSInfo {
-	return currentMacOSInfo(s.goos(), s.commandOutput)
-}
-
-func currentMacOSInfo(goos string, run commandRunner) macOSInfo {
-	if goos != "darwin" {
+	if s.goos() != "darwin" {
 		return macOSInfo{}
 	}
-	return parseSwVers(run("sw_vers"))
+	return parseSwVers(s.commandOutput("sw_vers"))
 }
 
 func parseSwVers(input string) macOSInfo {
@@ -848,14 +840,10 @@ func probeMacOSSystemProfilerSoftware(s *Session) macOSSystemProfilerSoftware {
 }
 
 func probeMacOSSystemProfilerEthernet(s *Session) macOSSystemProfilerEthernet {
-	return currentMacOSSystemProfilerEthernet(s.goos(), s.commandOutput)
-}
-
-func currentMacOSSystemProfilerEthernet(goos string, run commandRunner) macOSSystemProfilerEthernet {
-	if goos != "darwin" || run == nil {
+	if s.goos() != "darwin" {
 		return macOSSystemProfilerEthernet{}
 	}
-	return parseMacOSSystemProfilerEthernet(run("system_profiler", "SPEthernetDataType"))
+	return parseMacOSSystemProfilerEthernet(s.commandOutput("system_profiler", "SPEthernetDataType"))
 }
 
 func parseMacOSSystemProfilerHardware(input string) macOSSystemProfilerHardware {
@@ -1081,10 +1069,6 @@ func currentWindowsSystem32(goos, systemRoot string, isWOW64 func() (bool, bool)
 	return systemRoot + `\system32`
 }
 
-func currentWindowsProcessWOW64() (bool, bool) {
-	return os.Getenv("PROCESSOR_ARCHITEW6432") != "", true
-}
-
 func windowsSystem32Facts(path string) []ResolvedFact {
 	if path == "" {
 		return nil
@@ -1193,30 +1177,31 @@ type linuxDistro struct {
 }
 
 func probeLinuxDistro(s *Session) linuxDistro {
-	return currentLinuxDistro(runtime.GOOS, exec.LookPath, s.commandOutput, s.readFile)
+	return currentLinuxDistro(s, exec.LookPath)
 }
 
-func currentLinuxDistro(goos string, lookPath func(string) (string, error), run commandRunner, readFile fileReader) linuxDistro {
+func currentLinuxDistro(s *Session, lookPath func(string) (string, error)) linuxDistro {
+	goos := s.goos()
 	if goos != "linux" {
 		return linuxDistro{}
 	}
 	lsbDistro := linuxDistro{}
 	if _, err := lookPath("lsb_release"); err == nil {
-		out := run("lsb_release", "-a")
+		out := s.commandOutput("lsb_release", "-a")
 		if out != "" {
 			lsbDistro = parseLSBRelease(out)
 		}
 	}
-	data, err := readFile("/etc/os-release")
+	data, err := s.readFile("/etc/os-release")
 	if err != nil {
 		if linuxDistroHasData(lsbDistro) {
 			return lsbDistro
 		}
-		return currentSuseRelease(readFile)
+		return currentSuseRelease(s.readFile)
 	}
 	distro := parseLinuxDistroOSRelease(string(data))
 	if usesRedHatReleaseDistro(distro.ID) {
-		if redHat := currentRedHatRelease(readFile); redHat.ID != "" || redHat.Description != "" || redHat.Codename != "" || len(redHat.Release) > 0 {
+		if redHat := currentRedHatRelease(s.readFile); redHat.ID != "" || redHat.Description != "" || redHat.Codename != "" || len(redHat.Release) > 0 {
 			distro = mergeRedHatDistro(distro, redHat)
 		}
 		if linuxDistroHasData(lsbDistro) {
@@ -1226,12 +1211,12 @@ func currentLinuxDistro(goos string, lookPath func(string) (string, error), run 
 		return lsbDistro
 	}
 	if strings.EqualFold(distro.ID, "amzn") && distro.Release["full"] == "2023" {
-		if version := amazonOSReleaseRPMVersion(run); version != "" {
+		if version := amazonOSReleaseRPMVersion(s.commandOutput); version != "" {
 			distro.Release = releaseHashFromString(version, true)
 		}
 	}
 	if strings.EqualFold(distro.ID, "amzn") {
-		if systemRelease := currentAmazonSystemRelease(readFile); systemRelease.Description != "" {
+		if systemRelease := currentAmazonSystemRelease(s.readFile); systemRelease.Description != "" {
 			distro.ID = systemRelease.ID
 			distro.Description = systemRelease.Description
 			distro.Codename = systemRelease.Codename
@@ -1669,7 +1654,7 @@ func linuxDistroFacts(distro linuxDistro) []ResolvedFact {
 }
 
 func probeFilesystems(s *Session) []string {
-	return currentFilesystems(runtime.GOOS, s.readFile, s.commandOutput)
+	return currentFilesystems(s)
 }
 
 // filesystemsFacts returns the filesystems fact as an array of filesystem
@@ -1683,18 +1668,16 @@ func filesystemsFacts(value []string) []ResolvedFact {
 	return []ResolvedFact{{Name: "filesystems", Value: value}}
 }
 
-func currentFilesystems(goos string, readFile fileReader, run commandRunner) []string {
+func currentFilesystems(s *Session) []string {
+	goos := s.goos()
 	if profile, ok := targets.Lookup(goos); ok && !profile.Capabilities.Filesystems {
 		return nil
 	}
 	switch goos {
 	case "darwin":
-		if run == nil {
-			return nil
-		}
-		return parseDarwinFilesystems(run("mount"))
+		return parseDarwinFilesystems(s.commandOutput("mount"))
 	case "linux":
-		data, err := readFile("/proc/filesystems")
+		data, err := s.readFile("/proc/filesystems")
 		if err != nil {
 			return nil
 		}
@@ -1817,16 +1800,17 @@ func kernelFacts(name, release, version string) []ResolvedFact {
 // os name/family/release/architecture/hardware, filesystems, the Linux distro
 // facts, and the macOS and Windows OS-description facts) for the current host.
 func osCoreFacts(s *Session) []ResolvedFact {
+	goos := s.goos()
 	hardwareModel := s.cachedHardwareModel()
 	architecture := s.cachedArchitectureName()
 	linuxDistro := s.cachedLinuxDistro()
-	if runtime.GOOS == "illumos" {
+	if goos == "illumos" {
 		linuxDistro.Name = parseIllumosRelease(readFileString("/etc/release", s.readFile)).Name
 	}
-	osFamily := osFamily(runtime.GOOS, linuxDistro)
-	osName := osName(runtime.GOOS, linuxDistro)
-	kernelName := kernelName(runtime.GOOS)
-	if runtime.GOOS == "plan9" {
+	osFamily := osFamily(goos, linuxDistro)
+	osName := osName(goos, linuxDistro)
+	kernelName := kernelName(goos)
+	if goos == "plan9" {
 		return []ResolvedFact{
 			{Name: "os.architecture", Value: architecture},
 			{Name: "os.family", Value: osFamily},
@@ -1837,8 +1821,8 @@ func osCoreFacts(s *Session) []ResolvedFact {
 	}
 	kernelRelease := s.cachedKernelRelease()
 	osRelease := s.cachedOSRelease()
-	kernelVersion := kernelVersionFact(runtime.GOOS, kernelRelease, "")
-	if runtime.GOOS == "windows" {
+	kernelVersion := kernelVersionFact(goos, kernelRelease, "")
+	if goos == "windows" {
 		if name, release, version, ok := currentWindowsKernel(s.cachedWindowsOSVersionInput(), s.logr()); ok {
 			kernelName = name
 			kernelRelease = release
@@ -1862,7 +1846,9 @@ func osCoreFacts(s *Session) []ResolvedFact {
 	facts = append(facts, macOSSystemProfilerFacts(s.cachedMacOSSystemProfilerHardware())...)
 	facts = append(facts, macOSSystemProfilerSoftwareFacts(s.cachedMacOSSystemProfilerSoftware())...)
 	facts = append(facts, macOSSystemProfilerEthernetFacts(s.cachedMacOSSystemProfilerEthernet())...)
-	facts = append(facts, windowsSystem32Facts(currentWindowsSystem32(runtime.GOOS, os.Getenv("SystemRoot"), currentWindowsProcessWOW64))...)
-	facts = append(facts, windowsProductReleaseFacts(currentWindowsProductRelease(runtime.GOOS, s.commandOutput))...)
+	facts = append(facts, windowsSystem32Facts(currentWindowsSystem32(goos, s.getenv("SystemRoot"), func() (bool, bool) {
+		return s.getenv("PROCESSOR_ARCHITEW6432") != "", true
+	}))...)
+	facts = append(facts, windowsProductReleaseFacts(currentWindowsProductRelease(goos, s.commandOutput))...)
 	return facts
 }

@@ -32,6 +32,19 @@
   a native `rc` release gate, and CI cross-compile coverage. Plan 9 release
   artifacts remain a separate promotion decision.
 
+### Changed
+
+- Internal, behavior-preserving refactor of the discovery engine: fact
+  resolvers now reach the host only through the run-scoped Session seam, with
+  an automated check freezing that boundary. Category assembly reads platform
+  identity and environment through the Session so windows/plan9 paths are
+  exercisable with a fake host; the host-virtualization signals are gathered
+  once per discovery instead of up to three times; cloud metadata transport is
+  consolidated in one helper; and dead/test-only entrances (`detector.go`, the
+  `query.go` Select delegates, the `LoadExternalFacts` facade, `filehelper.go`,
+  the version fast path's crutch exports) are removed. No public API, CLI flag,
+  output, input-source precedence, diagnostic, or cache behavior changes.
+
 ### Fixed
 
 - The DragonFly `disks`/`partitions` probe no longer reports empty memory-disk

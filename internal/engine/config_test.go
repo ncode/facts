@@ -1009,7 +1009,7 @@ func TestGroupTTLSecondsRejectsMalformedTTLTokens(t *testing.T) {
 }
 
 func TestDisabledFactsForFiltering_retiredLegacyGroupBlocksNothing(t *testing.T) {
-	blocked := DisabledFactsForFiltering([]string{"legacy"}, nil)
+	blocked := DisabledFactsWithGroups([]string{"legacy"}, nil)
 
 	facts := []ResolvedFact{
 		{Name: "os.name", Value: "Darwin"},
@@ -1325,5 +1325,39 @@ func TestFirstConfigValueReturnsFirstNonEmptyValue(t *testing.T) {
 	}
 	if got := firstConfigValue("", ""); got != "" {
 		t.Fatalf("firstConfigValue(all empty) = %q, want empty", got)
+	}
+}
+
+func TestDisabledUnion_mergesConfigFlagAndEnvSources(t *testing.T) {
+	config := Config{Disabled: []string{"os"}}
+	got := DisabledUnion(config, []string{"processors"}, []string{"FACTS_DISABLE=networking"})
+	for _, name := range []string{"os", "processors", "networking"} {
+		if !got[name] {
+			t.Fatalf("DisabledUnion() missing %q from the union; got %#v", name, got)
+		}
+	}
+}
+
+func TestDisabledUnion_nilEnvironExcludesEnvSource(t *testing.T) {
+	config := Config{Disabled: []string{"os"}}
+	got := DisabledUnion(config, nil, nil)
+	if !got["os"] {
+		t.Fatalf("DisabledUnion() dropped config.Disabled; got %#v", got)
+	}
+	if got["networking"] {
+		t.Fatalf("DisabledUnion(nil environ) included an env source; got %#v", got)
+	}
+}
+
+func TestDisabledUnion_expandsGroups(t *testing.T) {
+	config := Config{
+		Disabled:   []string{"web"},
+		FactGroups: []FactGroup{{Name: "web", Facts: []string{"networking", "os.name"}}},
+	}
+	got := DisabledUnion(config, nil, nil)
+	for _, name := range []string{"networking", "os.name"} {
+		if !got[name] {
+			t.Fatalf("DisabledUnion() did not expand group member %q; got %#v", name, got)
+		}
 	}
 }

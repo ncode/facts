@@ -72,19 +72,19 @@ func TestParseWindowsMemoryLogsFailureDiagnosticLikeRubyResolver(t *testing.T) {
 	}
 }
 
-func TestCurrentWindowsMemoryRunsOnlyOnWindows(t *testing.T) {
+func TestProbeWindowsMemoryRunsOnlyOnWindows(t *testing.T) {
 	t.Parallel()
 
-	called := false
-	got := currentWindowsMemory("linux", func(name string, args ...string) string {
-		called = true
-		return ""
-	}, discardLog())
+	host := &fakeHostOS{platform: "linux"}
+	s := NewSession()
+	s.host = host
+
+	got := probeWindowsMemory(s)
 	if got != (windowsMemory{}) {
-		t.Fatalf("currentWindowsMemory(non-windows) = %#v, want empty", got)
+		t.Fatalf("probeWindowsMemory(non-windows) = %#v, want empty", got)
 	}
-	if called {
-		t.Fatal("currentWindowsMemory(non-windows) ran command")
+	if len(host.runCalls) != 0 {
+		t.Fatal("probeWindowsMemory(non-windows) ran command")
 	}
 }
 
@@ -299,16 +299,19 @@ func TestParseDarwinMemoryAmountBytes(t *testing.T) {
 	}
 }
 
-func TestCurrentDarwinSwapUsageMatchesRubyResolver(t *testing.T) {
+func TestProbeDarwinSwapUsageMatchesRubyResolver(t *testing.T) {
 	t.Parallel()
 
-	got := currentDarwinSwapUsage("darwin", func(name string, args ...string) string {
-		if name != "sysctl" || !reflect.DeepEqual(args, []string{"-n", "vm.swapusage"}) {
-			t.Fatalf("run = %s %v, want sysctl -n vm.swapusage", name, args)
-		}
-		return "total = 3072.00M  used = 1422.75M  free = 1649.25M  (encrypted)"
-	})
+	host := &fakeHostOS{
+		platform: "darwin",
+		runOutputs: map[string]string{
+			fakeRunKey("sysctl", "-n", "vm.swapusage"): "total = 3072.00M  used = 1422.75M  free = 1649.25M  (encrypted)",
+		},
+	}
+	s := NewSession()
+	s.host = host
 
+	got := probeDarwinSwapUsage(s)
 	want := darwinSwapUsage{
 		TotalBytes:     3_221_225_472,
 		UsedBytes:      1_491_861_504,
@@ -316,23 +319,24 @@ func TestCurrentDarwinSwapUsageMatchesRubyResolver(t *testing.T) {
 		Encrypted:      true,
 	}
 	if got != want {
-		t.Fatalf("currentDarwinSwapUsage() = %#v, want %#v", got, want)
+		t.Fatalf("probeDarwinSwapUsage() = %#v, want %#v", got, want)
+	}
+	if want := []fakeHostRunCall{{name: "sysctl", args: []string{"-n", "vm.swapusage"}}}; !reflect.DeepEqual(host.runCalls, want) {
+		t.Fatalf("run calls = %#v, want %#v", host.runCalls, want)
 	}
 }
 
 func TestDarwinMemoryParsersHandleMalformedAndNonDarwinInputs(t *testing.T) {
 	t.Parallel()
 
-	called := false
-	got := currentDarwinSwapUsage("linux", func(string, ...string) string {
-		called = true
-		return "total = 1G"
-	})
-	if got != (darwinSwapUsage{}) {
-		t.Fatalf("currentDarwinSwapUsage(non-darwin) = %#v, want empty", got)
+	host := &fakeHostOS{platform: "linux"}
+	s := NewSession()
+	s.host = host
+	if got := probeDarwinSwapUsage(s); got != (darwinSwapUsage{}) {
+		t.Fatalf("probeDarwinSwapUsage(non-darwin) = %#v, want empty", got)
 	}
-	if called {
-		t.Fatal("currentDarwinSwapUsage(non-darwin) ran command")
+	if len(host.runCalls) != 0 {
+		t.Fatal("probeDarwinSwapUsage(non-darwin) ran command")
 	}
 
 	if got := parseDarwinVMStatAvailableBytes("Pages free: 10.\n"); got != 0 {

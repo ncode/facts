@@ -385,3 +385,61 @@ func TestEngineDiscoverUsesCachedValueForConfiguredFacts(t *testing.T) {
 		t.Fatalf("cached Value(cache_probe) = %#v, %v, want cache file value", got, err)
 	}
 }
+
+// externalFactErrorFixtureDir writes a good static fact file alongside a
+// null-byte fact file. The loader loads the good file, then errors on the null
+// byte — the fixture that distinguishes the CLI (fail-fast) and library
+// (accumulate) error policies these pins lock before the Discover arms collapse.
+func externalFactErrorFixtureDir(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "good.txt"), []byte("good_fact=ok\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "bad.txt"), []byte("bad_fact=va\x00lue\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+// Library mode: a per-file loader failure is accumulated into the joined error
+// while the successfully loaded facts are retained in a partial snapshot.
+func TestEngineDiscoverLibraryModeAccumulatesLoaderErrorAndKeepsFacts(t *testing.T) {
+	dir := externalFactErrorFixtureDir(t)
+	eng, err := NewEngine(EngineConfig{ExternalDirs: []string{dir}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	snap, err := eng.Discover(context.Background(), "good_fact")
+	if !errors.Is(err, ErrNullByte) {
+		t.Fatalf("Discover() err = %v, want joined null-byte error", err)
+	}
+	if snap == nil {
+		t.Fatal("Discover() snapshot = nil, want partial snapshot retaining loaded facts")
+	}
+	if got, err := snap.Value("good_fact"); err != nil || got != "ok" {
+		t.Fatalf("Value(good_fact) = %#v, %v, want ok (library mode retains loaded facts)", got, err)
+	}
+}
+
+// CLI mode: the first loader failure aborts discovery, discarding the facts
+// loaded before it and returning the bare loader error (no core facts resolve).
+func TestEngineDiscoverCLIModeFailsFastAndDiscardsFacts(t *testing.T) {
+	dir := externalFactErrorFixtureDir(t)
+	eng, err := NewEngine(EngineConfig{ExternalDirs: []string{dir}, CLICompat: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	snap, err := eng.Discover(context.Background(), "good_fact")
+	if !errors.Is(err, ErrNullByte) {
+		t.Fatalf("Discover() err = %v, want bare null-byte loader error", err)
+	}
+	if snap == nil {
+		t.Fatal("Discover() snapshot = nil, want empty snapshot")
+	}
+	if _, err := snap.Value("good_fact"); !errors.Is(err, ErrFactNotFound) {
+		t.Fatalf("Value(good_fact) err = %v, want ErrFactNotFound (CLI fail-fast discards loaded facts)", err)
+	}
+}

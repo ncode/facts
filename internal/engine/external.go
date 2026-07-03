@@ -111,25 +111,6 @@ func ExternalFactResolutionRunning() bool {
 	return os.Getenv(externalFactResolutionEnv) != ""
 }
 
-// LoadExternalFacts loads static external facts from the provided directories.
-func LoadExternalFacts(s *Session, dirs []string) ([]ResolvedFact, error) {
-	return LoadExternalFactsWithBlocklist(s, dirs, nil)
-}
-
-// LoadExternalFactsWithBlocklist loads external facts from dirs plus the
-// FACTS_*/FACTER_* environment variables — the CLI's system-following
-// semantics — skipping files whose base name is blocklisted by the Facter
-// config.
-func LoadExternalFactsWithBlocklist(s *Session, dirs []string, blocked map[string]bool) ([]ResolvedFact, error) {
-	return externalFactLoader{
-		s:          s,
-		mode:       externalFactLoaderCLI,
-		dirs:       dirs,
-		blocked:    blocked,
-		includeEnv: true,
-	}.load()
-}
-
 func (l externalFactLoader) load() ([]ResolvedFact, error) {
 	l = l.withDefaults()
 	facts, failures, err := l.loadDirFacts()
@@ -305,14 +286,6 @@ func environmentDisabledFacts(env []string) []string {
 // to feed EngineConfig.ExtraDisabled.
 func SplitDisableList(value string) []string {
 	return splitDisableList(value)
-}
-
-// EnvironmentDisabledFacts extracts the disabled-set entries from the reserved
-// FACTS_DISABLE / FACTER_DISABLE control variables in env (native wins). It is
-// the exported seam internal/app uses to honor ambient disables in the
-// facterversion fast path.
-func EnvironmentDisabledFacts(env []string) []string {
-	return environmentDisabledFacts(env)
 }
 
 // splitDisableList splits a comma-separated disable list into trimmed,

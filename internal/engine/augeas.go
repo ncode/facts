@@ -5,15 +5,15 @@ import "regexp"
 var augeasVersionPattern = regexp.MustCompile(`\b(\d+\.\d+(?:\.\d+)?)\b`)
 
 func probeAugeasVersion(s *Session) string {
-	return currentAugeasVersion(fileExists, s.commandOutput)
+	return currentAugeasVersion(s)
 }
 
-func currentAugeasVersion(exists func(string) bool, run commandRunner) string {
+func currentAugeasVersion(s *Session) string {
 	augparse := "augparse"
-	if exists("/opt/puppetlabs/puppet/bin/augparse") {
+	if fileExists(s.host, "/opt/puppetlabs/puppet/bin/augparse") {
 		augparse = "/opt/puppetlabs/puppet/bin/augparse"
 	}
-	return parseAugeasVersion(run(augparse, "--version"))
+	return parseAugeasVersion(s.commandOutput(augparse, "--version"))
 }
 
 func parseAugeasVersion(out string) string {

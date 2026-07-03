@@ -184,8 +184,8 @@ func networkingInterfacesForPlatform(s *Session, goos string, snapshotProvider f
 		addLinuxDHCPServersFromSnapshots(s, values, snapshots)
 		addLinuxRouteSourceBindings(s, values)
 		addLinuxIfInet6Flags(values, parseLinuxIfInet6Flags(readText("/proc/net/if_inet6", s.readFile)))
-		addLinuxBondingSlaveMACsFromRootWithReader("/", values, s.readFile)
-		addLinuxInterfaceMetadataFromRootWithHost("/", values, s.host)
+		addLinuxBondingSlaveMACs(values, s.host)
+		addLinuxInterfaceMetadata(values, s.host)
 	}
 	return values
 }
@@ -1066,17 +1066,13 @@ func addLinuxIfInet6Flags(interfaces map[string]any, flags map[string]map[string
 	}
 }
 
-func addLinuxInterfaceMetadataFromRoot(root string, interfaces map[string]any) {
-	addLinuxInterfaceMetadataFromRootWithHost(root, interfaces, osHost{})
-}
-
-func addLinuxInterfaceMetadataFromRootWithHost(root string, interfaces map[string]any, host hostOS) {
+func addLinuxInterfaceMetadata(interfaces map[string]any, host hostOS) {
 	for name, raw := range interfaces {
 		iface, ok := raw.(map[string]any)
 		if !ok {
 			continue
 		}
-		ifaceRoot := rootedPath(root, filepath.Join("sys/class/net", name))
+		ifaceRoot := filepath.Join("/sys/class/net", name)
 		if state := strings.TrimSpace(readText(filepath.Join(ifaceRoot, "operstate"), host.readFile)); state != "" {
 			iface["operational_state"] = state
 		}
@@ -1091,12 +1087,8 @@ func addLinuxInterfaceMetadataFromRootWithHost(root string, interfaces map[strin
 	}
 }
 
-func addLinuxBondingSlaveMACsFromRoot(root string, interfaces map[string]any) {
-	addLinuxBondingSlaveMACsFromRootWithReader(root, interfaces, osHost{}.readFile)
-}
-
-func addLinuxBondingSlaveMACsFromRootWithReader(root string, interfaces map[string]any, readFile fileReader) {
-	entries, err := os.ReadDir(rootedPath(root, "proc/net/bonding"))
+func addLinuxBondingSlaveMACs(interfaces map[string]any, host hostOS) {
+	entries, err := host.readDir("/proc/net/bonding")
 	if err != nil {
 		return
 	}
@@ -1104,7 +1096,7 @@ func addLinuxBondingSlaveMACsFromRootWithReader(root string, interfaces map[stri
 		if entry.IsDir() {
 			continue
 		}
-		for slave, mac := range parseLinuxBondingSlaveMACs(readText(rootedPath(root, filepath.Join("proc/net/bonding", entry.Name())), readFile)) {
+		for slave, mac := range parseLinuxBondingSlaveMACs(readText(filepath.Join("/proc/net/bonding", entry.Name()), host.readFile)) {
 			iface, ok := interfaces[slave].(map[string]any)
 			if ok {
 				iface["mac"] = mac
@@ -1132,42 +1124,26 @@ func parseLinuxBondingSlaveMACs(content string) map[string]string {
 }
 
 func linuxDHCPServer(s *Session, interfaceName string, interfaceIndex int) string {
-	return linuxDHCPServerFromRoot(s, "/", interfaceName, interfaceIndex)
-}
-
-func linuxDHCPServerFromRoot(s *Session, root, interfaceName string, interfaceIndex int) string {
-	return linuxDHCPServerFromRootWithHost(root, interfaceName, interfaceIndex, s.commandOutput, s.host)
-}
-
-func linuxDHCPServerFromRootWithRunner(root, interfaceName string, interfaceIndex int, run commandRunner) string {
-	return linuxDHCPServerFromRootWithHost(root, interfaceName, interfaceIndex, run, osHost{})
-}
-
-func linuxDHCPServerFromRootWithHost(root, interfaceName string, interfaceIndex int, run commandRunner, host hostOS) string {
 	if interfaceIndex > 0 {
-		leasePath := rootedPath(root, filepath.Join("run/systemd/netif/leases", strconv.Itoa(interfaceIndex)))
-		if server := linuxSystemdDHCPServer(readText(leasePath, host.readFile)); server != "" {
+		leasePath := filepath.Join("/run/systemd/netif/leases", strconv.Itoa(interfaceIndex))
+		if server := linuxSystemdDHCPServer(readText(leasePath, s.readFile)); server != "" {
 			return server
 		}
 	}
-	for _, dir := range []string{"var/lib/dhclient", "var/lib/dhcp", "var/lib/dhcp3", "var/lib/NetworkManager", "var/db"} {
-		server := linuxDHCPServerFromLeaseDirWithReader(rootedPath(root, dir), interfaceName, host.readFile)
+	for _, dir := range []string{"/var/lib/dhclient", "/var/lib/dhcp", "/var/lib/dhcp3", "/var/lib/NetworkManager", "/var/db"} {
+		server := linuxDHCPServerFromLeaseDir(dir, interfaceName, s.host)
 		if server != "" {
 			return server
 		}
 	}
-	if server := linuxDHCPCDDHCPServer(run("dhcpcd", "-U", interfaceName)); server != "" {
+	if server := linuxDHCPCDDHCPServer(s.commandOutput("dhcpcd", "-U", interfaceName)); server != "" {
 		return server
 	}
 	return ""
 }
 
-func linuxDHCPServerFromLeaseDir(dir, interfaceName string) string {
-	return linuxDHCPServerFromLeaseDirWithReader(dir, interfaceName, osHost{}.readFile)
-}
-
-func linuxDHCPServerFromLeaseDirWithReader(dir, interfaceName string, readFile fileReader) string {
-	entries, err := os.ReadDir(dir)
+func linuxDHCPServerFromLeaseDir(dir, interfaceName string, host hostOS) string {
+	entries, err := host.readDir(dir)
 	if err != nil {
 		return ""
 	}
@@ -1176,7 +1152,7 @@ func linuxDHCPServerFromLeaseDirWithReader(dir, interfaceName string, readFile f
 		if entry.IsDir() || !strings.Contains(name, "lease") {
 			continue
 		}
-		content := readText(filepath.Join(dir, name), readFile)
+		content := readText(filepath.Join(dir, name), host.readFile)
 		if server, matched, explicit := linuxDHClientDHCPServerForInterfaceState(content, interfaceName); explicit {
 			if matched {
 				return server
