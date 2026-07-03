@@ -65,7 +65,7 @@ The library SHALL distinguish missing facts from nil-valued facts via an `ErrFac
 
 ### Requirement: Diagnostics via structured logging
 
-Engine diagnostics SHALL flow through `log/slog` with the contract-pinned message text and mapped severities, SHALL be discarded by default, and SHALL preserve once-only emission semantics per Engine. There SHALL be no package-global diagnostic sink: every diagnostic raised during discovery — including those from config-file parsing, the persistent cache, fact-group TTL parsing, canonical-tree collection collisions (the default collection the Snapshot exposes), and OS-hierarchy detection — SHALL be routed to the Engine's logger, not to a process-global handler. Collisions that arise only from a format-time transform (the CLI's `--force-dot-resolution`), not from the canonical tree, are out of scope of this requirement.
+Engine diagnostics SHALL flow through `log/slog` with the contract-pinned message text and mapped severities, SHALL be discarded by default, and SHALL preserve once-only emission semantics per Engine. There SHALL be no package-global diagnostic sink: every diagnostic raised during discovery — including those from config-file parsing, the persistent cache, fact-group TTL parsing, and canonical-tree collection collisions (the default collection the Snapshot exposes) — SHALL be routed to the Engine's logger, not to a process-global handler. Collisions that arise only from a format-time transform (the CLI's `--force-dot-resolution`), not from the canonical tree, are out of scope of this requirement.
 
 #### Scenario: Silent by default
 
@@ -96,3 +96,4 @@ Engine diagnostics SHALL flow through `log/slog` with the contract-pinned messag
 
 - **WHEN** an Engine constructed with `WithLogger` raises an error-class diagnostic (a collection collision, an unsupported cache group for an external fact, or an unparseable TTL unit)
 - **THEN** the diagnostic is emitted to the supplied logger at error severity, even though the facts CLI's stderr handler drops error-class lines
+
