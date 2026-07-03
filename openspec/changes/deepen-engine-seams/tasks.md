@@ -44,11 +44,11 @@
 
 ## 6. Concentrate the cloud metadata fetch
 
-- [ ] 6.1 Delete dead `gceFacts` (gce.go:35) and retarget its SIX referencing tests (five in gce_test.go plus `TestGCEFacts_fetchesMetadataAndCloudProvider` in ec2_test.go) to `platformGCEFacts`/`linuxGCEFacts` with production empty-case expectations (`{gce: nil}`); delete `TestGCEFactsSkipNilClient` (exact duplicate of the existing nil-client test). Verify: build + tests green.
-- [ ] 6.2 Add `internal/engine/metadatahttp.go` — shared `metadataMaxBodyBytes` const, `newMetadataHTTPClient(timeout)` (proxy-less), `fetchMetadata(ctx, client, method, url, headers) (string, http.Header, bool)` (200-required, 1MB cap, fail-closed) — plus metadatahttp_test.go covering client config, non-200, request-build error, read error, body cap, header passthrough (the first transport-invariant tests; today none exist). Verify: build + tests green.
-- [ ] 6.3 Convert az.go (ctor + `metadata`, keeping JSON/empty-map error shape and the 5s timeout). Verify: Azure tests + full package green.
-- [ ] 6.4 Convert gce.go (ctor + `get`, keeping the response `Metadata-Flavor` validation via the returned header and TrimSpace). Verify: GCE tests + full package green.
-- [ ] 6.5 Convert ec2.go (ctor + `getRaw` with conditional token header and untrimmed body + the `v2Token` request leg with PUT and TTL header; token cache/TrimSpace stay in `v2Token`). Verify: EC2 tests + benchmark + full package green.
+- [x] 6.1 Delete dead `gceFacts` (gce.go:35) and retarget its SIX referencing tests (five in gce_test.go plus `TestGCEFacts_fetchesMetadataAndCloudProvider` in ec2_test.go) to `platformGCEFacts`/`linuxGCEFacts` with production empty-case expectations (`{gce: nil}`); delete `TestGCEFactsSkipNilClient` (exact duplicate of the existing nil-client test). Verify: build + tests green.
+- [x] 6.2 Add `internal/engine/metadatahttp.go` — shared `metadataMaxBodyBytes` const, `newMetadataHTTPClient(timeout)` (proxy-less), `fetchMetadata(ctx, client, method, url, headers) (string, http.Header, bool)` (200-required, 1MB cap, fail-closed) — plus metadatahttp_test.go covering client config, non-200, request-build error, read error, body cap, header passthrough (the first transport-invariant tests; today none exist). Verify: build + tests green.
+- [x] 6.3 Convert az.go (ctor + `metadata`, keeping JSON/empty-map error shape and the 5s timeout). Verify: Azure tests + full package green.
+- [x] 6.4 Convert gce.go (ctor + `get`, keeping the response `Metadata-Flavor` validation via the returned header and TrimSpace). Verify: GCE tests + full package green.
+- [x] 6.5 Convert ec2.go (ctor + `getRaw` with conditional token header and untrimmed body + the `v2Token` request leg with PUT and TTL header; token cache/TrimSpace stay in `v2Token`). Verify: EC2 tests + benchmark + full package green.
 - [ ] 6.6 Smoke the nil paths: on the facts-dev Lima VM (NOT darwin — `platformGCEFacts` returns nil for goos=darwin, so `{gce: nil}` is unobservable there), confirm `az_metadata`/`ec2_metadata`/`ec2_userdata`/`gce` outputs unchanged on a non-cloud host. Verify: byte-identical.
 
 ## 7. Collapse Discover's duplicated external-loader arms

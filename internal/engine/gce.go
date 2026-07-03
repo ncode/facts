@@ -3,7 +3,6 @@ package engine
 import (
 	"context"
 	"encoding/json"
-	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -12,7 +11,6 @@ import (
 const (
 	gceMetadataBaseURL = "http://metadata.google.internal/computeMetadata/v1"
 	gceRequestTimeout  = 100 * time.Millisecond
-	gceMaxBodyBytes    = 1 << 20
 )
 
 type gceClient struct {
@@ -22,28 +20,9 @@ type gceClient struct {
 
 func newGCEClient(baseURL string, httpClient *http.Client) *gceClient {
 	if httpClient == nil {
-		httpClient = &http.Client{
-			Timeout: gceRequestTimeout,
-			Transport: &http.Transport{
-				Proxy: nil,
-			},
-		}
+		httpClient = newMetadataHTTPClient(gceRequestTimeout)
 	}
 	return &gceClient{baseURL: strings.TrimRight(baseURL, "/"), httpClient: httpClient}
-}
-
-func gceFacts(ctx context.Context, client *gceClient) []ResolvedFact {
-	if client == nil {
-		return nil
-	}
-	metadata := client.metadata(ctx)
-	if len(metadata) == 0 {
-		return nil
-	}
-	return []ResolvedFact{
-		{Name: "gce", Value: metadata},
-		{Name: "cloud.provider", Value: "gce"},
-	}
 }
 
 func linuxGCEFacts(ctx context.Context, goos, biosVendor string, client *gceClient) []ResolvedFact {
@@ -159,23 +138,12 @@ func lastPathSegment(value string) string {
 }
 
 func (gc *gceClient) get(ctx context.Context, path string) (string, bool) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, gc.baseURL+"/"+path, nil)
-	if err != nil {
+	body, header, ok := fetchMetadata(ctx, gc.httpClient, http.MethodGet, gc.baseURL+"/"+path, map[string]string{
+		"Metadata-Flavor": "Google",
+		"Accept":          "application/json",
+	})
+	if !ok || header.Get("Metadata-Flavor") != "Google" {
 		return "", false
 	}
-	req.Header.Set("Metadata-Flavor", "Google")
-	req.Header.Set("Accept", "application/json")
-	resp, err := gc.httpClient.Do(req)
-	if err != nil {
-		return "", false
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK || resp.Header.Get("Metadata-Flavor") != "Google" {
-		return "", false
-	}
-	data, err := io.ReadAll(io.LimitReader(resp.Body, gceMaxBodyBytes))
-	if err != nil {
-		return "", false
-	}
-	return strings.TrimSpace(string(data)), true
+	return strings.TrimSpace(body), true
 }

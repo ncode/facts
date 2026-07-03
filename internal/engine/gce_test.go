@@ -17,7 +17,7 @@ func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return f(req)
 }
 
-func TestGCEFactsFetchRecursiveMetadataAndNormalizeInstance(t *testing.T) {
+func TestLinuxGCEFactsFetchRecursiveMetadataAndNormalizeInstance(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.String() != "/?recursive=true&alt=json" {
 			t.Errorf("request URL = %q, want recursive JSON metadata endpoint", r.URL.String())
@@ -43,7 +43,7 @@ func TestGCEFactsFetchRecursiveMetadataAndNormalizeInstance(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	facts := gceFacts(context.Background(), newGCEClient(server.URL, server.Client()))
+	facts := linuxGCEFacts(context.Background(), "linux", "Google", newGCEClient(server.URL, server.Client()))
 	got := factValues(facts)
 
 	metadata, ok := got["gce"].(map[string]any)
@@ -79,7 +79,7 @@ func TestGCEFactsFetchRecursiveMetadataAndNormalizeInstance(t *testing.T) {
 	}
 }
 
-func TestGCEFactsSendsAcceptJSONHeaderLikeRubyResolver(t *testing.T) {
+func TestLinuxGCEFactsSendsAcceptJSONHeaderLikeRubyResolver(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("Accept"); got != "application/json" {
 			t.Fatalf("Accept = %q, want application/json", got)
@@ -89,39 +89,37 @@ func TestGCEFactsSendsAcceptJSONHeaderLikeRubyResolver(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	got := factValues(gceFacts(context.Background(), newGCEClient(server.URL, server.Client())))
+	got := factValues(linuxGCEFacts(context.Background(), "linux", "Google", newGCEClient(server.URL, server.Client())))
 	if got["gce"] == nil {
 		t.Fatalf("gce fact = %#v, want metadata", got["gce"])
 	}
 }
 
-func TestGCEFactsSkipInvalidMetadata(t *testing.T) {
+func TestLinuxGCEFactsSkipInvalidMetadata(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Metadata-Flavor", "Google")
 		_, _ = w.Write([]byte(`not json`))
 	}))
 	t.Cleanup(server.Close)
 
-	if got := gceFacts(context.Background(), newGCEClient(server.URL, server.Client())); len(got) != 0 {
-		t.Fatalf("gceFacts(context.Background(), ) = %#v, want no facts for invalid metadata", got)
+	got := linuxGCEFacts(context.Background(), "linux", "Google", newGCEClient(server.URL, server.Client()))
+	want := []ResolvedFact{{Name: "gce", Value: nil}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("linuxGCEFacts(invalid metadata) = %#v, want %#v", got, want)
 	}
 }
 
-func TestGCEFactsRequireGoogleMetadataFlavor(t *testing.T) {
+func TestLinuxGCEFactsRequireGoogleMetadataFlavor(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Metadata-Flavor", "NotGoogle")
 		_, _ = w.Write([]byte(`{"some":"metadata"}`))
 	}))
 	t.Cleanup(server.Close)
 
-	if got := gceFacts(context.Background(), newGCEClient(server.URL, server.Client())); len(got) != 0 {
-		t.Fatalf("gceFacts(context.Background(), ) = %#v, want no facts for spoofed metadata flavor", got)
-	}
-}
-
-func TestGCEFactsSkipNilClient(t *testing.T) {
-	if got := gceFacts(context.Background(), nil); got != nil {
-		t.Fatalf("gceFacts(nil client) = %#v, want nil", got)
+	got := linuxGCEFacts(context.Background(), "linux", "Google", newGCEClient(server.URL, server.Client()))
+	want := []ResolvedFact{{Name: "gce", Value: nil}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("linuxGCEFacts(spoofed metadata flavor) = %#v, want %#v", got, want)
 	}
 }
 

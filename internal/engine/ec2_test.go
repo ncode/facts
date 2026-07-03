@@ -324,7 +324,7 @@ func TestFileExecutableRequiresRegularExecutableFile(t *testing.T) {
 	}
 }
 
-func TestGCEFacts_fetchesMetadataAndCloudProvider(t *testing.T) {
+func TestLinuxGCEFacts_fetchesMetadataAndCloudProvider(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("Metadata-Flavor"); got != "Google" {
 			t.Fatalf("Metadata-Flavor = %q, want Google", got)
@@ -338,7 +338,7 @@ func TestGCEFacts_fetchesMetadataAndCloudProvider(t *testing.T) {
 	}))
 	defer server.Close()
 
-	got := gceFacts(context.Background(), newGCEClient(server.URL+"/computeMetadata/v1", server.Client()))
+	got := linuxGCEFacts(context.Background(), "linux", "Google", newGCEClient(server.URL+"/computeMetadata/v1", server.Client()))
 	want := []ResolvedFact{
 		{Name: "gce", Value: map[string]any{
 			"instance": map[string]any{
@@ -353,6 +353,6 @@ func TestGCEFacts_fetchesMetadataAndCloudProvider(t *testing.T) {
 		{Name: "cloud.provider", Value: "gce"},
 	}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("gceFacts(context.Background(), ) = %#v, want %#v", got, want)
+		t.Fatalf("linuxGCEFacts(context.Background(), ) = %#v, want %#v", got, want)
 	}
 }
