@@ -49,7 +49,7 @@
 - [x] 6.3 Convert az.go (ctor + `metadata`, keeping JSON/empty-map error shape and the 5s timeout). Verify: Azure tests + full package green.
 - [x] 6.4 Convert gce.go (ctor + `get`, keeping the response `Metadata-Flavor` validation via the returned header and TrimSpace). Verify: GCE tests + full package green.
 - [x] 6.5 Convert ec2.go (ctor + `getRaw` with conditional token header and untrimmed body + the `v2Token` request leg with PUT and TTL header; token cache/TrimSpace stay in `v2Token`). Verify: EC2 tests + benchmark + full package green.
-- [ ] 6.6 Smoke the nil paths: on the facts-dev Lima VM (NOT darwin — `platformGCEFacts` returns nil for goos=darwin, so `{gce: nil}` is unobservable there), confirm `az_metadata`/`ec2_metadata`/`ec2_userdata`/`gce` outputs unchanged on a non-cloud host. Verify: byte-identical.
+- [x] 6.6 Smoke the nil paths: on the facts-dev Lima VM (NOT darwin — `platformGCEFacts` returns nil for goos=darwin, so `{gce: nil}` is unobservable there), confirm `az_metadata`/`ec2_metadata`/`ec2_userdata`/`gce` outputs unchanged on a non-cloud host. Verify: byte-identical.
 
 ## 7. Collapse Discover's duplicated external-loader arms
 
@@ -67,7 +67,7 @@
 
 ## 9. Cross-cutting verification and docs
 
-- [ ] 9.1 Lima VM parity gates: facts-dev Facter 4.10.0 full-JSON diffs — before group 3, after group 5, and after group 8 — must be byte-identical pre/post at each bracket.
-- [ ] 9.2 Archive gates via facts-lab: nlab Windows guest smoke (env-casing paths: ssh programdata, SystemRoot/system32, path fact; windows virtualization memo) and plan9 guest smoke (`path` fact non-empty and NUL-split) — or record plan9 as an accepted risk in design.md if the guest is unavailable.
-- [ ] 9.3 One consolidated CHANGELOG internal-refactor entry; update ADR-0010's deferred-follow-on note to record the collapse as done; note the archived 2026-06-17 `LoadExternalFacts` open question as resolved.
-- [ ] 9.4 Final sweep: `go build ./...`, full `go test ./...`, `go vet ./...`, race where concurrency-sensitive, contract tests untouched (git diff clean on contract test files), `openspec validate deepen-engine-seams --strict`.
+- [x] 9.1 Lima VM parity gates: facts-dev Facter 4.10.0 full-JSON diffs — before group 3, after group 5, and after group 8 — must be byte-identical pre/post at each bracket.
+- [x] 9.2 Archive gates via facts-lab: nlab Windows guest smoke (env-casing paths: ssh programdata, SystemRoot/system32, path fact; windows virtualization memo) and plan9 guest smoke (`path` fact non-empty and NUL-split) — or record plan9 as an accepted risk in design.md if the guest is unavailable.
+- [x] 9.3 One consolidated CHANGELOG internal-refactor entry; update ADR-0010's deferred-follow-on note to record the collapse as done; note the archived 2026-06-17 `LoadExternalFacts` open question as resolved.
+- [x] 9.4 Final sweep: `go build ./...`, full `go test ./...`, `go vet ./...`, race where concurrency-sensitive, contract tests untouched (git diff clean on contract test files), `openspec validate deepen-engine-seams --strict`.
