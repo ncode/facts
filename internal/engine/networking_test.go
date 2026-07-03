@@ -19,7 +19,11 @@ func newLeaseDirHost(dir string, files map[string]string) *fakeHostOS {
 	blobs := make(map[string][]byte, len(files))
 	for name, content := range files {
 		names = append(names, name)
-		blobs[filepath.Join(dir, name)] = []byte(content)
+		// Key by forward slash: production joins with filepath.Join (backslash on
+		// Windows) but fakeHostOS.readFile normalizes lookups through
+		// fakeHostPath (filepath.ToSlash), so fixtures must use slashes to match
+		// on Windows as well as unix.
+		blobs[dir+"/"+name] = []byte(content)
 	}
 	sort.Strings(names)
 	return &fakeHostOS{

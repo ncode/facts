@@ -147,8 +147,14 @@ func (h *fakeHostOS) environ() []string {
 	return h.environEntries
 }
 
+// fakeHostPath normalizes a lookup path to forward slashes so path-keyed
+// fixtures use one portable form. It replaces backslashes unconditionally
+// rather than via filepath.ToSlash (which only converts on Windows): resolvers
+// that force a backslash join for the windows branch — sshCoreFacts keys off
+// s.goos()=="windows", not the runtime OS — produce backslash paths on unix
+// dev hosts too, and those must still resolve against slash-keyed fixtures.
 func fakeHostPath(path string) string {
-	return filepath.ToSlash(path)
+	return strings.ReplaceAll(path, `\`, "/")
 }
 
 type fakeFileInfo struct {

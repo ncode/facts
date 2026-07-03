@@ -260,7 +260,11 @@ func TestSSHCoreFactsFakeWindowsHostUsesProgramDataAndPrivilegeGate(t *testing.T
 			fakeRunKey("whoami", "/groups"): `BUILTIN\Administrators S-1-5-32-544 Enabled group` + "\n",
 		},
 		files: map[string][]byte{
-			`C:\ProgramData\ssh\ssh_host_rsa_key.pub`: []byte("ssh-rsa AAAA host\n"),
+			// Forward-slash key: production joins the windows path with
+			// backslashes, but fakeHostOS.readFile looks up through fakeHostPath
+			// (filepath.ToSlash), so the fixture must use slashes to match on a
+			// real Windows runner (on unix ToSlash is a no-op).
+			"C:/ProgramData/ssh/ssh_host_rsa_key.pub": []byte("ssh-rsa AAAA host\n"),
 		},
 	}
 	s := NewSessionContext(context.Background())
@@ -284,7 +288,11 @@ func TestSSHCoreFactsFakeWindowsHostUsesProgramDataAndPrivilegeGate(t *testing.T
 			fakeRunKey("whoami", "/groups"): "Everyone S-1-1-0 Mandatory group\n",
 		},
 		files: map[string][]byte{
-			`C:\ProgramData\ssh\ssh_host_rsa_key.pub`: []byte("ssh-rsa AAAA host\n"),
+			// Forward-slash key: production joins the windows path with
+			// backslashes, but fakeHostOS.readFile looks up through fakeHostPath
+			// (filepath.ToSlash), so the fixture must use slashes to match on a
+			// real Windows runner (on unix ToSlash is a no-op).
+			"C:/ProgramData/ssh/ssh_host_rsa_key.pub": []byte("ssh-rsa AAAA host\n"),
 		},
 	}
 	s2 := NewSessionContext(context.Background())
