@@ -2,7 +2,6 @@ package engine
 
 import (
 	"fmt"
-	"log/slog"
 	"strconv"
 	"strings"
 	"time"
@@ -30,49 +29,50 @@ func uptimeString(uptime uptimeInfo) string {
 }
 
 func probeUptime(s *Session) uptimeInfo {
-	return currentUptimeInfo(s, s.goos(), s.readFile, s.commandOutput, time.Now)
+	return currentUptimeInfo(s, time.Now)
 }
 
-func currentUptime(s *Session, goos string, readFile fileReader, run commandRunner, now func() time.Time) time.Duration {
-	return currentUptimeInfo(s, goos, readFile, run, now).Duration
+func currentUptime(s *Session, now func() time.Time) time.Duration {
+	return currentUptimeInfo(s, now).Duration
 }
 
-func currentUptimeInfo(s *Session, goos string, readFile fileReader, run commandRunner, now func() time.Time) uptimeInfo {
+func currentUptimeInfo(s *Session, now func() time.Time) uptimeInfo {
+	goos := s.goos()
 	if goos == "windows" {
-		return currentWindowsUptime(goos, run, s.logr())
+		return currentWindowsUptime(s)
 	}
 	if goos == "plan9" {
-		return currentPlan9Uptime(run)
+		return currentPlan9Uptime(s.commandOutput)
 	}
 	if goos == "linux" {
 		virtual := detectLinuxVirtualization(s.cachedLinuxVirtualizationInput())
-		return currentLinuxUptimeInfo(readFile, run, now, linuxContainerUptimeUsesPID1(virtual.Name))
+		return currentLinuxUptimeInfo(s, now, linuxContainerUptimeUsesPID1(virtual.Name))
 	}
-	return currentPosixUptime(readFile, run, now)
+	return currentPosixUptime(s, now)
 }
 
 func linuxContainerUptimeUsesPID1(name string) bool {
 	return name == "docker" || name == "kubernetes"
 }
 
-func currentLinuxUptimeInfo(readFile fileReader, run commandRunner, now func() time.Time, docker bool) uptimeInfo {
+func currentLinuxUptimeInfo(s *Session, now func() time.Time, docker bool) uptimeInfo {
 	if docker {
-		seconds := parseDockerElapsedTimeSeconds(run("ps", "-o", "etime=", "-p", "1"))
+		seconds := parseDockerElapsedTimeSeconds(s.commandOutput("ps", "-o", "etime=", "-p", "1"))
 		if seconds > 0 {
 			return uptimeInfo{Duration: time.Duration(seconds) * time.Second, Known: true}
 		}
 	}
-	return currentPosixUptime(readFile, run, now)
+	return currentPosixUptime(s, now)
 }
 
-func currentPosixUptime(readFile fileReader, run commandRunner, now func() time.Time) uptimeInfo {
-	if uptime := uptimeFromProc(readFile); uptime > 0 {
+func currentPosixUptime(s *Session, now func() time.Time) uptimeInfo {
+	if uptime := uptimeFromProc(s.readFile); uptime > 0 {
 		return uptimeInfo{Duration: uptime, Known: true}
 	}
-	if uptime := uptimeFromKernelBoottime(run("sysctl", "-n", "kern.boottime"), now); uptime > 0 {
+	if uptime := uptimeFromKernelBoottime(s.commandOutput("sysctl", "-n", "kern.boottime"), now); uptime > 0 {
 		return uptimeInfo{Duration: uptime, Known: true}
 	}
-	if out := run("uptime"); out != "" {
+	if out := s.commandOutput("uptime"); out != "" {
 		seconds := parseUptimeCommandSeconds(out)
 		if seconds > 0 {
 			return uptimeInfo{Duration: time.Duration(seconds) * time.Second, Known: true}
@@ -81,11 +81,12 @@ func currentPosixUptime(readFile fileReader, run commandRunner, now func() time.
 	return uptimeInfo{}
 }
 
-func currentWindowsUptime(goos string, run commandRunner, log *slog.Logger) uptimeInfo {
-	if goos != "windows" {
+func currentWindowsUptime(s *Session) uptimeInfo {
+	if s.goos() != "windows" {
 		return uptimeInfo{}
 	}
-	values := parseWindowsWMIValues(windowsWMIOutput(run, "os", "LocalDateTime,LastBootUpTime"))
+	log := s.logr()
+	values := parseWindowsWMIValues(windowsWMIOutput(s.commandOutput, "os", "LocalDateTime,LastBootUpTime"))
 	if len(values) == 0 {
 		log.Debug("WMI query returned no resultsfor Win32_OperatingSystem with values LocalDateTime and LastBootUpTime.")
 		log.Debug("Unable to determine system uptime!")
@@ -299,25 +300,25 @@ func parseUptimeHoursMinutes(input string) (int, int, bool) {
 }
 
 func probeLoadAverages(s *Session) map[string]any {
-	return currentLoadAverages(s.goos(), s.readFile, s.commandOutput)
+	return currentLoadAverages(s)
 }
 
-func currentLoadAverages(goos string, readFile fileReader, run commandRunner) map[string]any {
-	switch goos {
+func currentLoadAverages(s *Session) map[string]any {
+	switch s.goos() {
 	case "darwin", "freebsd", "netbsd", "openbsd", "dragonfly":
-		out := run("sysctl", "-n", "vm.loadavg")
+		out := s.commandOutput("sysctl", "-n", "vm.loadavg")
 		if out == "" {
 			return emptyLoadAverages()
 		}
 		return parseLoadAverages(out)
 	case "illumos":
-		out := run("uptime")
+		out := s.commandOutput("uptime")
 		if out == "" {
 			return emptyLoadAverages()
 		}
 		return parseIllumosLoadAverages(out)
 	case "linux":
-		data, err := readFile("/proc/loadavg")
+		data, err := s.readFile("/proc/loadavg")
 		if err != nil {
 			return emptyLoadAverages()
 		}

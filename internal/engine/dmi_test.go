@@ -15,7 +15,7 @@ func TestCurrentWindowsDMIMatchesRubyResolvers(t *testing.T) {
 	host := &fakeHostOS{
 		platform: "windows",
 		runOutputs: map[string]string{
-			fakeRunKey("wmic", "bios", "get", "Manufacturer,SerialNumber", "/value"): "Manufacturer=VMware, Inc.\r\nSerialNumber=VMware-42 1a 38 c5 9d 35 5b f1-7a 62 4b 6e cb a0 79 de\r\n",
+			fakeRunKey("wmic", "bios", "get", "Manufacturer,SerialNumber", "/value"):  "Manufacturer=VMware, Inc.\r\nSerialNumber=VMware-42 1a 38 c5 9d 35 5b f1-7a 62 4b 6e cb a0 79 de\r\n",
 			fakeRunKey("wmic", "computersystemproduct", "get", "Name,UUID", "/value"): "Name=VMware7,1\r\nUUID=C5381A42-359D-F15B-7A62-4B6ECBA079DE\r\n",
 		},
 	}
@@ -422,7 +422,7 @@ func TestCurrentBSDDMIFactsQueryPlatformSources(t *testing.T) {
 			platform:        "dragonfly",
 			emptyRunDefault: true,
 			runOutputs: map[string]string{
-				fakeRunKey("kenv", "smbios.system.maker"):                 "DragonFly Maker\n",
+				fakeRunKey("kenv", "smbios.system.maker"):               "DragonFly Maker\n",
 				fakeRunKey("/usr/local/sbin/dmidecode", "-t", "system"): "Manufacturer: fallback\n",
 			},
 		}
@@ -697,19 +697,18 @@ func TestMacOSDMIFacts_skipsEmptyProductName(t *testing.T) {
 }
 
 func TestCurrentLinuxDistro_mapsAmazonAMISystemReleaseIDAndMissingCodename(t *testing.T) {
-	files := map[string]string{
-		"/etc/os-release":     "ID=amzn\nVERSION_ID=2017.03\n",
-		"/etc/system-release": "Amazon Linux AMI release 2017.03\n",
+	host := &fakeHostOS{
+		platform:        "linux",
+		emptyRunDefault: true,
+		files: map[string][]byte{
+			"/etc/os-release":     []byte("ID=amzn\nVERSION_ID=2017.03\n"),
+			"/etc/system-release": []byte("Amazon Linux AMI release 2017.03\n"),
+		},
 	}
-	readFile := func(path string) ([]byte, error) {
-		value, ok := files[path]
-		if !ok {
-			return nil, os.ErrNotExist
-		}
-		return []byte(value), nil
-	}
+	s := NewSessionContext(t.Context())
+	s.host = host
 
-	got := currentLinuxDistro("linux", func(string) (string, error) { return "", os.ErrNotExist }, func(string, ...string) string { return "" }, readFile)
+	got := currentLinuxDistro(s, func(string) (string, error) { return "", os.ErrNotExist })
 	want := linuxDistro{
 		ID:           "AmazonAMI",
 		Description:  "Amazon Linux AMI release 2017.03",

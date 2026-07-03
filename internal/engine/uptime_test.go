@@ -112,15 +112,12 @@ func TestCurrentUptimeInfoUsesPID1ElapsedTimeForKubernetes(t *testing.T) {
 		files: map[string][]byte{
 			"/proc/1/cgroup": []byte("0::/kubepods.slice/pod123\n"),
 		},
-	}
-	run := func(name string, args ...string) string {
-		if name == "ps" && reflect.DeepEqual(args, []string{"-o", "etime=", "-p", "1"}) {
-			return "01:02"
-		}
-		return ""
+		runOutputs: map[string]string{
+			fakeRunKey("ps", "-o", "etime=", "-p", "1"): "01:02",
+		},
 	}
 
-	got := currentUptimeInfo(s, "linux", s.readFile, run, time.Now)
+	got := currentUptimeInfo(s, time.Now)
 	want := uptimeInfo{Duration: 62 * time.Second, Known: true}
 	if got != want {
 		t.Fatalf("currentUptimeInfo(kubernetes) = %#v, want %#v", got, want)
@@ -186,115 +183,134 @@ func TestParseDockerElapsedTimeSecondsMatchesRubyResolver(t *testing.T) {
 func TestCurrentUptimeFallsBackToKernelBoottime(t *testing.T) {
 	t.Parallel()
 
-	readFile := func(path string) ([]byte, error) {
-		if path != "/proc/uptime" {
-			t.Fatalf("readFile path = %q, want /proc/uptime", path)
-		}
-		return nil, os.ErrNotExist
+	host := &fakeHostOS{
+		platform: "freebsd",
+		runOutputs: map[string]string{
+			fakeRunKey("sysctl", "-n", "kern.boottime"): "{ sec = 60, usec = 0 } Tue Oct 10 10:59:00 2019",
+		},
 	}
-	run := func(name string, args ...string) string {
-		if name != "sysctl" || !reflect.DeepEqual(args, []string{"-n", "kern.boottime"}) {
-			t.Fatalf("run = %s %v, want sysctl -n kern.boottime", name, args)
-		}
-		return "{ sec = 60, usec = 0 } Tue Oct 10 10:59:00 2019"
-	}
+	s := NewSession()
+	s.host = host
 	now := func() time.Time { return time.Unix(120, 0) }
 
-	got := currentUptime(testSession, "freebsd", readFile, run, now)
+	got := currentUptime(s, now)
 	if got != time.Minute {
-		t.Fatalf("currentUptime(testSession) = %s, want 1m0s", got)
+		t.Fatalf("currentUptime() = %s, want 1m0s", got)
+	}
+	if want := []string{"/proc/uptime"}; !reflect.DeepEqual(host.readFileCalls, want) {
+		t.Fatalf("readFile calls = %#v, want %#v", host.readFileCalls, want)
+	}
+	if want := []fakeHostRunCall{{name: "sysctl", args: []string{"-n", "kern.boottime"}}}; !reflect.DeepEqual(host.runCalls, want) {
+		t.Fatalf("run calls = %#v, want %#v", host.runCalls, want)
 	}
 }
 
 func TestCurrentLinuxUptimeUsesDockerPIDOneElapsedTime(t *testing.T) {
 	t.Parallel()
 
-	got := currentLinuxUptimeInfo(func(path string) ([]byte, error) {
-		t.Fatalf("currentLinuxUptimeInfo() read %q, want Docker ps only", path)
-		return nil, os.ErrNotExist
-	}, func(name string, args ...string) string {
-		if name != "ps" || !reflect.DeepEqual(args, []string{"-o", "etime=", "-p", "1"}) {
-			t.Fatalf("run = %s %v, want ps -o etime= -p 1", name, args)
-		}
-		return "1-3:10:20"
-	}, time.Now, true)
+	host := &fakeHostOS{
+		runOutputs: map[string]string{
+			fakeRunKey("ps", "-o", "etime=", "-p", "1"): "1-3:10:20",
+		},
+	}
+	s := NewSession()
+	s.host = host
 
+	got := currentLinuxUptimeInfo(s, time.Now, true)
 	if !got.Known || got.Duration != 97_820*time.Second {
 		t.Fatalf("currentLinuxUptimeInfo() = %#v, want known 97820s", got)
+	}
+	if len(host.readFileCalls) != 0 {
+		t.Fatalf("currentLinuxUptimeInfo() read %#v, want Docker ps only", host.readFileCalls)
+	}
+	if want := []fakeHostRunCall{{name: "ps", args: []string{"-o", "etime=", "-p", "1"}}}; !reflect.DeepEqual(host.runCalls, want) {
+		t.Fatalf("run calls = %#v, want %#v", host.runCalls, want)
 	}
 }
 
 func TestCurrentLinuxUptimeFallsBackWhenDockerElapsedTimeInvalid(t *testing.T) {
 	t.Parallel()
 
-	got := currentLinuxUptimeInfo(func(path string) ([]byte, error) {
-		if path != "/proc/uptime" {
-			t.Fatalf("readFile path = %q, want /proc/uptime", path)
-		}
-		return []byte("60.00 10.00"), nil
-	}, func(name string, args ...string) string {
-		if name != "ps" {
-			t.Fatalf("run = %s %v, want ps for Docker fallback", name, args)
-		}
-		return "invalid"
-	}, time.Now, true)
+	host := &fakeHostOS{
+		files: map[string][]byte{
+			"/proc/uptime": []byte("60.00 10.00"),
+		},
+		runOutputs: map[string]string{
+			fakeRunKey("ps", "-o", "etime=", "-p", "1"): "invalid",
+		},
+	}
+	s := NewSession()
+	s.host = host
 
+	got := currentLinuxUptimeInfo(s, time.Now, true)
 	if !got.Known || got.Duration != time.Minute {
 		t.Fatalf("currentLinuxUptimeInfo() = %#v, want known 1m", got)
+	}
+	if want := []string{"/proc/uptime"}; !reflect.DeepEqual(host.readFileCalls, want) {
+		t.Fatalf("readFile calls = %#v, want %#v", host.readFileCalls, want)
+	}
+	if want := []fakeHostRunCall{{name: "ps", args: []string{"-o", "etime=", "-p", "1"}}}; !reflect.DeepEqual(host.runCalls, want) {
+		t.Fatalf("run calls = %#v, want %#v", host.runCalls, want)
 	}
 }
 
 func TestCurrentUptimeInfoMarksMissingSourcesUnknown(t *testing.T) {
 	t.Parallel()
 
-	readFile := func(path string) ([]byte, error) {
-		if path != "/proc/uptime" {
-			t.Fatalf("readFile path = %q, want /proc/uptime", path)
-		}
-		return nil, os.ErrNotExist
+	host := &fakeHostOS{
+		platform:        "freebsd",
+		emptyRunDefault: true,
+		runOutputs: map[string]string{
+			fakeRunKey("uptime"): "running for a while",
+		},
 	}
-	run := func(name string, args ...string) string {
-		switch name {
-		case "sysctl":
-			return ""
-		case "uptime":
-			return "running for a while"
-		default:
-			t.Fatalf("unexpected command %q %v", name, args)
-			return ""
-		}
-	}
+	s := NewSession()
+	s.host = host
 
-	got := currentUptimeInfo(testSession, "freebsd", readFile, run, time.Now)
+	got := currentUptimeInfo(s, time.Now)
 	if got.Known || got.Duration != 0 {
-		t.Fatalf("currentUptimeInfo(testSession) = %#v, want unknown zero duration", got)
+		t.Fatalf("currentUptimeInfo() = %#v, want unknown zero duration", got)
+	}
+	if want := []string{"/proc/uptime"}; !reflect.DeepEqual(host.readFileCalls, want) {
+		t.Fatalf("readFile calls = %#v, want %#v", host.readFileCalls, want)
+	}
+	wantRun := []fakeHostRunCall{
+		{name: "sysctl", args: []string{"-n", "kern.boottime"}},
+		{name: "uptime"},
+	}
+	if !reflect.DeepEqual(host.runCalls, wantRun) {
+		t.Fatalf("run calls = %#v, want %#v", host.runCalls, wantRun)
 	}
 }
 
 func TestCurrentUptimeInfoBSDsFallBackToUptimeCommand(t *testing.T) {
 	t.Parallel()
 
-	readFile := func(string) ([]byte, error) {
-		return nil, os.ErrNotExist
-	}
 	for _, goos := range []string{"openbsd", "netbsd"} {
 		t.Run(goos, func(t *testing.T) {
 			t.Parallel()
 
-			got := currentUptimeInfo(testSession, goos, readFile, func(name string, args ...string) string {
-				switch name {
-				case "sysctl":
-					return ""
-				case "uptime":
-					return "10:00AM up 1 day, 2:03, 1 user, load averages: 0.01, 0.02, 0.03"
-				default:
-					t.Fatalf("run = %s %#v, want sysctl or uptime", name, args)
-					return ""
-				}
-			}, time.Now)
+			host := &fakeHostOS{
+				platform:        goos,
+				emptyRunDefault: true,
+				runOutputs: map[string]string{
+					fakeRunKey("uptime"): "10:00AM up 1 day, 2:03, 1 user, load averages: 0.01, 0.02, 0.03",
+				},
+			}
+			s := NewSession()
+			s.host = host
+
+			got := currentUptimeInfo(s, time.Now)
 			want := uptimeInfo{Duration: 26*time.Hour + 3*time.Minute, Known: true}
 			if got != want {
 				t.Fatalf("currentUptimeInfo(%s) = %#v, want %#v", goos, got, want)
+			}
+			wantRun := []fakeHostRunCall{
+				{name: "sysctl", args: []string{"-n", "kern.boottime"}},
+				{name: "uptime"},
+			}
+			if !reflect.DeepEqual(host.runCalls, wantRun) {
+				t.Fatalf("run calls = %#v, want %#v", host.runCalls, wantRun)
 			}
 		})
 	}
@@ -303,81 +319,98 @@ func TestCurrentUptimeInfoBSDsFallBackToUptimeCommand(t *testing.T) {
 func TestCurrentUptimeUsesWindowsWMITimes(t *testing.T) {
 	t.Parallel()
 
-	got := currentUptime(testSession, "windows", func(path string) ([]byte, error) {
-		t.Fatalf("currentUptime(testSession, windows) read %q, want WMI only", path)
-		return nil, os.ErrNotExist
-	}, func(name string, args ...string) string {
-		if name != "wmic" {
-			t.Fatalf("command = %q %v, want wmic", name, args)
-		}
-		wantArgs := []string{"os", "get", "LocalDateTime,LastBootUpTime", "/value"}
-		if !reflect.DeepEqual(args, wantArgs) {
-			t.Fatalf("wmic args = %#v, want %#v", args, wantArgs)
-		}
-		return "LocalDateTime=20010203045006+0700\r\nLastBootUpTime=20010203030506+0700\r\n"
-	}, time.Now)
+	host := &fakeHostOS{
+		platform: "windows",
+		runOutputs: map[string]string{
+			fakeRunKey("wmic", "os", "get", "LocalDateTime,LastBootUpTime", "/value"): "LocalDateTime=20010203045006+0700\r\nLastBootUpTime=20010203030506+0700\r\n",
+		},
+	}
+	s := NewSession()
+	s.host = host
 
+	got := currentUptime(s, time.Now)
 	if got != 105*time.Minute {
-		t.Fatalf("currentUptime(testSession, windows) = %s, want 1h45m0s", got)
+		t.Fatalf("currentUptime(windows) = %s, want 1h45m0s", got)
+	}
+	if len(host.readFileCalls) != 0 {
+		t.Fatalf("currentUptime(windows) read %#v, want WMI only", host.readFileCalls)
+	}
+	if want := []fakeHostRunCall{{name: "wmic", args: []string{"os", "get", "LocalDateTime,LastBootUpTime", "/value"}}}; !reflect.DeepEqual(host.runCalls, want) {
+		t.Fatalf("run calls = %#v, want %#v", host.runCalls, want)
 	}
 }
 
 func TestCurrentWindowsUptimeSkipsNonWindows(t *testing.T) {
 	t.Parallel()
 
-	got := currentWindowsUptime("linux", func(string, ...string) string {
-		t.Fatal("currentWindowsUptime(non-windows) ran command")
-		return ""
-	}, discardLog())
+	host := &fakeHostOS{platform: "linux"}
+	s := NewSession()
+	s.host = host
+
+	got := currentWindowsUptime(s)
 	if got != (uptimeInfo{}) {
 		t.Fatalf("currentWindowsUptime(non-windows) = %#v, want empty", got)
+	}
+	if len(host.runCalls) != 0 {
+		t.Fatal("currentWindowsUptime(non-windows) ran command")
 	}
 }
 
 func TestCurrentUptimeReturnsZeroForInvalidWindowsWMITimes(t *testing.T) {
 	t.Parallel()
 
-	got := currentUptime(testSession, "windows", func(string) ([]byte, error) {
-		t.Fatal("currentUptime(testSession, windows) read file, want WMI only")
-		return nil, os.ErrNotExist
-	}, func(string, ...string) string {
-		return "LocalDateTime=20010201110506+0700\r\nLastBootUpTime=20010201120506+0700\r\n"
-	}, time.Now)
+	host := &fakeHostOS{
+		platform: "windows",
+		runOutputs: map[string]string{
+			fakeRunKey("wmic", "os", "get", "LocalDateTime,LastBootUpTime", "/value"): "LocalDateTime=20010201110506+0700\r\nLastBootUpTime=20010201120506+0700\r\n",
+		},
+	}
+	s := NewSession()
+	s.host = host
 
+	got := currentUptime(s, time.Now)
 	if got != 0 {
-		t.Fatalf("currentUptime(testSession, windows invalid times) = %s, want 0", got)
+		t.Fatalf("currentUptime(windows invalid times) = %s, want 0", got)
+	}
+	if len(host.readFileCalls) != 0 {
+		t.Fatalf("currentUptime(windows) read %#v, want WMI only", host.readFileCalls)
 	}
 }
 
 func TestCurrentWindowsUptimeInfoMarksInvalidWMITimesUnknown(t *testing.T) {
 	t.Parallel()
 
-	got := currentUptimeInfo(testSession, "windows", func(string) ([]byte, error) {
-		t.Fatal("currentUptimeInfo(testSession, windows) read file, want WMI only")
-		return nil, os.ErrNotExist
-	}, func(string, ...string) string {
-		return "LocalDateTime=20010201110506+0700\r\nLastBootUpTime=20010201120506+0700\r\n"
-	}, time.Now)
+	host := &fakeHostOS{
+		platform: "windows",
+		runOutputs: map[string]string{
+			fakeRunKey("wmic", "os", "get", "LocalDateTime,LastBootUpTime", "/value"): "LocalDateTime=20010201110506+0700\r\nLastBootUpTime=20010201120506+0700\r\n",
+		},
+	}
+	s := NewSession()
+	s.host = host
 
+	got := currentUptimeInfo(s, time.Now)
 	if got.Known || got.Duration != 0 {
-		t.Fatalf("currentUptimeInfo(testSession, windows invalid times) = %#v, want unknown zero duration", got)
+		t.Fatalf("currentUptimeInfo(windows invalid times) = %#v, want unknown zero duration", got)
+	}
+	if len(host.readFileCalls) != 0 {
+		t.Fatalf("currentUptimeInfo(windows) read %#v, want WMI only", host.readFileCalls)
 	}
 }
 
 func TestCurrentWindowsUptimeInfoLogsNoResultDiagnosticsLikeRubyResolver(t *testing.T) {
 	debugMessages := []string{}
+	host := &fakeHostOS{platform: "windows", emptyRunDefault: true}
 	s := NewSession()
+	s.host = host
 	s.logger = captureLogger(&debugMessages, nil, nil)
 
-	got := currentUptimeInfo(s, "windows", func(string) ([]byte, error) {
-		t.Fatal("currentUptimeInfo(testSession, windows) read file, want WMI only")
-		return nil, os.ErrNotExist
-	}, func(string, ...string) string {
-		return ""
-	}, time.Now)
-
+	got := currentUptimeInfo(s, time.Now)
 	if got.Known || got.Duration != 0 {
-		t.Fatalf("currentUptimeInfo(testSession, windows empty WMI) = %#v, want unknown zero duration", got)
+		t.Fatalf("currentUptimeInfo(windows empty WMI) = %#v, want unknown zero duration", got)
+	}
+	if len(host.readFileCalls) != 0 {
+		t.Fatalf("currentUptimeInfo(windows) read %#v, want WMI only", host.readFileCalls)
 	}
 	want := []string{
 		"WMI query returned no resultsfor Win32_OperatingSystem with values LocalDateTime and LastBootUpTime.",
@@ -401,11 +434,15 @@ func TestCurrentWindowsUptimeInfoLogsUnparseableWMITimes(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var debugMessages []string
 			s := NewSession()
+			s.host = &fakeHostOS{
+				platform: "windows",
+				runOutputs: map[string]string{
+					fakeRunKey("wmic", "os", "get", "LocalDateTime,LastBootUpTime", "/value"): tt.output,
+				},
+			}
 			s.logger = captureLogger(&debugMessages, nil, nil)
 
-			got := currentWindowsUptime("windows", func(string, ...string) string {
-				return tt.output
-			}, s.logr())
+			got := currentWindowsUptime(s)
 			if got.Known || got.Duration != 0 {
 				t.Fatalf("currentWindowsUptime() = %#v, want unknown zero duration", got)
 			}
@@ -419,18 +456,22 @@ func TestCurrentWindowsUptimeInfoLogsUnparseableWMITimes(t *testing.T) {
 
 func TestCurrentWindowsUptimeInfoLogsInvalidDurationLikeRubyResolver(t *testing.T) {
 	debugMessages := []string{}
+	host := &fakeHostOS{
+		platform: "windows",
+		runOutputs: map[string]string{
+			fakeRunKey("wmic", "os", "get", "LocalDateTime,LastBootUpTime", "/value"): "LocalDateTime=20010201110506+0700\r\nLastBootUpTime=20010201120506+0700\r\n",
+		},
+	}
 	s := NewSession()
+	s.host = host
 	s.logger = captureLogger(&debugMessages, nil, nil)
 
-	got := currentUptimeInfo(s, "windows", func(string) ([]byte, error) {
-		t.Fatal("currentUptimeInfo(testSession, windows) read file, want WMI only")
-		return nil, os.ErrNotExist
-	}, func(string, ...string) string {
-		return "LocalDateTime=20010201110506+0700\r\nLastBootUpTime=20010201120506+0700\r\n"
-	}, time.Now)
-
+	got := currentUptimeInfo(s, time.Now)
 	if got.Known || got.Duration != 0 {
-		t.Fatalf("currentUptimeInfo(testSession, windows invalid times) = %#v, want unknown zero duration", got)
+		t.Fatalf("currentUptimeInfo(windows invalid times) = %#v, want unknown zero duration", got)
+	}
+	if len(host.readFileCalls) != 0 {
+		t.Fatalf("currentUptimeInfo(windows) read %#v, want WMI only", host.readFileCalls)
 	}
 	want := []string{"Unable to determine system uptime!"}
 	if !reflect.DeepEqual(debugMessages, want) {
@@ -525,60 +566,82 @@ func TestParseMacOSLoadAverages(t *testing.T) {
 func TestCurrentLoadAverages_wiresBSDVMLoadavg(t *testing.T) {
 	for _, goos := range []string{"freebsd", "openbsd", "netbsd", "dragonfly"} {
 		t.Run(goos, func(t *testing.T) {
-			got := currentLoadAverages(goos, nil, func(path string, args ...string) string {
-				if path != "sysctl" || !reflect.DeepEqual(args, []string{"-n", "vm.loadavg"}) {
-					t.Fatalf("run(%q, %#v), want sysctl -n vm.loadavg", path, args)
-				}
-				return "{ 0.01 0.02 0.03 }"
-			})
-			want := map[string]any{"1m": 0.01, "5m": 0.02, "15m": 0.03}
+			host := &fakeHostOS{
+				platform: goos,
+				runOutputs: map[string]string{
+					fakeRunKey("sysctl", "-n", "vm.loadavg"): "{ 0.01 0.02 0.03 }",
+				},
+			}
+			s := NewSession()
+			s.host = host
 
+			got := currentLoadAverages(s)
+			want := map[string]any{"1m": 0.01, "5m": 0.02, "15m": 0.03}
 			if !reflect.DeepEqual(got, want) {
 				t.Fatalf("currentLoadAverages() = %#v, want %#v", got, want)
+			}
+			if want := []fakeHostRunCall{{name: "sysctl", args: []string{"-n", "vm.loadavg"}}}; !reflect.DeepEqual(host.runCalls, want) {
+				t.Fatalf("run calls = %#v, want %#v", host.runCalls, want)
 			}
 		})
 	}
 }
 
 func TestCurrentLoadAverages_wiresIllumosUptime(t *testing.T) {
-	got := currentLoadAverages("illumos", nil, func(path string, args ...string) string {
-		if path != "uptime" || len(args) != 0 {
-			t.Fatalf("run(%q, %#v), want uptime", path, args)
-		}
-		return "22:09:38    up  3:04,  0 users,  load average: 0.00, 0.01, 0.02"
-	})
-	want := map[string]any{"1m": 0.00, "5m": 0.01, "15m": 0.02}
+	host := &fakeHostOS{
+		platform: "illumos",
+		runOutputs: map[string]string{
+			fakeRunKey("uptime"): "22:09:38    up  3:04,  0 users,  load average: 0.00, 0.01, 0.02",
+		},
+	}
+	s := NewSession()
+	s.host = host
 
+	got := currentLoadAverages(s)
+	want := map[string]any{"1m": 0.00, "5m": 0.01, "15m": 0.02}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("currentLoadAverages(illumos) = %#v, want %#v", got, want)
+	}
+	if want := []fakeHostRunCall{{name: "uptime"}}; !reflect.DeepEqual(host.runCalls, want) {
+		t.Fatalf("run calls = %#v, want %#v", host.runCalls, want)
 	}
 }
 
 func TestCurrentLoadAverages_wiresDarwinVMLoadavg(t *testing.T) {
-	got := currentLoadAverages("darwin", nil, func(path string, args ...string) string {
-		if path != "sysctl" || !reflect.DeepEqual(args, []string{"-n", "vm.loadavg"}) {
-			t.Fatalf("run(%q, %#v), want sysctl -n vm.loadavg", path, args)
-		}
-		return "{ 0.00 0.03 0.03 }"
-	})
-	want := map[string]any{"1m": 0.00, "5m": 0.03, "15m": 0.03}
+	host := &fakeHostOS{
+		platform: "darwin",
+		runOutputs: map[string]string{
+			fakeRunKey("sysctl", "-n", "vm.loadavg"): "{ 0.00 0.03 0.03 }",
+		},
+	}
+	s := NewSession()
+	s.host = host
 
+	got := currentLoadAverages(s)
+	want := map[string]any{"1m": 0.00, "5m": 0.03, "15m": 0.03}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("currentLoadAverages() = %#v, want %#v", got, want)
+	}
+	if want := []fakeHostRunCall{{name: "sysctl", args: []string{"-n", "vm.loadavg"}}}; !reflect.DeepEqual(host.runCalls, want) {
+		t.Fatalf("run calls = %#v, want %#v", host.runCalls, want)
 	}
 }
 
 func TestCurrentLoadAverages_linuxUnreadableProcLoadavgMatchesRubyResolver(t *testing.T) {
-	got := currentLoadAverages("linux", func(path string) ([]byte, error) {
-		if path != "/proc/loadavg" {
-			t.Fatalf("readFile(%q), want /proc/loadavg", path)
-		}
-		return nil, os.ErrPermission
-	}, nil)
-	want := map[string]any{"1m": nil, "5m": nil, "15m": nil}
+	host := &fakeHostOS{
+		platform: "linux",
+		fileErrs: map[string]error{"/proc/loadavg": os.ErrPermission},
+	}
+	s := NewSession()
+	s.host = host
 
+	got := currentLoadAverages(s)
+	want := map[string]any{"1m": nil, "5m": nil, "15m": nil}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("currentLoadAverages() = %#v, want %#v", got, want)
+	}
+	if want := []string{"/proc/loadavg"}; !reflect.DeepEqual(host.readFileCalls, want) {
+		t.Fatalf("readFile calls = %#v, want %#v", host.readFileCalls, want)
 	}
 }
 
@@ -620,14 +683,20 @@ func TestUptimeCommandParsersRejectMalformedDurations(t *testing.T) {
 func TestLoadAverageParsersUseEmptyFallbacks(t *testing.T) {
 	t.Parallel()
 
+	sessionFor := func(platform string) *Session {
+		s := NewSession()
+		s.host = &fakeHostOS{platform: platform, emptyRunDefault: true}
+		return s
+	}
+
 	want := emptyLoadAverages()
 	cases := []struct {
 		name string
 		got  map[string]any
 	}{
-		{name: "bsd empty sysctl", got: currentLoadAverages("freebsd", nil, func(string, ...string) string { return "" })},
-		{name: "illumos empty uptime", got: currentLoadAverages("illumos", nil, func(string, ...string) string { return "" })},
-		{name: "unknown goos", got: currentLoadAverages("aix", nil, nil)},
+		{name: "bsd empty sysctl", got: currentLoadAverages(sessionFor("freebsd"))},
+		{name: "illumos empty uptime", got: currentLoadAverages(sessionFor("illumos"))},
+		{name: "unknown goos", got: currentLoadAverages(sessionFor("aix"))},
 		{name: "bad float", got: parseLoadAverages("0.01 bad 0.03")},
 		{name: "illumos no marker", got: parseIllumosLoadAverages("22:09:38 up 3:04")},
 	}
@@ -640,7 +709,7 @@ func TestLoadAverageParsersUseEmptyFallbacks(t *testing.T) {
 		})
 	}
 
-	if got := currentLoadAverages("plan9", nil, nil); got != nil {
+	if got := currentLoadAverages(sessionFor("plan9")); got != nil {
 		t.Fatalf("currentLoadAverages(plan9) = %#v, want nil", got)
 	}
 }

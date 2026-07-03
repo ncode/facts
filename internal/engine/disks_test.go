@@ -1507,52 +1507,60 @@ func TestParseLinuxFilesystems_sortsAndSkipsPseudoEntries(t *testing.T) {
 }
 
 func TestCurrentLinuxFilesystemsUnreadableProcMatchesRubyResolver(t *testing.T) {
-	readFile := func(path string) ([]byte, error) {
-		if path != "/proc/filesystems" {
-			t.Fatalf("path = %q, want /proc/filesystems", path)
-		}
-		return nil, os.ErrPermission
+	host := &fakeHostOS{
+		platform: "linux",
+		fileErrs: map[string]error{"/proc/filesystems": os.ErrPermission},
 	}
+	s := NewSessionContext(t.Context())
+	s.host = host
 
-	if got := currentFilesystems("linux", readFile, nil); got != nil {
+	if got := probeFilesystems(s); got != nil {
 		t.Fatalf("currentFilesystems(linux) = %#v, want nil", got)
+	}
+	if !reflect.DeepEqual(host.readFileCalls, []string{"/proc/filesystems"}) {
+		t.Fatalf("read file calls = %#v, want [/proc/filesystems]", host.readFileCalls)
 	}
 }
 
 func TestCurrentDarwinFilesystemsReadsMountOutput(t *testing.T) {
 	t.Parallel()
 
-	got := currentFilesystems("darwin", nil, func(name string, args ...string) string {
-		if name != "mount" || len(args) != 0 {
-			t.Fatalf("run(%q, %#v), want mount", name, args)
-		}
-		return "/dev/disk3s1s1 on / (apfs, local)\nmap auto_home on /System/Volumes/Data/home (autofs, automounted)\n"
-	})
+	host := &fakeHostOS{
+		platform: "darwin",
+		runOutputs: map[string]string{
+			fakeRunKey("mount"): "/dev/disk3s1s1 on / (apfs, local)\nmap auto_home on /System/Volumes/Data/home (autofs, automounted)\n",
+		},
+	}
+	s := NewSessionContext(t.Context())
+	s.host = host
+
+	got := probeFilesystems(s)
 	want := []string{"apfs", "autofs"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("currentFilesystems(darwin) = %#v, want %#v", got, want)
 	}
-	if got := currentFilesystems("darwin", nil, nil); got != nil {
-		t.Fatalf("currentFilesystems(darwin nil runner) = %#v, want nil", got)
+	wantCalls := []fakeHostRunCall{{name: "mount", args: nil}}
+	if !reflect.DeepEqual(host.runCalls, wantCalls) {
+		t.Fatalf("run calls = %#v, want %#v", host.runCalls, wantCalls)
 	}
 }
 
 func TestCurrentFilesystemsHonorsTargetCapabilityPolicy(t *testing.T) {
-	called := false
-	readFile := func(path string) ([]byte, error) {
-		called = true
-		return []byte("ext4\n"), nil
+	host := &fakeHostOS{
+		platform: "freebsd",
+		files:    map[string][]byte{"/proc/filesystems": []byte("ext4\n")},
+		runOutputs: map[string]string{
+			fakeRunKey("mount"): "/dev/disk on / (apfs, local)\n",
+		},
 	}
-	run := func(name string, args ...string) string {
-		called = true
-		return "/dev/disk on / (apfs, local)\n"
-	}
+	s := NewSessionContext(t.Context())
+	s.host = host
 
-	if got := currentFilesystems("freebsd", readFile, run); got != nil {
+	if got := probeFilesystems(s); got != nil {
 		t.Fatalf("currentFilesystems(freebsd) = %#v, want nil", got)
 	}
-	if called {
-		t.Fatal("currentFilesystems(freebsd) touched probes despite target policy")
+	if len(host.readFileCalls) != 0 || len(host.runCalls) != 0 {
+		t.Fatalf("currentFilesystems(freebsd) touched probes despite target policy: reads=%#v runs=%#v", host.readFileCalls, host.runCalls)
 	}
 }
 

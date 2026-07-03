@@ -138,33 +138,40 @@ func TestWindowsReleaseFinderMatchesRuby(t *testing.T) {
 func TestCurrentOSReleaseWindowsUsesKernelAndDescriptionData(t *testing.T) {
 	t.Parallel()
 
-	run := func(name string, args ...string) string {
-		if name != "wmic" {
-			t.Fatalf("command = %q %v, want wmic", name, args)
-		}
-		return "OtherTypeDescription=\r\nProductType=1\r\nVersion=10.0.22631\r\n"
+	host := &fakeHostOS{
+		platform: "windows",
+		runOutputs: map[string]string{
+			fakeRunKey("wmic", "os", "get", "OtherTypeDescription,ProductType,Version", "/value"): "OtherTypeDescription=\r\nProductType=1\r\nVersion=10.0.22631\r\n",
+		},
 	}
+	s := NewSessionContext(t.Context())
+	s.host = host
 
-	got := currentOSRelease(testSession, "windows", nil, run)
+	got := currentOSRelease(s)
 	want := map[string]any{"full": "11", "major": "11"}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("currentOSRelease(testSession, windows) = %#v, want %#v", got, want)
+		t.Fatalf("currentOSRelease(windows) = %#v, want %#v", got, want)
+	}
+	wantCalls := []fakeHostRunCall{{name: "wmic", args: []string{"os", "get", "OtherTypeDescription,ProductType,Version", "/value"}}}
+	if !reflect.DeepEqual(host.runCalls, wantCalls) {
+		t.Fatalf("run calls = %#v, want %#v", host.runCalls, wantCalls)
 	}
 }
 
 func TestCurrentOSReleaseSkipsUnsupportedAndPlan9Platforms(t *testing.T) {
-	readFile := func(string) ([]byte, error) {
-		t.Fatal("currentOSRelease read file for unsupported platform")
-		return nil, os.ErrNotExist
-	}
-	run := func(string, ...string) string {
-		t.Fatal("currentOSRelease ran command for unsupported platform")
-		return ""
-	}
-
 	for _, goos := range []string{"hurd", "plan9"} {
-		if got := currentOSRelease(testSession, goos, readFile, run); got != nil {
+		host := &fakeHostOS{platform: goos}
+		s := NewSessionContext(t.Context())
+		s.host = host
+
+		if got := currentOSRelease(s); got != nil {
 			t.Fatalf("currentOSRelease(%s) = %#v, want nil", goos, got)
+		}
+		if len(host.readFileCalls) != 0 {
+			t.Fatalf("currentOSRelease(%s) read files %#v, want none for unsupported platform", goos, host.readFileCalls)
+		}
+		if len(host.runCalls) != 0 {
+			t.Fatalf("currentOSRelease(%s) ran commands %#v, want none for unsupported platform", goos, host.runCalls)
 		}
 	}
 }
@@ -173,37 +180,36 @@ func TestCurrentOSReleaseFallsBackToKernelRelease(t *testing.T) {
 	tests := []struct {
 		name     string
 		platform string
-		readFile fileReader
-		run      commandRunner
 		want     string
 	}{
 		{
 			name:     "linux missing os release",
 			platform: "linux",
-			readFile: func(string) ([]byte, error) { return nil, os.ErrNotExist },
-			run:      func(string, ...string) string { return "" },
 			want:     "6.1.0-test",
 		},
 		{
 			name:     "freebsd missing userland release",
 			platform: "freebsd",
-			readFile: func(string) ([]byte, error) { return nil, os.ErrNotExist },
-			run:      func(string, ...string) string { return "" },
 			want:     "14.0-RELEASE",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// No files fixture: /etc/os-release is absent (linux) and
+			// freebsd-version returns "" via emptyRunDefault, so both
+			// platforms fall through to the memoized kernel release
+			// (uname -r).
 			s := NewSessionContext(t.Context())
 			s.host = &fakeHostOS{
-				platform: tt.platform,
+				platform:        tt.platform,
+				emptyRunDefault: true,
 				runOutputs: map[string]string{
 					fakeRunKey("uname", "-r"): tt.want + "\n",
 				},
 			}
 
-			if got := currentOSRelease(s, tt.platform, tt.readFile, tt.run); got != tt.want {
+			if got := currentOSRelease(s); got != tt.want {
 				t.Fatalf("currentOSRelease(%s) = %#v, want %q", tt.platform, got, tt.want)
 			}
 		})
@@ -213,20 +219,17 @@ func TestCurrentOSReleaseFallsBackToKernelRelease(t *testing.T) {
 func TestCurrentOSReleaseFreeBSDUsesInstalledUserlandVersion(t *testing.T) {
 	t.Parallel()
 
-	run := func(name string, args ...string) string {
-		if name != "/bin/freebsd-version" {
-			t.Fatalf("run(%q, %#v), want freebsd-version", name, args)
-		}
-		if !reflect.DeepEqual(args, []string{"-k"}) && !reflect.DeepEqual(args, []string{"-ru"}) {
-			t.Fatalf("run(%q, %#v), want -k or -ru", name, args)
-		}
-		if args[0] == "-k" {
-			return "13.0-CURRENT\n"
-		}
-		return "12.1-RELEASE-p3\n12.0-STABLE\n"
+	host := &fakeHostOS{
+		platform: "freebsd",
+		runOutputs: map[string]string{
+			fakeRunKey("/bin/freebsd-version", "-k"):  "13.0-CURRENT\n",
+			fakeRunKey("/bin/freebsd-version", "-ru"): "12.1-RELEASE-p3\n12.0-STABLE\n",
+		},
 	}
+	s := NewSessionContext(t.Context())
+	s.host = host
 
-	got := currentOSRelease(testSession, "freebsd", nil, run)
+	got := currentOSRelease(s)
 	want := map[string]any{
 		"full":   "12.0-STABLE",
 		"major":  "12",
@@ -236,18 +239,25 @@ func TestCurrentOSReleaseFreeBSDUsesInstalledUserlandVersion(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("currentOSRelease(freebsd) = %#v, want %#v", got, want)
 	}
+	wantCalls := []fakeHostRunCall{
+		{name: "/bin/freebsd-version", args: []string{"-k"}},
+		{name: "/bin/freebsd-version", args: []string{"-ru"}},
+	}
+	if !reflect.DeepEqual(host.runCalls, wantCalls) {
+		t.Fatalf("run calls = %#v, want %#v", host.runCalls, wantCalls)
+	}
 }
 
 func TestCurrentOSReleaseWindowsReturnsNilWithoutVersion(t *testing.T) {
-	calls := 0
-	got := currentOSRelease(testSession, "windows", nil, func(name string, args ...string) string {
-		calls++
-		return ""
-	})
+	host := &fakeHostOS{platform: "windows", emptyRunDefault: true}
+	s := NewSessionContext(t.Context())
+	s.host = host
+
+	got := currentOSRelease(s)
 	if got != nil {
 		t.Fatalf("currentOSRelease(windows empty version) = %#v, want nil", got)
 	}
-	if calls == 0 {
+	if len(host.runCalls) == 0 {
 		t.Fatal("currentOSRelease(windows empty version) did not query version data")
 	}
 }
@@ -327,19 +337,21 @@ func TestMacOSProbesUseSessionPlatform(t *testing.T) {
 }
 
 func TestMacOSCurrentHelpersSkipNonDarwin(t *testing.T) {
-	run := func(string, ...string) string {
-		t.Fatal("macOS helper ran command outside Darwin")
-		return ""
-	}
+	host := &fakeHostOS{platform: "linux"}
+	s := NewSessionContext(t.Context())
+	s.host = host
 
-	if got := currentMacOSModel("linux", run); got != "" {
-		t.Fatalf("currentMacOSModel(linux) = %q, want empty", got)
+	if got := probeMacOSModel(s); got != "" {
+		t.Fatalf("probeMacOSModel(linux) = %q, want empty", got)
 	}
-	if got := currentMacOSInfo("linux", run); got != (macOSInfo{}) {
-		t.Fatalf("currentMacOSInfo(linux) = %#v, want empty", got)
+	if got := probeMacOSInfo(s); got != (macOSInfo{}) {
+		t.Fatalf("probeMacOSInfo(linux) = %#v, want empty", got)
 	}
-	if got := currentMacOSSystemProfilerEthernet("linux", run); got != (macOSSystemProfilerEthernet{}) {
-		t.Fatalf("currentMacOSSystemProfilerEthernet(linux) = %#v, want empty", got)
+	if got := probeMacOSSystemProfilerEthernet(s); got != (macOSSystemProfilerEthernet{}) {
+		t.Fatalf("probeMacOSSystemProfilerEthernet(linux) = %#v, want empty", got)
+	}
+	if len(host.runCalls) != 0 {
+		t.Fatalf("macOS helpers ran commands %#v, want none outside Darwin", host.runCalls)
 	}
 }
 
@@ -713,16 +725,21 @@ func TestWindowsOSNameFamilyHardwareAndArchitectureMatchRubyFacts(t *testing.T) 
 }
 
 func TestCurrentOSReleaseOpenBSDUsesKernelReleaseMap(t *testing.T) {
-	got := currentOSRelease(testSession, "openbsd", nil, func(name string, args ...string) string {
-		if name != "uname" || !reflect.DeepEqual(args, []string{"-r"}) {
-			t.Fatalf("command = %s %#v, want uname -r", name, args)
-		}
-		return "7.2\n"
-	})
+	host := &fakeHostOS{
+		platform:   "openbsd",
+		runOutputs: map[string]string{fakeRunKey("uname", "-r"): "7.2\n"},
+	}
+	s := NewSessionContext(t.Context())
+	s.host = host
 
+	got := currentOSRelease(s)
 	want := map[string]any{"full": "7.2", "major": "7", "minor": "2"}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("currentOSRelease(testSession, openbsd) = %#v, want %#v", got, want)
+		t.Fatalf("currentOSRelease(openbsd) = %#v, want %#v", got, want)
+	}
+	wantCalls := []fakeHostRunCall{{name: "uname", args: []string{"-r"}}}
+	if !reflect.DeepEqual(host.runCalls, wantCalls) {
+		t.Fatalf("run calls = %#v, want %#v", host.runCalls, wantCalls)
 	}
 }
 
@@ -776,69 +793,91 @@ func TestWindows6ReleaseMapsConsumerAndServerNames(t *testing.T) {
 }
 
 func TestCurrentOSReleaseNetBSDUsesKernelReleaseMap(t *testing.T) {
-	got := currentOSRelease(testSession, "netbsd", nil, func(name string, args ...string) string {
-		if name != "uname" || !reflect.DeepEqual(args, []string{"-r"}) {
-			t.Fatalf("command = %s %#v, want uname -r", name, args)
-		}
-		return "10.1\n"
-	})
+	host := &fakeHostOS{
+		platform:   "netbsd",
+		runOutputs: map[string]string{fakeRunKey("uname", "-r"): "10.1\n"},
+	}
+	s := NewSessionContext(t.Context())
+	s.host = host
 
+	got := currentOSRelease(s)
 	want := map[string]any{"full": "10.1", "major": "10", "minor": "1"}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("currentOSRelease(testSession, netbsd) = %#v, want %#v", got, want)
+		t.Fatalf("currentOSRelease(netbsd) = %#v, want %#v", got, want)
+	}
+	wantCalls := []fakeHostRunCall{{name: "uname", args: []string{"-r"}}}
+	if !reflect.DeepEqual(host.runCalls, wantCalls) {
+		t.Fatalf("run calls = %#v, want %#v", host.runCalls, wantCalls)
 	}
 }
 
 func TestCurrentOSReleaseDragonFlyUsesKernelReleaseMap(t *testing.T) {
-	got := currentOSRelease(testSession, "dragonfly", nil, func(name string, args ...string) string {
-		if name != "uname" || !reflect.DeepEqual(args, []string{"-r"}) {
-			t.Fatalf("command = %s %#v, want uname -r", name, args)
-		}
-		return "6.4-RELEASE\n"
-	})
+	host := &fakeHostOS{
+		platform:   "dragonfly",
+		runOutputs: map[string]string{fakeRunKey("uname", "-r"): "6.4-RELEASE\n"},
+	}
+	s := NewSessionContext(t.Context())
+	s.host = host
 
+	got := currentOSRelease(s)
 	want := map[string]any{"full": "6.4-RELEASE", "major": "6", "minor": "4-RELEASE"}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("currentOSRelease(testSession, dragonfly) = %#v, want %#v", got, want)
+		t.Fatalf("currentOSRelease(dragonfly) = %#v, want %#v", got, want)
+	}
+	wantCalls := []fakeHostRunCall{{name: "uname", args: []string{"-r"}}}
+	if !reflect.DeepEqual(host.runCalls, wantCalls) {
+		t.Fatalf("run calls = %#v, want %#v", host.runCalls, wantCalls)
 	}
 }
 
 func TestCurrentOSReleaseIllumosUsesEtcRelease(t *testing.T) {
-	got := currentOSRelease(testSession, "illumos", func(path string) ([]byte, error) {
-		if path != "/etc/release" {
-			t.Fatalf("path = %q, want /etc/release", path)
-		}
-		return []byte("  OmniOS v11 r151058\n"), nil
-	}, nil)
+	host := &fakeHostOS{
+		platform: "illumos",
+		files:    map[string][]byte{"/etc/release": []byte("  OmniOS v11 r151058\n")},
+	}
+	s := NewSessionContext(t.Context())
+	s.host = host
 
+	got := currentOSRelease(s)
 	want := map[string]any{"full": "r151058", "major": "151058"}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("currentOSRelease(testSession, illumos) = %#v, want %#v", got, want)
+		t.Fatalf("currentOSRelease(illumos) = %#v, want %#v", got, want)
+	}
+	if !reflect.DeepEqual(host.readFileCalls, []string{"/etc/release"}) {
+		t.Fatalf("read file calls = %#v, want [/etc/release]", host.readFileCalls)
+	}
+	if len(host.runCalls) != 0 {
+		t.Fatalf("run calls = %#v, want none", host.runCalls)
 	}
 }
 
 func TestCurrentOSReleaseIllumosScansPastBannerLines(t *testing.T) {
-	got := currentOSRelease(testSession, "illumos", func(path string) ([]byte, error) {
-		return []byte("\n  OpenIndiana Development\n  OpenIndiana Hipster r202510\n"), nil
-	}, nil)
+	host := &fakeHostOS{
+		platform: "illumos",
+		files:    map[string][]byte{"/etc/release": []byte("\n  OpenIndiana Development\n  OpenIndiana Hipster r202510\n")},
+	}
+	s := NewSessionContext(t.Context())
+	s.host = host
 
+	got := currentOSRelease(s)
 	want := map[string]any{"full": "r202510", "major": "202510"}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("currentOSRelease(testSession, illumos) = %#v, want %#v", got, want)
+		t.Fatalf("currentOSRelease(illumos) = %#v, want %#v", got, want)
 	}
 }
 
 func TestCurrentOSReleaseIllumosFallsBackToKernelRelease(t *testing.T) {
-	host := &fakeHostOS{runOutput: "5.11\n"}
-	session := NewSession()
-	session.host = host
+	host := &fakeHostOS{
+		platform:  "illumos",
+		runOutput: "5.11\n",
+		files:     map[string][]byte{"/etc/release": []byte("OpenIndiana Hipster\n")},
+	}
+	s := NewSessionContext(t.Context())
+	s.host = host
 
-	got := currentOSRelease(session, "illumos", func(path string) ([]byte, error) {
-		return []byte("OpenIndiana Hipster\n"), nil
-	}, session.commandOutput)
-
+	got := currentOSRelease(s)
 	if got != "5.11" {
-		t.Fatalf("currentOSRelease(session, illumos) = %#v, want %q", got, "5.11")
+		t.Fatalf("currentOSRelease(illumos) = %#v, want %q", got, "5.11")
 	}
 }
 
@@ -1042,21 +1081,20 @@ func TestCurrentOSRelease_prefersDistroSpecificReleaseFiles(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			files := map[string]string{
-				"/etc/os-release": tt.osRelease,
-				tt.specificPath:   tt.specificBody,
+			host := &fakeHostOS{
+				platform:        "linux",
+				emptyRunDefault: true,
+				files: map[string][]byte{
+					"/etc/os-release": []byte(tt.osRelease),
+					tt.specificPath:   []byte(tt.specificBody),
+				},
 			}
-			readFile := func(path string) ([]byte, error) {
-				value, ok := files[path]
-				if !ok {
-					return nil, os.ErrNotExist
-				}
-				return []byte(value), nil
-			}
+			s := NewSessionContext(t.Context())
+			s.host = host
 
-			got := currentOSRelease(testSession, "linux", readFile, func(string, ...string) string { return "" })
+			got := currentOSRelease(s)
 			if !reflect.DeepEqual(got, tt.want) {
-				t.Fatalf("currentOSRelease(testSession) = %#v, want %#v", got, tt.want)
+				t.Fatalf("currentOSRelease(linux) = %#v, want %#v", got, tt.want)
 			}
 		})
 	}
@@ -1132,33 +1170,35 @@ func TestCurrentOSRelease_marinerAndAzureLinuxFallbackSplitOSReleaseVersion(t *t
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			readFile := func(path string) ([]byte, error) {
-				if path != "/etc/os-release" {
-					return nil, os.ErrNotExist
-				}
-				return []byte(tt.osRelease), nil
+			host := &fakeHostOS{
+				platform:        "linux",
+				emptyRunDefault: true,
+				files:           map[string][]byte{"/etc/os-release": []byte(tt.osRelease)},
 			}
+			s := NewSessionContext(t.Context())
+			s.host = host
 
-			got := currentOSRelease(testSession, "linux", readFile, func(string, ...string) string { return "" })
+			got := currentOSRelease(s)
 			if !reflect.DeepEqual(got, tt.want) {
-				t.Fatalf("currentOSRelease(testSession) = %#v, want %#v", got, tt.want)
+				t.Fatalf("currentOSRelease(linux) = %#v, want %#v", got, tt.want)
 			}
 		})
 	}
 }
 
 func TestCurrentOSRelease_linuxmintFallbackSplitsOSReleaseVersionLikeRubyFact(t *testing.T) {
-	readFile := func(path string) ([]byte, error) {
-		if path != "/etc/os-release" {
-			return nil, os.ErrNotExist
-		}
-		return []byte("ID=linuxmint\nVERSION_ID=19.4\n"), nil
+	host := &fakeHostOS{
+		platform:        "linux",
+		emptyRunDefault: true,
+		files:           map[string][]byte{"/etc/os-release": []byte("ID=linuxmint\nVERSION_ID=19.4\n")},
 	}
+	s := NewSessionContext(t.Context())
+	s.host = host
 
-	got := currentOSRelease(testSession, "linux", readFile, func(string, ...string) string { return "" })
+	got := currentOSRelease(s)
 	want := map[string]any{"full": "19.4", "major": "19", "minor": "4"}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("currentOSRelease(testSession) = %#v, want %#v", got, want)
+		t.Fatalf("currentOSRelease(linux) = %#v, want %#v", got, want)
 	}
 }
 
@@ -1182,44 +1222,44 @@ func TestCurrentOSRelease_gentooAndMageiaFallbackSplitOSReleaseVersion(t *testin
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			readFile := func(path string) ([]byte, error) {
-				if path != "/etc/os-release" {
-					return nil, os.ErrNotExist
-				}
-				return []byte(tt.osRelease), nil
+			host := &fakeHostOS{
+				platform:        "linux",
+				emptyRunDefault: true,
+				files:           map[string][]byte{"/etc/os-release": []byte(tt.osRelease)},
 			}
+			s := NewSessionContext(t.Context())
+			s.host = host
 
-			got := currentOSRelease(testSession, "linux", readFile, func(string, ...string) string { return "" })
+			got := currentOSRelease(s)
 			if !reflect.DeepEqual(got, tt.want) {
-				t.Fatalf("currentOSRelease(testSession) = %#v, want %#v", got, tt.want)
+				t.Fatalf("currentOSRelease(linux) = %#v, want %#v", got, tt.want)
 			}
 		})
 	}
 }
 
 func TestCurrentOSRelease_usesAmazonLinux2023RPMVersion(t *testing.T) {
-	files := map[string]string{
-		"/etc/os-release":     "ID=amzn\nVERSION_ID=2023\n",
-		"/etc/system-release": "Amazon Linux 2023\n",
+	host := &fakeHostOS{
+		platform: "linux",
+		files: map[string][]byte{
+			"/etc/os-release":     []byte("ID=amzn\nVERSION_ID=2023\n"),
+			"/etc/system-release": []byte("Amazon Linux 2023\n"),
+		},
+		runOutputs: map[string]string{
+			fakeRunKey("rpm", "-q", "--qf", "%{NAME}\n%{VERSION}\n%{RELEASE}\n%{VENDOR}", "-f", "/etc/os-release"): "system-release\n2023.1.20230912\n1.amzn2023\nAmazon Linux",
+		},
 	}
-	readFile := func(path string) ([]byte, error) {
-		value, ok := files[path]
-		if !ok {
-			return nil, os.ErrNotExist
-		}
-		return []byte(value), nil
-	}
-	run := func(name string, args ...string) string {
-		if name != "rpm" || !reflect.DeepEqual(args, []string{"-q", "--qf", "%{NAME}\n%{VERSION}\n%{RELEASE}\n%{VENDOR}", "-f", "/etc/os-release"}) {
-			t.Fatalf("run(%q, %#v), want rpm os-release package query", name, args)
-		}
-		return "system-release\n2023.1.20230912\n1.amzn2023\nAmazon Linux"
-	}
+	s := NewSessionContext(t.Context())
+	s.host = host
 
-	got := currentOSRelease(testSession, "linux", readFile, run)
+	got := currentOSRelease(s)
 	want := map[string]any{"full": "2023.1.20230912", "major": "2023", "minor": "1"}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("currentOSRelease(testSession) = %#v, want %#v", got, want)
+		t.Fatalf("currentOSRelease(linux) = %#v, want %#v", got, want)
+	}
+	wantCalls := []fakeHostRunCall{{name: "rpm", args: []string{"-q", "--qf", "%{NAME}\n%{VERSION}\n%{RELEASE}\n%{VENDOR}", "-f", "/etc/os-release"}}}
+	if !reflect.DeepEqual(host.runCalls, wantCalls) {
+		t.Fatalf("run calls = %#v, want %#v", host.runCalls, wantCalls)
 	}
 }
 
@@ -1342,20 +1382,19 @@ func TestCurrentLinuxReleaseFilesReturnEmptyWhenMissing(t *testing.T) {
 func TestCurrentLinuxDistro_usesRedHatReleaseForRHELDistroFields(t *testing.T) {
 	t.Parallel()
 
-	files := map[string]string{
-		"/etc/os-release":     "NAME=\"CentOS Linux\"\nID=centos\nVERSION_ID=7.2.1511\n",
-		"/etc/redhat-release": "CentOS Linux release 7.2.1511 (Core)\n",
+	host := &fakeHostOS{
+		platform:        "linux",
+		emptyRunDefault: true,
+		files: map[string][]byte{
+			"/etc/os-release":     []byte("NAME=\"CentOS Linux\"\nID=centos\nVERSION_ID=7.2.1511\n"),
+			"/etc/redhat-release": []byte("CentOS Linux release 7.2.1511 (Core)\n"),
+		},
 	}
-	readFile := func(path string) ([]byte, error) {
-		value, ok := files[path]
-		if !ok {
-			return nil, os.ErrNotExist
-		}
-		return []byte(value), nil
-	}
+	s := NewSessionContext(t.Context())
+	s.host = host
 	lookPath := func(string) (string, error) { return "", os.ErrNotExist }
 
-	got := currentLinuxDistro("linux", lookPath, func(string, ...string) string { return "" }, readFile)
+	got := currentLinuxDistro(s, lookPath)
 	want := linuxDistro{
 		Name:         "CentOS",
 		ID:           "CentOS",
@@ -1372,31 +1411,30 @@ func TestCurrentLinuxDistro_usesRedHatReleaseForRHELDistroFields(t *testing.T) {
 func TestCurrentLinuxDistroRHELPrefersRedHatReleaseOverLSB(t *testing.T) {
 	t.Parallel()
 
-	files := map[string]string{
-		"/etc/os-release":     "NAME=\"Red Hat Enterprise Linux\"\nID=rhel\nVERSION_ID=8.0\n",
-		"/etc/redhat-release": "Red Hat Enterprise Linux release 8.0 (Ootpa)\n",
+	host := &fakeHostOS{
+		platform: "linux",
+		files: map[string][]byte{
+			"/etc/os-release":     []byte("NAME=\"Red Hat Enterprise Linux\"\nID=rhel\nVERSION_ID=8.0\n"),
+			"/etc/redhat-release": []byte("Red Hat Enterprise Linux release 8.0 (Ootpa)\n"),
+		},
+		runOutputs: map[string]string{
+			fakeRunKey("lsb_release", "-a"): "Distributor ID:\trhel-lsb\nDescription:\tLSB supplied description\nRelease:\t8.0-lsb\nCodename:\tlsb-code\n",
+		},
 	}
-	readFile := func(path string) ([]byte, error) {
-		value, ok := files[path]
-		if !ok {
-			return nil, os.ErrNotExist
-		}
-		return []byte(value), nil
-	}
+	s := NewSessionContext(t.Context())
+	s.host = host
 	lookPath := func(name string) (string, error) {
 		if name != "lsb_release" {
 			return "", os.ErrNotExist
 		}
 		return "/usr/bin/lsb_release", nil
 	}
-	run := func(name string, args ...string) string {
-		if name != "lsb_release" || !reflect.DeepEqual(args, []string{"-a"}) {
-			t.Fatalf("run(%q, %#v), want lsb_release -a", name, args)
-		}
-		return "Distributor ID:\trhel-lsb\nDescription:\tLSB supplied description\nRelease:\t8.0-lsb\nCodename:\tlsb-code\n"
-	}
 
-	got := currentLinuxDistro("linux", lookPath, run, readFile)
+	got := currentLinuxDistro(s, lookPath)
+	wantCalls := []fakeHostRunCall{{name: "lsb_release", args: []string{"-a"}}}
+	if !reflect.DeepEqual(host.runCalls, wantCalls) {
+		t.Fatalf("run calls = %#v, want %#v", host.runCalls, wantCalls)
+	}
 	core := linuxDistroFacts(got)
 
 	coreCollection := Collection(core)
@@ -1419,19 +1457,16 @@ func TestCurrentLinuxDistroRHELPrefersRedHatReleaseOverLSB(t *testing.T) {
 func TestCurrentLinuxDistro_usesSuseReleaseWhenOSReleaseIsMissing(t *testing.T) {
 	t.Parallel()
 
-	files := map[string]string{
-		"/etc/SuSE-release": "openSUSE 11.1 (i586)\nVERSION = 11.1\n",
+	host := &fakeHostOS{
+		platform:        "linux",
+		emptyRunDefault: true,
+		files:           map[string][]byte{"/etc/SuSE-release": []byte("openSUSE 11.1 (i586)\nVERSION = 11.1\n")},
 	}
-	readFile := func(path string) ([]byte, error) {
-		value, ok := files[path]
-		if !ok {
-			return nil, os.ErrNotExist
-		}
-		return []byte(value), nil
-	}
+	s := NewSessionContext(t.Context())
+	s.host = host
 	lookPath := func(string) (string, error) { return "", os.ErrNotExist }
 
-	got := currentLinuxDistro("linux", lookPath, func(string, ...string) string { return "" }, readFile)
+	got := currentLinuxDistro(s, lookPath)
 	want := linuxDistro{
 		Name:         "openSUSE",
 		ID:           "opensuse",
@@ -1663,16 +1698,17 @@ func TestParseLinuxDistroOSRelease_normalizesArchLinuxName(t *testing.T) {
 func TestCurrentOSRelease_omitsArchRollingBuildID(t *testing.T) {
 	t.Parallel()
 
-	readFile := func(path string) ([]byte, error) {
-		if path != "/etc/os-release" {
-			return nil, os.ErrNotExist
-		}
-		return []byte("NAME=\"Arch Linux\"\nPRETTY_NAME=\"Arch Linux\"\nID=arch\nBUILD_ID=rolling\n"), nil
+	host := &fakeHostOS{
+		platform:        "linux",
+		emptyRunDefault: true,
+		files:           map[string][]byte{"/etc/os-release": []byte("NAME=\"Arch Linux\"\nPRETTY_NAME=\"Arch Linux\"\nID=arch\nBUILD_ID=rolling\n")},
 	}
+	s := NewSessionContext(t.Context())
+	s.host = host
 
-	got := currentOSRelease(testSession, "linux", readFile, func(string, ...string) string { return "" })
+	got := currentOSRelease(s)
 	if got != nil {
-		t.Fatalf("currentOSRelease(testSession, arch) = %#v, want nil because BUILD_ID is not a release", got)
+		t.Fatalf("currentOSRelease(arch) = %#v, want nil because BUILD_ID is not a release", got)
 	}
 }
 
@@ -1807,16 +1843,21 @@ func TestParseFreeBSDVersions_returnsKernelAndUserlandValues(t *testing.T) {
 }
 
 func TestCurrentOSRelease_mapsDarwinKernelReleaseLikeRubyFact(t *testing.T) {
-	got := currentOSRelease(testSession, "darwin", nil, func(name string, args ...string) string {
-		if name != "uname" || !reflect.DeepEqual(args, []string{"-r"}) {
-			t.Fatalf("run(%q, %#v), want uname -r", name, args)
-		}
-		return "10.9\n"
-	})
+	host := &fakeHostOS{
+		platform:   "darwin",
+		runOutputs: map[string]string{fakeRunKey("uname", "-r"): "10.9\n"},
+	}
+	s := NewSessionContext(t.Context())
+	s.host = host
 
+	got := currentOSRelease(s)
 	want := map[string]any{"full": "10.9", "major": "10", "minor": "9"}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("currentOSRelease(testSession, darwin) = %#v, want %#v", got, want)
+		t.Fatalf("currentOSRelease(darwin) = %#v, want %#v", got, want)
+	}
+	wantCalls := []fakeHostRunCall{{name: "uname", args: []string{"-r"}}}
+	if !reflect.DeepEqual(host.runCalls, wantCalls) {
+		t.Fatalf("run calls = %#v, want %#v", host.runCalls, wantCalls)
 	}
 }
 
@@ -1952,15 +1993,19 @@ func TestMacOSStringFact_skipsEmptyValues(t *testing.T) {
 func TestCurrentMacOSModelUsesSysctlHWModel(t *testing.T) {
 	t.Parallel()
 
-	run := func(name string, args ...string) string {
-		if name != "sysctl" || !reflect.DeepEqual(args, []string{"-n", "hw.model"}) {
-			t.Fatalf("command = %s %#v, want sysctl -n hw.model", name, args)
-		}
-		return "MacBookPro11,4\n"
+	host := &fakeHostOS{
+		platform:   "darwin",
+		runOutputs: map[string]string{fakeRunKey("sysctl", "-n", "hw.model"): "MacBookPro11,4\n"},
 	}
+	s := NewSessionContext(t.Context())
+	s.host = host
 
-	if got := currentMacOSModel("darwin", run); got != "MacBookPro11,4" {
-		t.Fatalf("currentMacOSModel() = %q, want MacBookPro11,4", got)
+	if got := probeMacOSModel(s); got != "MacBookPro11,4" {
+		t.Fatalf("probeMacOSModel() = %q, want MacBookPro11,4", got)
+	}
+	wantCalls := []fakeHostRunCall{{name: "sysctl", args: []string{"-n", "hw.model"}}}
+	if !reflect.DeepEqual(host.runCalls, wantCalls) {
+		t.Fatalf("run calls = %#v, want %#v", host.runCalls, wantCalls)
 	}
 }
 
@@ -1976,17 +2021,21 @@ func TestParseSwVers(t *testing.T) {
 func TestCurrentMacOSInfoUsesSwVersCommand(t *testing.T) {
 	t.Parallel()
 
-	run := func(name string, args ...string) string {
-		if name != "sw_vers" || len(args) != 0 {
-			t.Fatalf("command = %s %#v, want sw_vers", name, args)
-		}
-		return "ProductName:\tmacOS\nProductVersion:\t13.3.1\nProductVersionExtra:\t(a)\nBuildVersion:\t22E772610a\n"
+	host := &fakeHostOS{
+		platform:   "darwin",
+		runOutputs: map[string]string{fakeRunKey("sw_vers"): "ProductName:\tmacOS\nProductVersion:\t13.3.1\nProductVersionExtra:\t(a)\nBuildVersion:\t22E772610a\n"},
 	}
+	s := NewSessionContext(t.Context())
+	s.host = host
 
-	got := currentMacOSInfo("darwin", run)
+	got := probeMacOSInfo(s)
 	want := macOSInfo{ProductName: "macOS", ProductVersion: "13.3.1", ProductVersionExtra: "(a)", BuildVersion: "22E772610a"}
 	if got != want {
-		t.Fatalf("currentMacOSInfo() = %#v, want %#v", got, want)
+		t.Fatalf("probeMacOSInfo() = %#v, want %#v", got, want)
+	}
+	wantCalls := []fakeHostRunCall{{name: "sw_vers", args: nil}}
+	if !reflect.DeepEqual(host.runCalls, wantCalls) {
+		t.Fatalf("run calls = %#v, want %#v", host.runCalls, wantCalls)
 	}
 }
 
@@ -2114,20 +2163,20 @@ func TestParseMacOSSystemProfilerEthernetIgnoresMalformedKeyValueLinesLikeRubyEx
 }
 
 func TestCurrentMacOSSystemProfilerEthernetUsesCommand(t *testing.T) {
-	var calledName string
-	var calledArgs []string
-	run := func(name string, args ...string) string {
-		calledName = name
-		calledArgs = append([]string(nil), args...)
-		return "Vendor ID: 0x8086\n"
+	host := &fakeHostOS{
+		platform:   "darwin",
+		runOutputs: map[string]string{fakeRunKey("system_profiler", "SPEthernetDataType"): "Vendor ID: 0x8086\n"},
 	}
+	s := NewSessionContext(t.Context())
+	s.host = host
 
-	got := currentMacOSSystemProfilerEthernet("darwin", run)
-	if calledName != "system_profiler" || len(calledArgs) != 1 || calledArgs[0] != "SPEthernetDataType" {
-		t.Fatalf("command = %q %#v, want system_profiler SPEthernetDataType", calledName, calledArgs)
+	got := probeMacOSSystemProfilerEthernet(s)
+	wantCalls := []fakeHostRunCall{{name: "system_profiler", args: []string{"SPEthernetDataType"}}}
+	if !reflect.DeepEqual(host.runCalls, wantCalls) {
+		t.Fatalf("command = %#v, want system_profiler SPEthernetDataType", host.runCalls)
 	}
 	if got.VendorID != "0x8086" {
-		t.Fatalf("currentMacOSSystemProfilerEthernet().VendorID = %q, want 0x8086", got.VendorID)
+		t.Fatalf("probeMacOSSystemProfilerEthernet().VendorID = %q, want 0x8086", got.VendorID)
 	}
 }
 
@@ -2476,24 +2525,17 @@ func TestParseLinuxDistroOSRelease_unescapesQuotedValues(t *testing.T) {
 }
 
 func TestCurrentLinuxDistro_usesAmazonLinux2023RPMVersionWithPatch(t *testing.T) {
-	files := map[string]string{
-		"/etc/os-release": "ID=amzn\nVERSION_ID=2023\n",
+	host := &fakeHostOS{
+		platform: "linux",
+		files:    map[string][]byte{"/etc/os-release": []byte("ID=amzn\nVERSION_ID=2023\n")},
+		runOutputs: map[string]string{
+			fakeRunKey("rpm", "-q", "--qf", "%{NAME}\n%{VERSION}\n%{RELEASE}\n%{VENDOR}", "-f", "/etc/os-release"): "system-release\n2023.1.20230912\n1.amzn2023\nAmazon Linux",
+		},
 	}
-	readFile := func(path string) ([]byte, error) {
-		value, ok := files[path]
-		if !ok {
-			return nil, os.ErrNotExist
-		}
-		return []byte(value), nil
-	}
-	run := func(name string, args ...string) string {
-		if name != "rpm" || !reflect.DeepEqual(args, []string{"-q", "--qf", "%{NAME}\n%{VERSION}\n%{RELEASE}\n%{VENDOR}", "-f", "/etc/os-release"}) {
-			t.Fatalf("run(%q, %#v), want rpm os-release package query", name, args)
-		}
-		return "system-release\n2023.1.20230912\n1.amzn2023\nAmazon Linux"
-	}
+	s := NewSessionContext(t.Context())
+	s.host = host
 
-	got := currentLinuxDistro("linux", func(string) (string, error) { return "", os.ErrNotExist }, run, readFile)
+	got := currentLinuxDistro(s, func(string) (string, error) { return "", os.ErrNotExist })
 	want := linuxDistro{
 		ID:           "amzn",
 		Release:      map[string]any{"full": "2023.1.20230912", "major": "2023", "minor": "1", "patch": "20230912"},
@@ -2502,22 +2544,25 @@ func TestCurrentLinuxDistro_usesAmazonLinux2023RPMVersionWithPatch(t *testing.T)
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("currentLinuxDistro() = %#v, want %#v", got, want)
 	}
+	wantCalls := []fakeHostRunCall{{name: "rpm", args: []string{"-q", "--qf", "%{NAME}\n%{VERSION}\n%{RELEASE}\n%{VENDOR}", "-f", "/etc/os-release"}}}
+	if !reflect.DeepEqual(host.runCalls, wantCalls) {
+		t.Fatalf("run calls = %#v, want %#v", host.runCalls, wantCalls)
+	}
 }
 
 func TestCurrentLinuxDistro_usesAmazonSystemReleaseForDistroFields(t *testing.T) {
-	files := map[string]string{
-		"/etc/os-release":     "ID=amzn\nVERSION_ID=2\n",
-		"/etc/system-release": "Amazon Linux release 2 (2017.12) LTS Release Candidate\n",
+	host := &fakeHostOS{
+		platform:        "linux",
+		emptyRunDefault: true,
+		files: map[string][]byte{
+			"/etc/os-release":     []byte("ID=amzn\nVERSION_ID=2\n"),
+			"/etc/system-release": []byte("Amazon Linux release 2 (2017.12) LTS Release Candidate\n"),
+		},
 	}
-	readFile := func(path string) ([]byte, error) {
-		value, ok := files[path]
-		if !ok {
-			return nil, os.ErrNotExist
-		}
-		return []byte(value), nil
-	}
+	s := NewSessionContext(t.Context())
+	s.host = host
 
-	got := currentLinuxDistro("linux", func(string) (string, error) { return "", os.ErrNotExist }, func(string, ...string) string { return "" }, readFile)
+	got := currentLinuxDistro(s, func(string) (string, error) { return "", os.ErrNotExist })
 	want := linuxDistro{
 		ID:           "Amazon",
 		Description:  "Amazon Linux release 2 (2017.12) LTS Release Candidate",

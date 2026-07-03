@@ -1495,7 +1495,7 @@ OEM Strings
 	String 1: vboxVer_6.1.4
 	String 2: vboxRev_136177
 `,
-			fakeRunKey("virt-what"): "kvm",
+			fakeRunKey("virt-what"):    "kvm",
 			fakeRunKey("vmware", "-v"): "",
 		},
 	}
