@@ -38,4 +38,4 @@
 
 - [x] 6.1 Run `go test ./...` and `go vet ./...`; confirm the pre-existing test files pass unmodified (only additions permitted).
 - [x] 6.2 Run the CLI option-contract tests (help/man drift) and the acceptance suite.
-- [ ] 6.3 Confirm `add-fact-disable-controls` is archived before this change archives; run `openspec validate deepen-cli-intake-and-gating-descriptors --strict`.
+- [x] 6.3 Confirm `add-fact-disable-controls` is archived before this change archives; run `openspec validate deepen-cli-intake-and-gating-descriptors --strict`. (add-fact-disable-controls archived 2026-07-06; validate passed.)
