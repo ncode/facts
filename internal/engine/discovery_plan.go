@@ -2,7 +2,6 @@ package engine
 
 import (
 	"slices"
-	"strings"
 )
 
 type discoveryPlan struct {
@@ -40,9 +39,6 @@ func (e *Engine) planDiscovery(s *Session, queries []string) (discoveryPlan, []e
 	if err != nil {
 		failures = append(failures, err)
 	} else if ok {
-		if len(plan.externalDirs) == 0 {
-			plan.externalDirs = slices.Clone(config.ExternalDirs)
-		}
 		plan.noExternalFacts = plan.noExternalFacts || config.NoExternalFacts
 		plan.cacheGroups = cloneFactGroups(config.FactGroups)
 		if plan.useCache {
@@ -62,10 +58,34 @@ func (e *Engine) planDiscovery(s *Session, queries []string) (discoveryPlan, []e
 	if plan.disabledFacts == nil {
 		plan.disabledFacts = map[string]bool{}
 	}
-	if !plan.noExternalFacts && len(plan.externalDirs) == 0 && e.cfg.SystemDefaults {
-		plan.externalDirs = e.defaultExternalDirs()
+	var defaultExternalDirs []string
+	systemDefaults := e.cfg.SystemDefaults && !plan.noExternalFacts
+	if systemDefaults && len(plan.externalDirs) == 0 && len(config.ExternalDirs) == 0 {
+		defaultExternalDirs = e.defaultExternalDirs()
 	}
+	configForDirs := config
+	configForDirs.NoExternalFacts = false
+	plan.externalDirs = DiscoveryExternalDirs(configForDirs, plan.externalDirs, false, systemDefaults, defaultExternalDirs)
 	return plan, failures
+}
+
+// DiscoveryExternalDirs returns the external fact directories discovery would
+// load for the same inputs: explicit directories first, then config
+// directories, then process defaults when system defaults are enabled.
+func DiscoveryExternalDirs(config Config, explicit []string, noExternalFacts, systemDefaults bool, defaults []string) []string {
+	if noExternalFacts || config.NoExternalFacts {
+		return nil
+	}
+	if len(explicit) > 0 {
+		return slices.Clone(explicit)
+	}
+	if len(config.ExternalDirs) > 0 {
+		return slices.Clone(config.ExternalDirs)
+	}
+	if systemDefaults {
+		return slices.Clone(defaults)
+	}
+	return nil
 }
 
 // disabledSourceEnv and disabledSourceConfig label the ambient (non-CLI)
@@ -111,7 +131,7 @@ func (e *Engine) unionDisabledFacts(s *Session, config Config, includeEnv bool) 
 	for name := range DisabledFactsWithGroups(e.cfg.ExtraDisabled, groups) {
 		delete(ambient, name)
 		for k := range ambient {
-			if strings.HasPrefix(k, name+".") {
+			if factHierarchyCovers(name, k) {
 				delete(ambient, k)
 			}
 		}

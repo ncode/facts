@@ -138,6 +138,15 @@ deltas against the capabilities in `openspec/specs/`:
 
 Record user-visible behavior changes in `CHANGELOG.md` under Unreleased.
 
+## CLI task semantics
+
+The `--list-block-groups` and `--list-cache-groups` tasks intentionally do
+less than normal fact queries. They parse options through the shared CLI intake,
+but only `--config` and `--external-dir` affect group listing; every other
+accepted option, including `--no-external-facts`, `--no-cache`, `--disable`,
+`--no-block`, and `--debug`, is inert for these tasks. Changing this frozen
+semantics is a user-visible behavior change and needs its own OpenSpec change.
+
 ## Parity questions
 
 Ruby Facter compatibility is promised at the CLI process boundary (output

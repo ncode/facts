@@ -114,3 +114,63 @@ func TestPlanDiscoveryDisabledFactsOverrideWinsOverUnion(t *testing.T) {
 		t.Fatalf("disabledFacts = %#v, want override verbatim %#v (--no-block / explicit set wins)", plan.disabledFacts, want)
 	}
 }
+
+func TestDiscoveryExternalDirsResolutionOrder(t *testing.T) {
+	tests := []struct {
+		name           string
+		config         Config
+		explicit       []string
+		noExternal     bool
+		systemDefaults bool
+		defaults       []string
+		want           []string
+	}{
+		{
+			name:           "explicit wins",
+			config:         Config{ExternalDirs: []string{"/config"}},
+			explicit:       []string{"/cli"},
+			systemDefaults: true,
+			defaults:       []string{"/default"},
+			want:           []string{"/cli"},
+		},
+		{
+			name:           "config fallback",
+			config:         Config{ExternalDirs: []string{"/config"}},
+			systemDefaults: true,
+			defaults:       []string{"/default"},
+			want:           []string{"/config"},
+		},
+		{
+			name:           "system defaults fallback",
+			systemDefaults: true,
+			defaults:       []string{"/default"},
+			want:           []string{"/default"},
+		},
+		{
+			name:       "explicit no external",
+			explicit:   []string{"/cli"},
+			noExternal: true,
+		},
+		{
+			name:     "config no external",
+			config:   Config{ExternalDirs: []string{"/config"}, NoExternalFacts: true},
+			explicit: []string{"/cli"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := DiscoveryExternalDirs(tt.config, tt.explicit, tt.noExternal, tt.systemDefaults, tt.defaults)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("DiscoveryExternalDirs() = %#v, want %#v", got, tt.want)
+			}
+			if len(got) > 0 {
+				got[0] = "mutated"
+				again := DiscoveryExternalDirs(tt.config, tt.explicit, tt.noExternal, tt.systemDefaults, tt.defaults)
+				if reflect.DeepEqual(got, again) {
+					t.Fatalf("DiscoveryExternalDirs() returned aliased slice %#v", again)
+				}
+			}
+		})
+	}
+}

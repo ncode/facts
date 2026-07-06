@@ -22,19 +22,12 @@ func hasRoot(facts []ResolvedFact, root string) bool {
 	return rootNames(facts)[root]
 }
 
-// gatedSingleOutputCategories pairs each resolution-gated core category with the
-// top-level fact name that gates it (ADR-0015).
-var gatedSingleOutputCategories = []string{
-	"networking", "processors", "memory", "ssh",
-	"timezone", "fips_enabled", "augeas", "xen", "packages",
-}
-
 func TestBuildCoreFacts_resolutionGatesSingleOutputCategories(t *testing.T) {
 	// buildCoreFacts performs no filtering, so a fact root that is absent here
 	// can only be absent because its resolver was skipped — exactly the
 	// resolution-gating contract.
 	baseline := buildCoreFacts(NewSession(), nil)
-	for _, fact := range gatedSingleOutputCategories {
+	for _, fact := range standaloneCoreFactRoots() {
 		if !hasRoot(baseline, fact) {
 			// Not every category resolves on this host (e.g. augeas/xen). Only
 			// assert gating for the ones that do produce output by default.
