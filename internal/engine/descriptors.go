@@ -108,7 +108,7 @@ var coreFactDescriptors = []coreFactDescriptor{
 		root:         "disks",
 		class:        coreFactMultiOutput,
 		assemble:     func(b *coreFactBuild) []ResolvedFact { return disksCoreFacts(b.s) },
-		emittedRoots: []string{"disks", "mountpoints", "partitions", "zpool"},
+		emittedRoots: []string{"disks", "mountpoints", "partitions", "zfs", "zpool"},
 	},
 	{
 		root:           "ssh",
