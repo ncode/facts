@@ -34,6 +34,12 @@
 
 ### Changed
 
+- Internal, behavior-preserving refactor of CLI option intake and fact
+  disabling/gating metadata: runtime parsing now derives from the shared option
+  registry, core fact gating and built-in fact groups derive from one engine
+  descriptor table, and CLI fast-path/list-group external directory planning
+  uses the engine's discovery planning seam. No CLI flags, output bytes,
+  diagnostics, input precedence, or fact shapes change.
 - Internal, behavior-preserving refactor of the discovery engine: fact
   resolvers now reach the host only through the run-scoped Session seam, with
   an automated check freezing that boundary. Category assembly reads platform

@@ -1,7 +1,9 @@
 package engine
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -285,6 +287,66 @@ func TestFactCache_cacheFactsWritesConfiguredGroups(t *testing.T) {
 	}
 	if _, ok := data["site_role"]; ok {
 		t.Fatalf("site_role was cached in networking group: %#v", data)
+	}
+}
+
+func TestDiscover_disabledFactIsNotServedFromFreshCache(t *testing.T) {
+	cacheDir := t.TempDir()
+	writeJSONFile(t, filepath.Join(cacheDir, "networking"), map[string]any{
+		"cache_format_version": float64(1),
+		"networking.hostname":  "cached-host",
+	})
+	oldDefaultCachePath := DefaultCachePath
+	DefaultCachePath = func() string { return cacheDir }
+	t.Cleanup(func() { DefaultCachePath = oldDefaultCachePath })
+
+	eng, err := NewEngine(EngineConfig{
+		UseCache:      true,
+		ConfigLoaded:  true,
+		Config:        Config{TTLs: []FactTTL{{Fact: "networking", TTL: "1 hour"}}},
+		ExtraDisabled: []string{"networking.hostname"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap, err := eng.Discover(context.Background(), "networking.hostname")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got, err := snap.Value("networking.hostname"); got != nil || !errors.Is(err, ErrFactNotFound) {
+		t.Fatalf("Value(networking.hostname) = %#v, %v; want ErrFactNotFound, not cached value", got, err)
+	}
+}
+
+func TestDiscover_prunedSubfactIsNotCached(t *testing.T) {
+	cacheDir := t.TempDir()
+	oldDefaultCachePath := DefaultCachePath
+	DefaultCachePath = func() string { return cacheDir }
+	t.Cleanup(func() { DefaultCachePath = oldDefaultCachePath })
+
+	eng, err := NewEngine(EngineConfig{
+		UseCache:     true,
+		ConfigLoaded: true,
+		Config: Config{
+			Disabled: []string{"os.release"},
+			TTLs:     []FactTTL{{Fact: "operating system", TTL: "1 hour"}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := eng.Discover(context.Background(), "os"); err != nil {
+		t.Fatal(err)
+	}
+
+	data := readJSONFile(t, filepath.Join(cacheDir, "operating system"))
+	osFact, ok := data["os"].(map[string]any)
+	if !ok {
+		t.Fatalf("cached os = %#v, want object", data["os"])
+	}
+	if _, ok := osFact["release"]; ok {
+		t.Fatalf("cached os = %#v, want os.release pruned before cache write", osFact)
 	}
 }
 

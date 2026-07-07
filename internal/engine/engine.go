@@ -134,20 +134,14 @@ func diagnoseAmbientDisabledQueries(logger *slog.Logger, queries []string, ambie
 
 // ambientDisableSource reports the ambient source that disables name, matching
 // the full dotted name and then every ancestor (parent, grandparent, … root) so
-// the diagnostic covers descendants the way pruneDisabledDescendants /
-// FilterDisabledFacts do: a config disable of `os.release` is reported for a
-// query of `os.release.major`.
+// a config disable of `os.release` is reported for a query of
+// `os.release.major`.
 func ambientDisableSource(name string, ambient map[string]string) (string, bool) {
-	for {
-		if source, ok := ambient[name]; ok {
-			return source, true
-		}
-		cut := strings.LastIndex(name, ".")
-		if cut < 0 {
-			return "", false
-		}
-		name = name[:cut]
-	}
+	_, source, ok := factHierarchyMatch(name, func(candidate string) (string, bool) {
+		source, ok := ambient[candidate]
+		return source, ok
+	})
+	return source, ok
 }
 
 // warnOnce emits message at warn level the first time it is seen on this
@@ -256,7 +250,9 @@ func (e *Engine) Discover(ctx context.Context, queries ...string) (*Snapshot, er
 
 	if plan.useCache && ctx.Err() == nil {
 		cache := NewFactCache(DefaultCachePath(), plan.cacheTTLs, plan.cacheGroups, s.logger)
-		remaining, cached := cache.ResolveFacts(facts)
+		cacheFacts := FilterDisabledFacts(facts, plan.disabledFacts)
+		remaining, cached := cache.ResolveFacts(cacheFacts)
+		cached = FilterDisabledFacts(cached, plan.disabledFacts)
 		if err := cache.CacheFacts(remaining); err != nil {
 			failures = append(failures, err)
 		}

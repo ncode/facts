@@ -1,8 +1,5 @@
-# facts-cli-option-contract Specification
+## MODIFIED Requirements
 
-## Purpose
-Define the internal contract that keeps accepted `facts` CLI options, parser metadata, help output, man output, and installed documentation in sync.
-## Requirements
 ### Requirement: CLI option vocabulary is shared
 
 The `facts` CLI SHALL use one supported option vocabulary for validation, option metadata, help output, man output, installed man page content, and runtime parsing. The runtime parser's flag set SHALL be derived from the shared option metadata rather than declared independently, so an option cannot be accepted by validation and unknown to the parser (or vice versa).
@@ -23,25 +20,6 @@ The `facts` CLI SHALL use one supported option vocabulary for validation, option
 - **WHEN** a non-task option exists in the shared option metadata
 - **THEN** the runtime parser MUST accept it (with its aliases, arity, and repeatability) without a second hand-written declaration
 - **AND** a mismatch between the shared metadata and the parser's accepted flag set MUST fail tests
-
-### Requirement: CLI option metadata preserves parser behavior
-
-The shared CLI option metadata SHALL describe canonical names, aliases, value arity, repeatability, task flags, and conflicts without replacing the existing parser.
-
-#### Scenario: Short aliases canonicalize consistently
-
-- **WHEN** validation processes grouped short options such as `-jdtz`
-- **THEN** each short alias MUST map to the same canonical option used by runtime handling
-
-#### Scenario: Repeated and valued options are recognized consistently
-
-- **WHEN** validation, group-listing logic, config path discovery, or external-dir discovery needs to know whether an option takes a value or can repeat
-- **THEN** each caller MUST receive the same answer from the shared option metadata
-
-#### Scenario: Documentation drift fails tests
-
-- **WHEN** help text, man text, or the installed man page omits a non-hidden supported option
-- **THEN** the CLI option contract tests MUST fail
 
 ### Requirement: Version fast path reuses engine-owned seams
 
@@ -72,20 +50,7 @@ The CLI's version-query fast path SHALL derive its disabled-fact set from the en
 - **WHEN** `facts --color facterversion` runs
 - **THEN** stdout bytes are identical to `facts facterversion` (the fast path renders the bare version scalar uncolored, as today)
 
-### Requirement: The --disable option is part of the shared option vocabulary
-
-The `facts` CLI SHALL accept `--disable` as a valued, comma-separated, repeatable option in the shared option vocabulary, documented like any other non-hidden option, contributing fact and group names to the disabled set.
-
-#### Scenario: --disable is accepted and documented
-
-- **WHEN** `--disable packages,os` is parsed
-- **THEN** validation MUST accept it as a valued option contributing `packages` and `os` to the disabled set
-- **AND** `--disable` MUST appear in generated help and man output
-
-#### Scenario: --disable composes with --no-block
-
-- **WHEN** both `--disable packages` and `--no-block` are given
-- **THEN** `--no-block` MUST clear the disabled set so nothing is disabled
+## ADDED Requirements
 
 ### Requirement: Group-listing tasks parse options through the shared intake
 

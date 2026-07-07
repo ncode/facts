@@ -5,7 +5,7 @@
 - [x] 1.3 Test resolution-gating: a standalone-resolver fact (`packages`) skips its resolver; a multi-output category runs and prunes when only some of its outputs are disabled; a disabled sub-fact is pruned.
 - [x] 1.4 Test `--no-block` clears the set; disable-beats-query returns empty; an env/config-sourced disable on an explicit query emits the stderr diagnostic with empty stdout.
 - [x] 1.5 Test `FACTS_DISABLE`, `FACTSDISABLE`, `FACTER_DISABLE`, and `FACTERDISABLE` are all reserved (no `disable` fact created) and feed the disabled set.
-- [ ] 1.6 Test a disabled fact is never served from cache and a pruned sub-fact is not persisted into a cached group. (Behavior verified sound by review — disabled set is subtracted before cache resolution — but a dedicated regression test is still a follow-up.)
+- [x] 1.6 Test a disabled fact is never served from cache and a pruned sub-fact is not persisted into a cached group. (Closed by deepen-cli-intake-and-gating-descriptors, commit cb8b35f1: `TestDiscover_disabledFactIsNotServedFromFreshCache` / `TestDiscover_prunedSubfactIsNotCached` — the pin exposed a real query-path cache resurrection, fixed by confining disabled subtraction to the cache interaction.)
 
 ## 2. Implementation
 

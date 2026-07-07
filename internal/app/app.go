@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"log/slog"
@@ -59,89 +58,25 @@ func Run(stdout, stderr io.Writer, args []string) error {
 }
 
 func factGroups(args []string) ([]engine.FactGroup, error) {
+	options := parseListOptions(args)
 	groups := engine.BuiltinFactGroups()
-	configPath := configPathFromArgs(args)
-	config, err := engine.ParseConfig(configPath, slog.New(slog.DiscardHandler))
+	config, err := engine.ParseConfig(options.ConfigPath, slog.New(slog.DiscardHandler))
 	if err != nil {
 		return nil, err
 	}
 	groups = engine.MergeFactGroups(groups, config.FactGroups)
-	externalDirs := externalDirsFromArgs(args)
-	if len(externalDirs) == 0 {
-		externalDirs = config.ExternalDirs
+	config.NoExternalFacts = false
+	configuredExternalDirs := engine.DiscoveryExternalDirs(config, options.ExternalDirs, false, false, nil)
+	var defaultExternalDirs []string
+	if len(configuredExternalDirs) == 0 {
+		defaultExternalDirs = defaultExternalFactDirs()
 	}
-	externalDirs = effectiveExternalDirs(externalDirs)
+	externalDirs := engine.DiscoveryExternalDirs(config, options.ExternalDirs, false, true, defaultExternalDirs)
 	external, err := engine.ExternalFactGroups(externalDirs)
 	if err != nil {
 		return nil, err
 	}
 	return engine.MergeFactGroups(groups, external), nil
-}
-
-func effectiveExternalDirs(explicit []string) []string {
-	if len(explicit) > 0 {
-		return explicit
-	}
-	return defaultExternalFactDirs()
-}
-
-func configPathFromArgs(args []string) string {
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		option, ok := cli.LookupOption(arg)
-		if !ok {
-			continue
-		}
-		if value, hasInlineValue := inlineOptionValue(arg); hasInlineValue {
-			if option.Canonical == "--config" {
-				return value
-			}
-			continue
-		}
-		if option.Canonical == "--config" {
-			if i+1 < len(args) {
-				return args[i+1]
-			}
-			return ""
-		}
-		if option.Arity == cli.RequiredValue && i+1 < len(args) {
-			i++
-		}
-	}
-	return ""
-}
-
-func externalDirsFromArgs(args []string) []string {
-	dirs := []string{}
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		option, ok := cli.LookupOption(arg)
-		if !ok {
-			continue
-		}
-		if value, hasInlineValue := inlineOptionValue(arg); hasInlineValue {
-			if option.Canonical == "--external-dir" {
-				dirs = append(dirs, value)
-			}
-			continue
-		}
-		if option.Canonical == "--external-dir" {
-			if i+1 < len(args) {
-				dirs = append(dirs, args[i+1])
-				i++
-			}
-			continue
-		}
-		if option.Arity == cli.RequiredValue && i+1 < len(args) {
-			i++
-		}
-	}
-	return dirs
-}
-
-func inlineOptionValue(arg string) (string, bool) {
-	_, value, ok := strings.Cut(arg, "=")
-	return value, ok
 }
 
 func helpText() string {
@@ -215,101 +150,65 @@ Format facts as JSON:
 }
 
 func runQuery(stdout, stderr io.Writer, args []string) error {
-	flags := flag.NewFlagSet("query", flag.ContinueOnError)
-	flags.SetOutput(stderr)
-	jsonOutput := flags.Bool("json", false, "render facts as JSON")
-	jsonOutputShort := flags.Bool("j", false, "render facts as JSON")
-	flags.Bool("no-json", false, "do not render facts as JSON")
-	yamlOutput := flags.Bool("yaml", false, "render facts as YAML")
-	yamlOutputShort := flags.Bool("y", false, "render facts as YAML")
-	flags.Bool("no-yaml", false, "do not render facts as YAML")
-	hoconOutput := flags.Bool("hocon", false, "render facts as HOCON")
-	flags.Bool("no-hocon", false, "do not render facts as HOCON")
-	debug := flags.Bool("debug", false, "write debug logs")
-	debugShort := flags.Bool("d", false, "write debug logs")
-	color := flags.Bool("color", false, "colorize diagnostic output")
-	noColor := flags.Bool("no-color", false, "disable colorized diagnostic output")
-	flags.String("log-level", "", "accepted for Facter compatibility")
-	flags.String("l", "", "accepted for Facter compatibility")
-	timing := flags.Bool("timing", false, "write fact timing")
-	timingShort := flags.Bool("t", false, "write fact timing")
-	strict := flags.Bool("strict", false, "return an error when queried facts are missing")
-	forceDotResolution := flags.Bool("force-dot-resolution", false, "merge dotted facts into structured facts")
-	configPath := flags.String("config", "", "load configuration from file")
-	configPathShort := flags.String("c", "", "load configuration from file")
-	noBlock := flags.Bool("no-block", false, "disable fact blocking")
-	noCache := flags.Bool("no-cache", false, "disable loading and refreshing facts from the cache")
-	verbose := flags.Bool("verbose", false, "write info logs")
-	flags.Bool("sequential", false, "accepted for Facter compatibility")
-	flags.Bool("http-debug", false, "accepted for Facter compatibility")
-	noExternalFacts := flags.Bool("no-external-facts", false, "accepted for Facter compatibility")
-	var externalDirs []string
-	flags.Func("external-dir", "load external facts from directory", func(value string) error {
-		externalDirs = append(externalDirs, value)
-		return nil
-	})
-	var disableEntries []string
-	flags.Func("disable", "disable facts or fact groups (comma-separated, repeatable)", func(value string) error {
-		disableEntries = append(disableEntries, engine.SplitDisableList(value)...)
-		return nil
-	})
-	if err := flags.Parse(args); err != nil {
+	flags, options, err := parseOptions("query", stderr, args)
+	if err != nil {
 		return err
 	}
-	colorOutput := resolveColor(*color, *noColor, stdout)
-	colorDiagnostics := resolveColor(*color, *noColor, stderr)
+	colorOutput := resolveColor(options.Color, options.NoColor, stdout)
+	colorDiagnostics := resolveColor(options.Color, options.NoColor, stderr)
 	// One diagnostics sink for the whole run: engine diagnostics (config, cache,
 	// collection, …) and CLI diagnostics share this handler. debug/verbose are
 	// set once resolved below; warn-class (the only level ParseConfig emits) is
 	// always enabled, so config diagnostics render identically before that.
 	logHandler := &stderrLogHandler{stderr: stderr, color: colorDiagnostics}
 	logger := slog.New(logHandler)
-	configFile := firstNonEmpty(*configPath, *configPathShort)
+	configFile := options.ConfigPath
 	configOptions, configErr := engine.ParseConfig(configFile, logger)
 	if configErr != nil {
 		return configErr
 	}
-	cliExternalDirs := externalDirs
-	discoveryExternalDirs := externalDirs
-	if len(discoveryExternalDirs) == 0 {
-		discoveryExternalDirs = configOptions.ExternalDirs
-	}
+	cliExternalDirs := options.ExternalDirs
+	configForConflict := configOptions
+	configForConflict.NoExternalFacts = false
+	conflictExternalDirs := engine.DiscoveryExternalDirs(configForConflict, options.ExternalDirs, false, false, nil)
 	if configOptions.NoExternalFacts {
-		*noExternalFacts = true
+		options.NoExternalFacts = true
 	}
 	if configOptions.Debug {
-		*debug = true
+		options.Debug = true
 	}
 	if configOptions.Verbose {
-		*verbose = true
+		options.Verbose = true
 	}
-	if *noExternalFacts && hasNonEmpty(discoveryExternalDirs) {
+	if options.NoExternalFacts && hasNonEmpty(conflictExternalDirs) {
 		return optionError(stdout, errors.New("--no-external-facts and --external-dir options conflict: please specify only one"))
 	}
-	if !*noExternalFacts {
-		discoveryExternalDirs = effectiveExternalDirs(discoveryExternalDirs)
+	var defaultExternalDirs []string
+	if !options.NoExternalFacts && len(conflictExternalDirs) == 0 {
+		defaultExternalDirs = defaultExternalFactDirs()
 	}
+	discoveryExternalDirs := engine.DiscoveryExternalDirs(configOptions, options.ExternalDirs, options.NoExternalFacts, true, defaultExternalDirs)
 	disabledFactsForFastPath := map[string]bool{}
 	var disabledFacts map[string]bool
-	if *noBlock {
+	if options.NoBlock {
 		// --no-block is the master override: an empty non-nil map clears the
 		// whole disabled set for this run, including --disable and FACTS_DISABLE.
 		disabledFacts = map[string]bool{}
 	}
-	if !*noBlock {
+	if !options.NoBlock {
 		// The fast path honors every disable source so a disabled facterversion
 		// query falls through to normal resolution (and disable-beats-query). It
 		// derives its set from the same engine union discovery planning uses, so
 		// the two can never disagree on whether facterversion is disabled.
-		disabledFactsForFastPath = engine.DisabledUnion(configOptions, disableEntries, os.Environ())
+		disabledFactsForFastPath = engine.DisabledUnion(configOptions, options.DisableEntries, os.Environ())
 	}
-	mergeDottedFacts := configOptions.ForceDotResolution || *forceDotResolution
-	logLevel := firstNonEmpty(flags.Lookup("log-level").Value.String(), flags.Lookup("l").Value.String(), configOptions.LogLevel)
+	mergeDottedFacts := configOptions.ForceDotResolution || options.ForceDotResolution
+	logLevel := firstNonEmpty(options.LogLevel, configOptions.LogLevel)
 	if logLevel != "" && !cli.SupportedLogLevel(logLevel) {
 		return optionError(stdout, fmt.Errorf("unsupported log level %s", logLevel))
 	}
-	debugEnabled := *debug || *debugShort
-	verboseEnabled := *verbose
+	debugEnabled := options.Debug
+	verboseEnabled := options.Verbose
 	if resolvedLogOptionsConflict(debugEnabled, verboseEnabled, logLevel) {
 		return optionError(stdout, errors.New("debug, verbose, and log-level options conflict: please specify only one."))
 	}
@@ -322,8 +221,8 @@ func runQuery(stdout, stderr io.Writer, args []string) error {
 		writeInfo(stderr, "executed with command line: "+strings.Join(args, " "), colorDiagnostics)
 		writeInfo(stderr, "resolving facts", colorDiagnostics)
 	}
-	if canUseVersionQueryFastPath(flags.Args(), discoveryExternalDirs, disabledFactsForFastPath, *noExternalFacts, *timing || *timingShort) {
-		return writeVersionQuery(stdout, *jsonOutput || *jsonOutputShort, *yamlOutput || *yamlOutputShort, *hoconOutput)
+	if canUseVersionQueryFastPath(flags.Args(), discoveryExternalDirs, disabledFactsForFastPath, options.NoExternalFacts, options.Timing) {
+		return writeVersionQuery(stdout, options.JSON, options.YAML, options.HOCON)
 	}
 	resolutionStart := time.Now()
 
@@ -334,12 +233,12 @@ func runQuery(stdout, stderr io.Writer, args []string) error {
 		ConfigLoaded:           true,
 		Config:                 configOptions,
 		ExternalDirs:           cliExternalDirs,
-		UseCache:               !*noCache,
-		NoExternalFacts:        *noExternalFacts,
+		UseCache:               !options.NoCache,
+		NoExternalFacts:        options.NoExternalFacts,
 		DisabledFacts:          disabledFacts,
-		ExtraDisabled:          disableEntries,
+		ExtraDisabled:          options.DisableEntries,
 		DefaultExternalDirsSet: true,
-		DefaultExternalDirs:    defaultExternalFactDirs(),
+		DefaultExternalDirs:    defaultExternalDirs,
 		IncludeTypedDotted:     mergeDottedFacts,
 		Logger:                 logger,
 	})
@@ -353,16 +252,16 @@ func runQuery(stdout, stderr io.Writer, args []string) error {
 	facts := snapshot.Facts()
 	resolutionDuration := time.Since(resolutionStart).Seconds()
 	out, err := engine.BuildFormatter(engine.FormatOptions{
-		JSON:               *jsonOutput || *jsonOutputShort,
-		YAML:               *yamlOutput || *yamlOutputShort,
-		HOCON:              *hoconOutput,
+		JSON:               options.JSON,
+		YAML:               options.YAML,
+		HOCON:              options.HOCON,
 		IncludeTypedDotted: mergeDottedFacts,
 		Colorize:           colorOutput,
 	}).Format(facts)
 	if err != nil {
 		return err
 	}
-	if *timing || *timingShort {
+	if options.Timing {
 		for _, fact := range facts {
 			name := fact.UserQuery
 			if name == "" {
@@ -383,7 +282,7 @@ func runQuery(stdout, stderr io.Writer, args []string) error {
 			return err
 		}
 	}
-	if *strict {
+	if options.Strict {
 		missing := engine.NewProjection(facts, mergeDottedFacts).MissingQueries(facts)
 		if len(missing) > 0 {
 			for _, name := range missing {

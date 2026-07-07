@@ -1049,6 +1049,19 @@ func TestFilterDisabledFacts_blocksExactNameAndRoot(t *testing.T) {
 	}
 }
 
+func TestFilterDisabledFactsKeepsFlatDottedFactWhenMiddleSegmentDisabled(t *testing.T) {
+	facts := []ResolvedFact{{Name: "a.b.c", Value: "kept", Type: "file"}}
+
+	got := FilterDisabledFacts(facts, map[string]bool{"a.b": true})
+	if !reflect.DeepEqual(got, facts) {
+		t.Fatalf("FilterDisabledFacts(a.b) = %#v, want flat dotted fact kept %#v", got, facts)
+	}
+
+	if got := FilterDisabledFacts(facts, map[string]bool{"a": true}); len(got) != 0 {
+		t.Fatalf("FilterDisabledFacts(a) = %#v, want fact dropped by first segment", got)
+	}
+}
+
 func TestFilterDisabledFacts_prunesDisabledDescendantsFromStructuredParents(t *testing.T) {
 	facts := []ResolvedFact{
 		{
@@ -1079,6 +1092,39 @@ func TestFilterDisabledFacts_prunesDisabledDescendantsFromStructuredParents(t *t
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("FilterDisabledFacts(os.release.major) = %#v, want %#v", got, want)
+	}
+}
+
+func TestFilterDisabledFactsPrunesDescendantsByDisabledKeyPresence(t *testing.T) {
+	facts := []ResolvedFact{
+		{
+			Name: "os",
+			Value: map[string]any{
+				"name": "Ubuntu",
+				"release": map[string]any{
+					"full":  "24.04",
+					"major": "24",
+				},
+			},
+			Type: "core",
+		},
+	}
+
+	got := FilterDisabledFacts(facts, map[string]bool{"os.release.major": false})
+	want := []ResolvedFact{
+		{
+			Name: "os",
+			Value: map[string]any{
+				"name": "Ubuntu",
+				"release": map[string]any{
+					"full": "24.04",
+				},
+			},
+			Type: "core",
+		},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("FilterDisabledFacts(false-valued disabled key) = %#v, want %#v", got, want)
 	}
 }
 

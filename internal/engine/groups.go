@@ -21,17 +21,7 @@ type FactGroup struct {
 // ADR-0007 and never resolve, so listing them was a no-op. Disabling a group
 // name still drops the whole subtree through the structured root.
 func BuiltinFactGroups() []FactGroup {
-	return []FactGroup{
-		{Name: "memory", Facts: []string{"memory"}},
-		{Name: "networking", Facts: []string{"networking"}},
-		{Name: "operating system", Facts: []string{"os"}},
-		// Facts-native group (ADR-0014): a deliberate divergence from Ruby
-		// Facter's group list, so a disable names package collection as one
-		// unit and --list-block-groups shows it.
-		{Name: "packages", Facts: []string{"packages"}},
-		{Name: "path", Facts: []string{"path"}},
-		{Name: "processor", Facts: []string{"processors"}},
-	}
+	return cloneFactGroups(builtinFactGroupsFromDescriptors())
 }
 
 // MergeFactGroups returns defaults with configured groups replacing same-name defaults.
@@ -217,6 +207,24 @@ func DisabledUnion(config Config, extraDisabled []string, environ []string) map[
 	return DisabledFactsWithGroups(entries, config.FactGroups)
 }
 
+func factHierarchyCovers(ancestor, name string) bool {
+	return ancestor == name || strings.HasPrefix(name, ancestor+".")
+}
+
+func factHierarchyMatch[T any](name string, lookup func(string) (T, bool)) (string, T, bool) {
+	for {
+		if value, ok := lookup(name); ok {
+			return name, value, true
+		}
+		cut := strings.LastIndex(name, ".")
+		if cut < 0 {
+			var zero T
+			return "", zero, false
+		}
+		name = name[:cut]
+	}
+}
+
 // FilterDisabledFacts removes facts whose root name is disabled.
 func FilterDisabledFacts(facts []ResolvedFact, disabled map[string]bool) []ResolvedFact {
 	if len(disabled) == 0 {
@@ -237,7 +245,7 @@ func FilterDisabledFacts(facts []ResolvedFact, disabled map[string]bool) []Resol
 func pruneDisabledDescendants(name string, value any, disabled map[string]bool) any {
 	var pruned any
 	for disabledName := range disabled {
-		if !strings.HasPrefix(disabledName, name+".") {
+		if disabledName == name || !factHierarchyCovers(name, disabledName) {
 			continue
 		}
 		if pruned == nil {

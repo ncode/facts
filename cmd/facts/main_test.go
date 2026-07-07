@@ -111,6 +111,51 @@ func TestRunMainReportsGenericErrors(t *testing.T) {
 	}
 }
 
+func TestRunMainReportsRuntimeOptionErrorsWithoutOptionsValidatorPrefix(t *testing.T) {
+	externalConflictConfig := filepath.Join(t.TempDir(), "external-conflict.conf")
+	if err := os.WriteFile(externalConflictConfig, []byte("global : {\n  external-dir : [ \"/facts\" ],\n}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	logConflictConfig := filepath.Join(t.TempDir(), "log-conflict.conf")
+	if err := os.WriteFile(logConflictConfig, []byte("cli : {\n  debug : true,\n  log-level : info,\n}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name       string
+		args       []string
+		wantStderr string
+	}{
+		{
+			name:       "external facts conflict after config parse",
+			args:       []string{"--config", externalConflictConfig, "--no-external-facts", "facterversion"},
+			wantStderr: "--no-external-facts and --external-dir options conflict: please specify only one\n",
+		},
+		{
+			name:       "log option conflict after config parse",
+			args:       []string{"--config", logConflictConfig, "facterversion"},
+			wantStderr: "debug, verbose, and log-level options conflict: please specify only one.\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+
+			if code := runMain(&stdout, &stderr, tt.args); code != 1 {
+				t.Fatalf("runMain() code = %d, want 1", code)
+			}
+			assertMainUsageOutput(t, stdout.String())
+			if got := stderr.String(); got != tt.wantStderr {
+				t.Fatalf("stderr = %q, want %q", got, tt.wantStderr)
+			}
+			if strings.Contains(stderr.String(), "Facts::OptionsValidator") {
+				t.Fatalf("stderr = %q, want runtime error without OptionsValidator prefix", stderr.String())
+			}
+		})
+	}
+}
+
 func TestFactsCommand_noQueryPrintsStructuredFacts(t *testing.T) {
 	bin := buildFactsCommand(t)
 
@@ -246,6 +291,15 @@ type errorWriter struct {
 
 func (w errorWriter) Write([]byte) (int, error) {
 	return 0, w.err
+}
+
+func assertMainUsageOutput(t *testing.T, got string) {
+	t.Helper()
+	for _, want := range []string{"Usage", "facts [options] [query]"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("stdout = %q, want %q", got, want)
+		}
+	}
 }
 
 func buildFactsCommand(t *testing.T) string {

@@ -90,6 +90,32 @@ func TestRun_facterversionHOCONFastPathBytes(t *testing.T) {
 	}
 }
 
+func TestRun_facterversionFastPathIgnoresColorAndForceDotResolution(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "color", args: []string{"--color", "facterversion"}},
+		{name: "force dot resolution", args: []string{"--force-dot-resolution", "facterversion"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+
+			if err := Run(&stdout, &stderr, tt.args); err != nil {
+				t.Fatal(err)
+			}
+			if got, want := stdout.String(), engine.Version+"\n"; got != want {
+				t.Fatalf("stdout = %q, want %q", got, want)
+			}
+			if stderr.Len() != 0 {
+				t.Fatalf("stderr = %q, want empty", stderr.String())
+			}
+		})
+	}
+}
+
 func TestRun_facterversionQueryAllowsExternalOverride(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "version.txt"), []byte("facterversion=external\n"), 0o600); err != nil {
@@ -637,6 +663,71 @@ func TestRun_strictLogsMissingFactErrorWhenQueriedFactIsMissing(t *testing.T) {
 	}
 }
 
+func TestRun_noCacheDisabledQueriedFactKeepsProjectionPlaceholder(t *testing.T) {
+	tests := []struct {
+		name       string
+		args       []string
+		wantStdout string
+		wantStderr string
+		wantStatus int
+	}{
+		{
+			name:       "legacy",
+			args:       []string{"--no-cache", "--disable", "facterversion", "facterversion"},
+			wantStdout: "",
+		},
+		{
+			name:       "json",
+			args:       []string{"--no-cache", "--disable", "facterversion", "--json", "facterversion"},
+			wantStdout: "{\n  \"facterversion\": null\n}\n",
+		},
+		{
+			name:       "yaml",
+			args:       []string{"--no-cache", "--disable", "facterversion", "--yaml", "facterversion"},
+			wantStdout: "facterversion: \"\"\n",
+		},
+		{
+			name:       "hocon",
+			args:       []string{"--no-cache", "--disable", "facterversion", "--hocon", "facterversion"},
+			wantStdout: "",
+		},
+		{
+			name:       "strict",
+			args:       []string{"--no-cache", "--disable", "facterversion", "--strict", "facterversion"},
+			wantStdout: "",
+			wantStderr: "ERROR Facts - fact \"facterversion\" does not exist.\n",
+			wantStatus: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+
+			err := Run(&stdout, &stderr, tt.args)
+			if tt.wantStatus == 0 {
+				if err != nil {
+					t.Fatalf("Run(%v) err = %v, want nil", tt.args, err)
+				}
+			} else {
+				status, ok := err.(ExitStatus)
+				if !ok {
+					t.Fatalf("Run(%v) err = %T %[2]v, want ExitStatus", tt.args, err)
+				}
+				if status.Code() != tt.wantStatus {
+					t.Fatalf("Run(%v) status = %d, want %d", tt.args, status.Code(), tt.wantStatus)
+				}
+			}
+			if got := stdout.String(); got != tt.wantStdout {
+				t.Fatalf("stdout = %q, want %q", got, tt.wantStdout)
+			}
+			if got := stderr.String(); got != tt.wantStderr {
+				t.Fatalf("stderr = %q, want %q", got, tt.wantStderr)
+			}
+		})
+	}
+}
+
 func TestRun_queryNoJSONUsesLegacyOutput(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
@@ -648,6 +739,24 @@ func TestRun_queryNoJSONUsesLegacyOutput(t *testing.T) {
 	}
 	if stderr.Len() != 0 {
 		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}
+
+func TestRun_noFormatCompatibilityFlagsAreAcceptedAndInert(t *testing.T) {
+	for _, flag := range []string{"--no-json", "--no-yaml", "--no-hocon"} {
+		t.Run(flag, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+
+			if err := Run(&stdout, &stderr, []string{flag, "facterversion"}); err != nil {
+				t.Fatal(err)
+			}
+			if got, want := stdout.String(), engine.Version+"\n"; got != want {
+				t.Fatalf("stdout = %q, want %q", got, want)
+			}
+			if stderr.Len() != 0 {
+				t.Fatalf("stderr = %q, want empty", stderr.String())
+			}
+		})
 	}
 }
 
@@ -1612,6 +1721,81 @@ func assertUsageOutput(t *testing.T, got string) {
 	}
 }
 
+func runAppOutput(t *testing.T, args ...string) (string, string) {
+	t.Helper()
+	var stdout, stderr bytes.Buffer
+	if err := Run(&stdout, &stderr, args); err != nil {
+		t.Fatalf("Run(%v) err = %v", args, err)
+	}
+	return stdout.String(), stderr.String()
+}
+
+func TestRun_listTaskNonConfigOptionsAreInert(t *testing.T) {
+	tasks := []string{"--list-cache-groups", "--list-block-groups"}
+	options := []struct {
+		name string
+		args []string
+	}{
+		{name: "no external facts", args: []string{"--no-external-facts"}},
+		{name: "no cache", args: []string{"--no-cache"}},
+		{name: "disable", args: []string{"--disable", "networking"}},
+		{name: "no block", args: []string{"--no-block"}},
+		{name: "debug", args: []string{"--debug"}},
+	}
+
+	for _, task := range tasks {
+		t.Run(task, func(t *testing.T) {
+			wantStdout, wantStderr := runAppOutput(t, task)
+			for _, option := range options {
+				t.Run(option.name, func(t *testing.T) {
+					args := append([]string{task}, option.args...)
+					gotStdout, gotStderr := runAppOutput(t, args...)
+					if gotStdout != wantStdout {
+						t.Fatalf("stdout = %q, want bare task output %q", gotStdout, wantStdout)
+					}
+					if gotStderr != wantStderr {
+						t.Fatalf("stderr = %q, want bare task stderr %q", gotStderr, wantStderr)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestRun_listTasksIgnoreTrailingTaskFlags(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{
+			name: "cache groups ignore version",
+			args: []string{"--list-cache-groups", "--version"},
+			want: "memory\n- memory",
+		},
+		{
+			name: "block groups ignore help",
+			args: []string{"--list-block-groups", "-h"},
+			want: "networking\n- networking",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			if err := Run(&stdout, &stderr, tt.args); err != nil {
+				t.Fatalf("Run(%v) err = %v, want nil", tt.args, err)
+			}
+			if !strings.Contains(stdout.String(), tt.want) {
+				t.Fatalf("stdout = %q, want substring %q", stdout.String(), tt.want)
+			}
+			if stderr.Len() != 0 {
+				t.Fatalf("stderr = %q, want empty", stderr.String())
+			}
+		})
+	}
+}
+
 func TestRun_listBlockGroupsPrintsFactGroups(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
@@ -1641,6 +1825,106 @@ func TestRun_listCacheGroupsPrintsFactGroups(t *testing.T) {
 	}
 	if stderr.Len() != 0 {
 		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}
+
+func TestRun_listCacheGroupsSkipsInterleavedValuedOptions(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "facter.conf")
+	content := `fact-groups : {
+  pinned-config : [ "from_config" ],
+}`
+	if err := os.WriteFile(configPath, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "from-dir.yaml"), []byte("site_role: web\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{
+			name: "separate values",
+			args: []string{"--list-cache-groups", "-l", "debug", "-c", configPath, "--external-dir", dir},
+		},
+		{
+			name: "attached long values",
+			args: []string{"--list-cache-groups", "--log-level=debug", "--config=" + configPath, "--external-dir=" + dir},
+		},
+		{
+			name: "attached short log level and config",
+			args: []string{"--list-cache-groups", "-ldebug", "-c=" + configPath, "--external-dir", dir},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stdout, stderr := runAppOutput(t, tt.args...)
+			for _, want := range []string{"pinned-config\n- from_config", "from-dir.yaml\n"} {
+				if !strings.Contains(stdout, want) {
+					t.Fatalf("stdout = %q, want parsed group %q", stdout, want)
+				}
+			}
+			if strings.Contains(stdout, "debug\n") {
+				t.Fatalf("stdout = %q, want log-level value skipped, not treated as an external group", stdout)
+			}
+			if stderr != "" {
+				t.Fatalf("stderr = %q, want empty", stderr)
+			}
+		})
+	}
+}
+
+func TestRun_listTasksScanWholeTailForConfigAndExternalDirs(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "facter.conf")
+	content := `fact-groups : {
+  pinned-config : [ "from_config" ],
+}`
+	if err := os.WriteFile(configPath, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "from-dir.yaml"), []byte("site_role: web\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{
+			name: "config after positional",
+			args: []string{"--list-cache-groups", "bogus", "--config", configPath},
+			want: "pinned-config\n- from_config",
+		},
+		{
+			name: "config after delimiter",
+			args: []string{"--list-cache-groups", "--", "--config", configPath},
+			want: "pinned-config\n- from_config",
+		},
+		{
+			name: "external dir after positional",
+			args: []string{"--list-block-groups", "bogus", "--external-dir", dir},
+			want: "from-dir.yaml\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			if err := Run(&stdout, &stderr, tt.args); err != nil {
+				t.Fatalf("Run(%v) err = %v, want nil", tt.args, err)
+			}
+			if !strings.Contains(stdout.String(), tt.want) {
+				t.Fatalf("stdout = %q, want substring %q", stdout.String(), tt.want)
+			}
+			if stderr.Len() != 0 {
+				t.Fatalf("stderr = %q, want empty", stderr.String())
+			}
+		})
 	}
 }
 

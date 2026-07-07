@@ -57,50 +57,14 @@ func disabledFingerprint(disabled map[string]bool) string {
 // the composition order does not affect the resolved output; it mirrors the
 // historical assembly order for reviewability.
 func buildCoreFacts(s *Session, disabled map[string]bool) []ResolvedFact {
-	goos := s.goos()
-	virtualization := detectVirtualization(s)
-	virtualFact, isVirtualFact := virtualizationFactValues(virtualization)
-	dmi := s.cachedDMI()
-	facts := []ResolvedFact{
-		{Name: "facterversion", Value: Version},
-		{Name: "is_virtual", Value: isVirtualFact},
-		{Name: "path", Value: currentPathEntries(goos, s.getenv)},
-		{Name: "virtual", Value: virtualFact},
-	}
-	// gate skips a single-output category whose only top-level fact name is
-	// disabled, so the resolver never runs (resolution-gating, ADR-0015). Only
-	// categories whose entire output shares one root and whose probes are not
-	// needed by a kept fact are gated; multi-output (os/disks/uptime),
-	// shared-probe (identity, dmi), inline, and cloud/hypervisor facts below
-	// stay eager and rely on FilterDisabledFacts resolve-then-prune. selinux is
-	// likewise eager: it emits as os.selinux.* descendants, so a name-level
-	// disable of "selinux" is a no-op — it is disabled via os.selinux.
-	gate := func(fact string, resolve func(*Session) []ResolvedFact) {
-		if disabled[fact] {
-			return
+	build := newCoreFactBuild(s)
+	facts := make([]ResolvedFact, 0)
+	for _, descriptor := range coreFactDescriptors {
+		if descriptor.class == coreFactStandalone && disabled[descriptor.root] {
+			continue
 		}
-		facts = append(facts, resolve(s)...)
+		facts = append(facts, descriptor.assemble(build)...)
 	}
-	gate("networking", networkingCoreFacts)
-	gate("processors", processorsCoreFacts)
-	gate("memory", memoryCoreFacts)
-	facts = append(facts, osCoreFacts(s)...)
-	facts = append(facts, dmiCoreFacts(s)...)
-	facts = append(facts, disksCoreFacts(s)...)
-	gate("ssh", sshCoreFacts)
-	facts = append(facts, identityCoreFacts(s)...)
-	facts = append(facts, uptimeCoreFacts(s)...)
-	facts = append(facts, selinuxCoreFacts(s)...)
-	gate("fips_enabled", fipsCoreFacts)
-	gate("timezone", timezoneCoreFacts)
-	gate("augeas", augeasCoreFacts)
-	gate("xen", xenCoreFacts)
-	gate("packages", packagesCoreFacts)
-	facts = append(facts, currentLinuxHypervisorFacts(s)...)
-	facts = append(facts, currentWindowsHypervisorFacts(s)...)
-	facts = append(facts, azureFacts(s.Context(), newAzureClient(azureMetadataBaseURL, nil), virtualization)...)
-	facts = append(facts, ec2Facts(s, newEC2Client(ec2MetadataBaseURL, nil), virtualization)...)
-	facts = append(facts, platformGCEFacts(s.Context(), goos, virtualization, dmiBIOSVendor(dmi), newGCEClient(gceMetadataBaseURL, nil))...)
 	return facts
 }
 
