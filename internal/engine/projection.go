@@ -14,6 +14,10 @@ import (
 //
 // A Projection memoizes the canonical tree it builds for fallback digs, so
 // repeated lookups over one Projection do not rebuild the tree per call.
+// Discovery Projections select queries with the discovery plan's dotted mode;
+// a Snapshot retains a canonical non-force-dot Projection; OutputProjection
+// creates a defensive CLI presentation Projection; and the version fast path
+// builds its own synthetic one-fact Projection.
 type Projection struct {
 	facts              []ResolvedFact
 	includeTypedDotted bool
@@ -50,10 +54,10 @@ func (p *Projection) Collection() map[string]any {
 	return p.tree
 }
 
-// Select returns one resolved fact per query, applying reverse-precedence
+// selectFacts returns one resolved fact per query, applying reverse-precedence
 // selection, wildcard matching, and canonical tree fallback. With no queries it
 // returns the backing facts unchanged, matching the full-output contract.
-func (p *Projection) Select(queries []string) []ResolvedFact {
+func (p *Projection) selectFacts(queries []string) []ResolvedFact {
 	if len(queries) == 0 {
 		return p.facts
 	}
@@ -71,7 +75,7 @@ func (p *Projection) Select(queries []string) []ResolvedFact {
 // fact resolved is missing (value nil, found false). This is the Snapshot
 // missing-vs-nil contract.
 func (p *Projection) LookupValue(query string) (value any, found bool) {
-	fact := p.Select([]string{query})[0]
+	fact := p.selectFacts([]string{query})[0]
 	if v, found := valueForQuery(fact); found {
 		return v, true
 	}
@@ -84,14 +88,28 @@ func (p *Projection) LookupValue(query string) (value any, found bool) {
 // MissingQueries returns the user queries among selected facts that no fact
 // resolved to a non-nil value, in order, for CLI strict-mode reporting. A
 // selected fact with an empty UserQuery (full output) is never missing.
-func (p *Projection) MissingQueries(selected []ResolvedFact) []string {
+func (p *Projection) MissingQueries() []string {
 	missing := make([]string, 0)
-	for _, fact := range selected {
+	for _, fact := range p.facts {
 		if fact.UserQuery != "" && ValueForQuery(fact) == nil {
 			missing = append(missing, fact.UserQuery)
 		}
 	}
 	return missing
+}
+
+// PresentationNames returns one display name per backing fact in order. Query
+// output uses the original user query; full output falls back to the fact name.
+func (p *Projection) PresentationNames() []string {
+	names := make([]string, 0, len(p.facts))
+	for _, fact := range p.facts {
+		name := fact.UserQuery
+		if name == "" {
+			name = fact.Name
+		}
+		names = append(names, name)
+	}
+	return names
 }
 
 // OutputShape names the projection shape a formatter renders.
@@ -141,6 +159,27 @@ func (p *Projection) SingleQueryValue() any {
 // rendering.
 func (p *Projection) MultiQueryValues() map[string]any {
 	return factsForQueries(p.facts)
+}
+
+func uniqueQueries(facts []ResolvedFact) []string {
+	seen := make(map[string]bool, len(facts))
+	queries := make([]string, 0, len(facts))
+	for _, fact := range facts {
+		if seen[fact.UserQuery] {
+			continue
+		}
+		seen[fact.UserQuery] = true
+		queries = append(queries, fact.UserQuery)
+	}
+	return queries
+}
+
+func factsForQueries(facts []ResolvedFact) map[string]any {
+	values := make(map[string]any, len(facts))
+	for _, fact := range facts {
+		values[fact.UserQuery] = ValueForQuery(fact)
+	}
+	return values
 }
 
 // findFactIn returns the resolved fact for query using a precomputed

@@ -11,10 +11,11 @@ func BenchmarkFormatJSON(b *testing.B) {
 		{Name: "processors.models", Value: []string{"Apple M4 Pro"}},
 		{Name: "networking.hostname", Value: "host"},
 	}
+	projection := NewProjection(facts, false)
 
 	b.ReportAllocs()
 	for b.Loop() {
-		if _, err := FormatJSON(facts); err != nil {
+		if _, err := FormatJSON(projection); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -29,10 +30,11 @@ func BenchmarkFormatLegacy(b *testing.B) {
 		{Name: "processors.models", Value: []string{"Apple M4 Pro"}},
 		{Name: "networking.hostname", Value: "host"},
 	}
+	projection := NewProjection(facts, false)
 
 	b.ReportAllocs()
 	for b.Loop() {
-		_ = FormatLegacy(facts)
+		_ = FormatLegacy(projection)
 	}
 }
 
@@ -45,9 +47,10 @@ func BenchmarkFormatHOCON(b *testing.B) {
 		{Name: "processors.models", Value: []string{"Apple M4 Pro"}},
 		{Name: "networking.hostname", Value: "host"},
 	}
+	projection := NewProjection(facts, false)
 
 	b.ReportAllocs()
 	for b.Loop() {
-		_ = FormatHOCON(facts)
+		_ = FormatHOCON(projection)
 	}
 }

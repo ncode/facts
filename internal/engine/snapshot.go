@@ -83,10 +83,11 @@ func (sn *Snapshot) All() iter.Seq2[string, any] {
 	}
 }
 
-// Facts returns the resolved facts backing the Snapshot, for the CLI's
-// formatter pipeline.
-func (sn *Snapshot) Facts() []ResolvedFact {
-	return cloneFacts(sn.facts)
+// OutputProjection returns a defensive presentation Projection over the
+// Snapshot's selected facts. Its dotted-fact mode is independent from the
+// canonical non-force-dot Projection retained for Snapshot queries.
+func (sn *Snapshot) OutputProjection(includeTypedDotted bool) *Projection {
+	return NewProjection(cloneFacts(sn.facts), includeTypedDotted)
 }
 
 func cloneFacts(facts []ResolvedFact) []ResolvedFact {

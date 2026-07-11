@@ -245,7 +245,7 @@ func (e *Engine) Discover(ctx context.Context, queries ...string) (*Snapshot, er
 	facts = FilterDisabledFacts(facts, plan.disabledFacts)
 
 	if len(plan.queries) > 0 {
-		facts = NewProjection(facts, plan.includeTypedDotted).Select(plan.queries)
+		facts = NewProjection(facts, plan.includeTypedDotted).selectFacts(plan.queries)
 	}
 
 	if plan.useCache && ctx.Err() == nil {
@@ -258,7 +258,7 @@ func (e *Engine) Discover(ctx context.Context, queries ...string) (*Snapshot, er
 		}
 		facts = append(remaining, cached...)
 		if len(plan.queries) > 0 {
-			facts = NewProjection(facts, plan.includeTypedDotted).Select(plan.queries)
+			facts = NewProjection(facts, plan.includeTypedDotted).selectFacts(plan.queries)
 		}
 	}
 

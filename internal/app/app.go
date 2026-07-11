@@ -249,24 +249,19 @@ func runQuery(stdout, stderr io.Writer, args []string) error {
 	if err != nil {
 		return err
 	}
-	facts := snapshot.Facts()
+	presentation := snapshot.OutputProjection(mergeDottedFacts)
 	resolutionDuration := time.Since(resolutionStart).Seconds()
 	out, err := engine.BuildFormatter(engine.FormatOptions{
-		JSON:               options.JSON,
-		YAML:               options.YAML,
-		HOCON:              options.HOCON,
-		IncludeTypedDotted: mergeDottedFacts,
-		Colorize:           colorOutput,
-	}).Format(facts)
+		JSON:     options.JSON,
+		YAML:     options.YAML,
+		HOCON:    options.HOCON,
+		Colorize: colorOutput,
+	})(presentation)
 	if err != nil {
 		return err
 	}
 	if options.Timing {
-		for _, fact := range facts {
-			name := fact.UserQuery
-			if name == "" {
-				name = fact.Name
-			}
+		for _, name := range presentation.PresentationNames() {
 			if _, err := fmt.Fprintf(stdout, "fact '%s', took: (%.3f) seconds\n", name, resolutionDuration); err != nil {
 				return err
 			}
@@ -283,7 +278,7 @@ func runQuery(stdout, stderr io.Writer, args []string) error {
 		}
 	}
 	if options.Strict {
-		missing := engine.NewProjection(facts, mergeDottedFacts).MissingQueries(facts)
+		missing := presentation.MissingQueries()
 		if len(missing) > 0 {
 			for _, name := range missing {
 				writeError(stderr, fmt.Sprintf("fact %q does not exist.", name), colorDiagnostics)
@@ -392,15 +387,15 @@ func canUseVersionQueryFastPath(queries, externalDirs []string, disabledFacts ma
 }
 
 func writeVersionQuery(stdout io.Writer, jsonOutput, yamlOutput, hoconOutput bool) error {
-	facts := []engine.ResolvedFact{{Name: "facterversion", Value: engine.Version, UserQuery: "facterversion"}}
+	presentation := engine.NewProjection([]engine.ResolvedFact{{Name: "facterversion", Value: engine.Version, UserQuery: "facterversion"}}, false)
 	// The fast path carries only the three format booleans: it deliberately
-	// ignores --color and --force-dot-resolution, so Colorize/IncludeTypedDotted
-	// stay false and formatter selection reuses the engine's own precedence.
+	// ignores --color and --force-dot-resolution, so it uses an uncolored,
+	// non-force-dot Projection and the engine's own formatter precedence.
 	out, err := engine.BuildFormatter(engine.FormatOptions{
 		JSON:  jsonOutput,
 		YAML:  yamlOutput,
 		HOCON: hoconOutput,
-	}).Format(facts)
+	})(presentation)
 	if err != nil {
 		return err
 	}
