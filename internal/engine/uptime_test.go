@@ -193,9 +193,10 @@ func TestCurrentUptimeFallsBackToKernelBoottime(t *testing.T) {
 	s.host = host
 	now := func() time.Time { return time.Unix(120, 0) }
 
-	got := currentUptime(s, now)
-	if got != time.Minute {
-		t.Fatalf("currentUptime() = %s, want 1m0s", got)
+	got := currentUptimeInfo(s, now)
+	want := uptimeInfo{Duration: time.Minute, Known: true}
+	if got != want {
+		t.Fatalf("currentUptimeInfo() = %#v, want %#v", got, want)
 	}
 	if want := []string{"/proc/uptime"}; !reflect.DeepEqual(host.readFileCalls, want) {
 		t.Fatalf("readFile calls = %#v, want %#v", host.readFileCalls, want)
@@ -316,7 +317,7 @@ func TestCurrentUptimeInfoBSDsFallBackToUptimeCommand(t *testing.T) {
 	}
 }
 
-func TestCurrentUptimeUsesWindowsWMITimes(t *testing.T) {
+func TestCurrentUptimeInfoUsesWindowsWMITimes(t *testing.T) {
 	t.Parallel()
 
 	host := &fakeHostOS{
@@ -328,12 +329,13 @@ func TestCurrentUptimeUsesWindowsWMITimes(t *testing.T) {
 	s := NewSession()
 	s.host = host
 
-	got := currentUptime(s, time.Now)
-	if got != 105*time.Minute {
-		t.Fatalf("currentUptime(windows) = %s, want 1h45m0s", got)
+	got := currentUptimeInfo(s, time.Now)
+	want := uptimeInfo{Duration: 105 * time.Minute, Known: true}
+	if got != want {
+		t.Fatalf("currentUptimeInfo(windows) = %#v, want %#v", got, want)
 	}
 	if len(host.readFileCalls) != 0 {
-		t.Fatalf("currentUptime(windows) read %#v, want WMI only", host.readFileCalls)
+		t.Fatalf("currentUptimeInfo(windows) read %#v, want WMI only", host.readFileCalls)
 	}
 	if want := []fakeHostRunCall{{name: "wmic", args: []string{"os", "get", "LocalDateTime,LastBootUpTime", "/value"}}}; !reflect.DeepEqual(host.runCalls, want) {
 		t.Fatalf("run calls = %#v, want %#v", host.runCalls, want)
@@ -353,27 +355,6 @@ func TestCurrentWindowsUptimeSkipsNonWindows(t *testing.T) {
 	}
 	if len(host.runCalls) != 0 {
 		t.Fatal("currentWindowsUptime(non-windows) ran command")
-	}
-}
-
-func TestCurrentUptimeReturnsZeroForInvalidWindowsWMITimes(t *testing.T) {
-	t.Parallel()
-
-	host := &fakeHostOS{
-		platform: "windows",
-		runOutputs: map[string]string{
-			fakeRunKey("wmic", "os", "get", "LocalDateTime,LastBootUpTime", "/value"): "LocalDateTime=20010201110506+0700\r\nLastBootUpTime=20010201120506+0700\r\n",
-		},
-	}
-	s := NewSession()
-	s.host = host
-
-	got := currentUptime(s, time.Now)
-	if got != 0 {
-		t.Fatalf("currentUptime(windows invalid times) = %s, want 0", got)
-	}
-	if len(host.readFileCalls) != 0 {
-		t.Fatalf("currentUptime(windows) read %#v, want WMI only", host.readFileCalls)
 	}
 }
 

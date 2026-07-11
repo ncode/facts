@@ -6,19 +6,13 @@ import (
 	"testing"
 )
 
-func TestAugeasFacts_returnsStructuredVersion(t *testing.T) {
-	got := augeasFacts("augparse 1.14.1 <http://augeas.net/>")
+func TestAugeasVersionFacts_returnsParsedVersion(t *testing.T) {
+	got := augeasVersionFacts(parseAugeasVersion("augparse 1.14.1 <http://augeas.net/>"))
 	want := []ResolvedFact{
 		{Name: "augeas.version", Value: "1.14.1"},
 	}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("augeasFacts() = %#v, want %#v", got, want)
-	}
-}
-
-func TestAugeasFacts_skipsMissingVersion(t *testing.T) {
-	if got := augeasFacts(""); got != nil {
-		t.Fatalf("augeasFacts() = %#v, want nil", got)
+		t.Fatalf("augeasVersionFacts(parseAugeasVersion()) = %#v, want %#v", got, want)
 	}
 }
 

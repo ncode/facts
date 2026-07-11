@@ -20,10 +20,6 @@ func parseAugeasVersion(out string) string {
 	return augeasVersionPattern.FindString(out)
 }
 
-func augeasFacts(out string) []ResolvedFact {
-	return augeasVersionFacts(parseAugeasVersion(out))
-}
-
 // augeasVersionFacts returns the augeas fact, or nothing when no augparse
 // binary produced a version: Ruby Facter omits the fact instead of emitting
 // an empty version string.

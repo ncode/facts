@@ -96,10 +96,6 @@ func sshKeyName(keyType string) (string, int, bool) {
 	}
 }
 
-func sshFacts(keys []sshHostKey) []ResolvedFact {
-	return sshFactsForPlatform("", keys)
-}
-
 func sshFactsForPlatform(goos string, keys []sshHostKey) []ResolvedFact {
 	if len(keys) == 0 {
 		if goos == "openbsd" {

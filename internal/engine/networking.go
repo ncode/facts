@@ -1172,11 +1172,6 @@ func linuxDHCPServerFromLeaseDir(dir, interfaceName string, host hostOS) string 
 	return ""
 }
 
-func linuxDHClientDHCPServerForInterface(content, interfaceName string) (string, bool) {
-	server, _, explicit := linuxDHClientDHCPServerForInterfaceState(content, interfaceName)
-	return server, explicit
-}
-
 func linuxDHClientDHCPServerForInterfaceState(content, interfaceName string) (string, bool, bool) {
 	if !dhclientContentHasInterface(content) {
 		return "", false, false

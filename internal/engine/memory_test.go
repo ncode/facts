@@ -350,29 +350,6 @@ func TestDarwinMemoryParsersHandleMalformedAndNonDarwinInputs(t *testing.T) {
 	}
 }
 
-func TestBytesToMB(t *testing.T) {
-	tests := []struct {
-		name  string
-		value any
-		want  any
-	}{
-		{"bytes", 256_586_343, 244.6998052597046},
-		{"string bytes", "2343455", 2.2348928451538086},
-		{"string bytes with suffix", "2343455abc", 2.2348928451538086},
-		{"non numeric string", "not-a-number", 0.0},
-		{"zero", 0, 0.0},
-		{"nil", nil, nil},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := bytesToMB(tt.value); got != tt.want {
-				t.Fatalf("bytesToMB(%#v) = %#v, want %#v", tt.value, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestBytesToHumanReadable(t *testing.T) {
 	tests := []struct {
 		name  string

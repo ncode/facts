@@ -2,7 +2,6 @@ package engine
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
 )
 
@@ -71,41 +70,6 @@ func releaseHashFromString(version string, includePatch bool) map[string]any {
 		release["patch"] = parts[2]
 	}
 	return release
-}
-
-func releaseHashFromMatchData(match []string) map[string]any {
-	if len(match) < 2 {
-		return nil
-	}
-	return releaseHashFromString(match[1], false)
-}
-
-func tryToBool(value string) any {
-	switch value {
-	case "true":
-		return true
-	case "false":
-		return false
-	default:
-		return value
-	}
-}
-
-func tryToInt(value any) any {
-	switch v := value.(type) {
-	case int:
-		return v
-	case float64:
-		return int(v)
-	case string:
-		parsed, err := strconv.Atoi(v)
-		if err != nil {
-			return v
-		}
-		return parsed
-	default:
-		return value
-	}
 }
 
 func deepStringifyKeys(value any) any {

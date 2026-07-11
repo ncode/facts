@@ -2,7 +2,6 @@ package engine
 
 import (
 	"reflect"
-	"regexp"
 	"testing"
 )
 
@@ -98,84 +97,6 @@ func TestFirstNonEmptyReturnsFirstValueInOrder(t *testing.T) {
 	}
 	if got := firstNonEmpty("", ""); got != "" {
 		t.Fatalf("firstNonEmpty(empty) = %q, want empty", got)
-	}
-}
-
-func TestReleaseHashFromMatchData_matchesRubyFactsUtils(t *testing.T) {
-	releasePattern := regexp.MustCompile(`^RELEASE=(\d+.\d+.*)`)
-	majorPattern := regexp.MustCompile(`^RELEASE=(\d+)`)
-
-	tests := []struct {
-		name    string
-		match   []string
-		want    map[string]any
-		wantNil bool
-	}{
-		{name: "major minor", match: releasePattern.FindStringSubmatch("RELEASE=4.3"), want: map[string]any{"full": "4.3", "major": "4", "minor": "3"}},
-		{name: "major only", match: majorPattern.FindStringSubmatch("RELEASE=4"), want: map[string]any{"full": "4", "major": "4"}},
-		{name: "nil", match: nil, wantNil: true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := releaseHashFromMatchData(tt.match)
-			if tt.wantNil {
-				if got != nil {
-					t.Fatalf("releaseHashFromMatchData() = %#v, want nil", got)
-				}
-				return
-			}
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Fatalf("releaseHashFromMatchData() = %#v, want %#v", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestTryToBool_matchesRubyUtils(t *testing.T) {
-	tests := []struct {
-		name  string
-		input string
-		want  any
-	}{
-		{name: "true", input: "true", want: true},
-		{name: "false", input: "false", want: false},
-		{name: "unchanged", input: "something else", want: "something else"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := tryToBool(tt.input); got != tt.want {
-				t.Fatalf("tryToBool(%q) = %#v, want %#v", tt.input, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestTryToInt_matchesRubyUtils(t *testing.T) {
-	tests := []struct {
-		name  string
-		input any
-		want  any
-	}{
-		{name: "int", input: 7, want: 7},
-		{name: "string int", input: "7", want: 7},
-		{name: "positive string int", input: "+7", want: 7},
-		{name: "negative string int", input: "-7", want: -7},
-		{name: "float", input: 7.10, want: 7},
-		{name: "non numeric string", input: "string", want: "string"},
-		{name: "partial string int", input: "7string", want: "7string"},
-		{name: "true", input: true, want: true},
-		{name: "false", input: false, want: false},
-		{name: "string float", input: "7.10", want: "7.10"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := tryToInt(tt.input); got != tt.want {
-				t.Fatalf("tryToInt(%#v) = %#v, want %#v", tt.input, got, tt.want)
-			}
-		})
 	}
 }
 
