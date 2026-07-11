@@ -10,6 +10,7 @@ The Go port SHALL preserve Ruby-compatible framework behavior around configurati
 #### Scenario: Query and formatter behavior
 - **WHEN** Facter formats selected or unselected facts as legacy text, JSON, YAML, or HOCON
 - **THEN** the Go port MUST match Ruby behavior for nested fact selection, arrays, dotted fact names, nil rendering, scalar formatting, map ordering where specified, string quoting, IPv6/path handling, and collision diagnostics
+- **AND** selected-query projection, dotted fact mode, selected-query value maps, and strict missing-query detection MUST be provided by the internal projection module rather than duplicated across CLI and formatter paths
 - **AND** formatter adapters MUST consume shape and selected values from a presentation Projection rather than reconstructing a Projection from raw Snapshot records
 - **AND** each formatter MAY retain the format-specific scalar, map, ordering, quoting, and legacy transformation rules required for byte compatibility
 
