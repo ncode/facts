@@ -14,7 +14,7 @@ func TestProjectionSelectExtractsSelectedQueryValues(t *testing.T) {
 	}
 	projection := NewProjection(facts, false)
 
-	selected := projection.Select([]string{"os.release.major", "kernel"})
+	selected := projection.selectFacts([]string{"os.release.major", "kernel"})
 	if len(selected) != 2 {
 		t.Fatalf("Select() returned %d facts, want 2", len(selected))
 	}
@@ -52,7 +52,7 @@ func TestProjectionDottedFactModeMergesPartialQuery(t *testing.T) {
 		{Name: "a.b.c", Value: "external", Type: "external"},
 	}
 
-	dotted := NewProjection(facts, true).Select([]string{"a.b", "a"})
+	dotted := NewProjection(facts, true).selectFacts([]string{"a.b", "a"})
 	if got, want := ValueForQuery(dotted[0]), (map[string]any{"c": "external"}); !reflect.DeepEqual(got, want) {
 		t.Fatalf("dotted ValueForQuery(a.b) = %#v, want %#v", got, want)
 	}
@@ -60,7 +60,7 @@ func TestProjectionDottedFactModeMergesPartialQuery(t *testing.T) {
 		t.Fatalf("dotted ValueForQuery(a) = %#v, want %#v", got, want)
 	}
 
-	flat := NewProjection(facts, false).Select([]string{"a.b", "a"})
+	flat := NewProjection(facts, false).selectFacts([]string{"a.b", "a"})
 	if got := ValueForQuery(flat[0]); got != nil {
 		t.Fatalf("flat ValueForQuery(a.b) = %#v, want nil", got)
 	}
@@ -91,6 +91,14 @@ func TestProjectionShapeClassification(t *testing.T) {
 			want:  ShapeSingleQuery,
 		},
 		{
+			name: "repeated user query is single",
+			facts: []ResolvedFact{
+				{Name: "kernel", Value: "Darwin", UserQuery: "kernel"},
+				{Name: "kernel", Value: "Darwin", UserQuery: "kernel"},
+			},
+			want: ShapeSingleQuery,
+		},
+		{
 			name: "multiple user queries is multi",
 			facts: []ResolvedFact{
 				{Name: "kernel", Value: "Darwin", UserQuery: "kernel"},
@@ -116,9 +124,11 @@ func TestProjectionMissingQueriesReportsUnresolvedQueries(t *testing.T) {
 	facts := []ResolvedFact{
 		{Name: "kernel", Value: "Darwin", UserQuery: "kernel"},
 		{Name: "nope", UserQuery: "nope", Type: "nil"},
+		{Name: "still_present", Value: true, UserQuery: "still_present"},
+		{Name: "nope", UserQuery: "nope", Type: "nil"},
 	}
-	missing := NewProjection(facts, false).MissingQueries(facts)
-	if want := []string{"nope"}; !reflect.DeepEqual(missing, want) {
+	missing := NewProjection(facts, false).MissingQueries()
+	if want := []string{"nope", "nope"}; !reflect.DeepEqual(missing, want) {
 		t.Fatalf("MissingQueries() = %#v, want %#v", missing, want)
 	}
 }
@@ -130,7 +140,7 @@ func TestProjectionMissingQueriesTreatsResolvedNilSelectedValueAsMissing(t *test
 		{Name: "blank", Value: nil, UserQuery: "blank", Type: "external"},
 		{Name: "blank_custom", Value: nil, UserQuery: "blank_custom", Type: "custom"},
 	}
-	missing := NewProjection(facts, false).MissingQueries(facts)
+	missing := NewProjection(facts, false).MissingQueries()
 	if want := []string{"blank", "blank_custom"}; !reflect.DeepEqual(missing, want) {
 		t.Fatalf("MissingQueries() = %#v, want %#v", missing, want)
 	}
@@ -142,9 +152,23 @@ func TestProjectionMissingQueriesIgnoresFullOutputFacts(t *testing.T) {
 		{Name: "kernel", Value: "Darwin"},
 		{Name: "blank", Value: nil, Type: "external"},
 	}
-	missing := NewProjection(facts, false).MissingQueries(facts)
+	missing := NewProjection(facts, false).MissingQueries()
 	if len(missing) != 0 {
 		t.Fatalf("MissingQueries() = %#v, want empty", missing)
+	}
+}
+
+func TestProjectionPresentationNamesPreservesOrderAndDuplicates(t *testing.T) {
+	facts := []ResolvedFact{
+		{Name: "os", UserQuery: "os.name"},
+		{Name: "kernel"},
+		{Name: "os", UserQuery: "os.name"},
+	}
+
+	got := NewProjection(facts, false).PresentationNames()
+	want := []string{"os.name", "kernel", "os.name"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("PresentationNames() = %#v, want %#v", got, want)
 	}
 }
 
@@ -253,14 +277,14 @@ func TestSnapshotReturnedMutableValuesDoNotAffectSnapshot(t *testing.T) {
 		t.Fatalf("Value() after Tree mutation = %#v, want web", value)
 	}
 
-	facts := sn.Facts()
-	facts[0].Value.(map[string]any)["roles"].([]string)[0] = "db"
+	presentation := sn.OutputProjection(false)
+	presentation.FullTree()["site"].(map[string]any)["roles"].([]string)[0] = "db"
 	value, err = sn.Value("site.roles.0")
 	if err != nil {
 		t.Fatalf("Value() error = %v", err)
 	}
 	if value != "web" {
-		t.Fatalf("Value() after Facts mutation = %#v, want web", value)
+		t.Fatalf("Value() after OutputProjection mutation = %#v, want web", value)
 	}
 }
 

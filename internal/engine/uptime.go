@@ -32,10 +32,6 @@ func probeUptime(s *Session) uptimeInfo {
 	return currentUptimeInfo(s, time.Now)
 }
 
-func currentUptime(s *Session, now func() time.Time) time.Duration {
-	return currentUptimeInfo(s, now).Duration
-}
-
 func currentUptimeInfo(s *Session, now func() time.Time) uptimeInfo {
 	goos := s.goos()
 	if goos == "windows" {

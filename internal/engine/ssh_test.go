@@ -29,7 +29,7 @@ func TestParseSSHHostPublicKeyBuildsStructuredFacts(t *testing.T) {
 		t.Fatalf("entry.SHA256 = %q, want %q", got, want)
 	}
 
-	collection := Collection(sshFacts([]sshHostKey{entry}))
+	collection := Collection(sshFactsForPlatform("linux", []sshHostKey{entry}))
 	ssh, ok := collection["ssh"].(map[string]any)
 	if !ok {
 		t.Fatalf("ssh fact = %#v, want map", collection["ssh"])
@@ -145,7 +145,7 @@ func TestDiscoverSSHHostKeysWindowsReadsProgramDataSSH(t *testing.T) {
 }
 
 func TestSSHFactsPreserveFirstDuplicateKeyType(t *testing.T) {
-	collection := Collection(sshFacts([]sshHostKey{
+	collection := Collection(sshFactsForPlatform("linux", []sshHostKey{
 		{Name: "rsa", Type: "ssh-rsa", Key: "first", SHA1: "first-sha1", SHA256: "first-sha256"},
 		{Name: "rsa", Type: "ssh-rsa", Key: "second", SHA1: "second-sha1", SHA256: "second-sha256"},
 	}))

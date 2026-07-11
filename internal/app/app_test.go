@@ -782,6 +782,49 @@ func TestRun_timingPrintsResolutionDuration(t *testing.T) {
 	}
 }
 
+func TestRun_sharedPresentationProjectionPreservesTimingOutputAndStrictOrder(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+
+	err := Run(&stdout, &stderr, []string{"--timing", "--strict", "--json", "os.name", "missing_fact", "missing_fact"})
+	status, ok := err.(ExitStatus)
+	if !ok {
+		t.Fatalf("Run() err = %T %[1]v, want ExitStatus", err)
+	}
+	if status.Code() != 1 {
+		t.Fatalf("Run() status = %d, want 1", status.Code())
+	}
+
+	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
+	if len(lines) < 4 {
+		t.Fatalf("stdout = %q, want three timing lines followed by JSON", stdout.String())
+	}
+	for i, name := range []string{"os.name", "missing_fact", "missing_fact"} {
+		want := regexp.MustCompile(`^fact '` + regexp.QuoteMeta(name) + `', took: \([0-9]+\.[0-9]{3}\) seconds$`)
+		if !want.MatchString(lines[i]) {
+			t.Fatalf("timing line %d = %q, want query %q", i, lines[i], name)
+		}
+	}
+	formatted := strings.Join(lines[3:], "\n")
+	var got map[string]any
+	if err := json.Unmarshal([]byte(formatted), &got); err != nil {
+		t.Fatalf("formatted output after timing lines is not JSON: %q: %v", formatted, err)
+	}
+	if got["os.name"] == nil {
+		t.Fatalf("formatted output = %q, want resolved os.name", formatted)
+	}
+	if value, exists := got["missing_fact"]; !exists || value != nil {
+		t.Fatalf("formatted output = %q, want missing_fact null", formatted)
+	}
+	if strings.Index(formatted, `"missing_fact"`) > strings.Index(formatted, `"os.name"`) {
+		t.Fatalf("formatted output order = %q, want missing_fact before os.name", formatted)
+	}
+	wantStderr := "ERROR Facts - fact \"missing_fact\" does not exist.\n" +
+		"ERROR Facts - fact \"missing_fact\" does not exist.\n"
+	if got := stderr.String(); got != wantStderr {
+		t.Fatalf("stderr = %q, want %q", got, wantStderr)
+	}
+}
+
 func TestRun_rejectsRemovedCustomFactOptions(t *testing.T) {
 	tests := []struct {
 		name   string

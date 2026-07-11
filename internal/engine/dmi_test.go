@@ -274,7 +274,9 @@ func TestFreeBSDDMIFacts_returnsStructuredFacts(t *testing.T) {
 	}
 }
 
-func TestDragonFlyDMIFacts_fallsBackToDMIDecodeWhenKenvHasNoSMBIOS(t *testing.T) {
+func TestCurrentDragonFlyDMIFactsFallsBackToDMIDecodeWhenKenvHasNoSMBIOS(t *testing.T) {
+	t.Parallel()
+
 	bios := `BIOS Information
 	Vendor: SeaBIOS
 	Version: 1.16.3-debian-1.16.3-2
@@ -295,7 +297,19 @@ func TestDragonFlyDMIFacts_fallsBackToDMIDecodeWhenKenvHasNoSMBIOS(t *testing.T)
 	Asset Tag: Not Specified
 `
 
-	facts := dragonFlyDMIFacts(map[string]string{}, bios, system, chassis)
+	host := &fakeHostOS{
+		platform:        "dragonfly",
+		emptyRunDefault: true,
+		runOutputs: map[string]string{
+			fakeRunKey("/usr/local/sbin/dmidecode", "-t", "bios"):    bios,
+			fakeRunKey("/usr/local/sbin/dmidecode", "-t", "system"):  system,
+			fakeRunKey("/usr/local/sbin/dmidecode", "-t", "chassis"): chassis,
+		},
+	}
+	s := NewSessionContext(t.Context())
+	s.host = host
+
+	facts := currentDragonFlyDMIFacts(s)
 	collection := Collection(facts)
 
 	want := map[string]any{
@@ -318,29 +332,19 @@ func TestDragonFlyDMIFacts_fallsBackToDMIDecodeWhenKenvHasNoSMBIOS(t *testing.T)
 		},
 	}
 	if !reflect.DeepEqual(collection, want) {
-		t.Fatalf("dragonFlyDMIFacts() = %#v, want %#v", collection, want)
+		t.Fatalf("currentDragonFlyDMIFacts() = %#v, want %#v", collection, want)
 	}
-}
-
-func TestDragonFlyDMIFactsPrefersKenvSMBIOSValues(t *testing.T) {
-	values := map[string]string{
-		"smbios.system.maker":   "DragonFly Maker",
-		"smbios.system.product": "DragonFly Product",
+	wantCalls := make([]fakeHostRunCall, 0, len(freeBSDDMIKeys)+3)
+	for _, key := range freeBSDDMIKeys {
+		wantCalls = append(wantCalls, fakeHostRunCall{name: "kenv", args: []string{key}})
 	}
-
-	facts := dragonFlyDMIFacts(values, "Vendor: dmidecode BIOS", "Manufacturer: dmidecode", "Type: Other")
-	collection := Collection(facts)
-
-	want := map[string]any{
-		"dmi": map[string]any{
-			"manufacturer": "DragonFly Maker",
-			"product": map[string]any{
-				"name": "DragonFly Product",
-			},
-		},
-	}
-	if !reflect.DeepEqual(collection, want) {
-		t.Fatalf("dragonFlyDMIFacts() = %#v, want %#v", collection, want)
+	wantCalls = append(wantCalls,
+		fakeHostRunCall{name: "/usr/local/sbin/dmidecode", args: []string{"-t", "bios"}},
+		fakeHostRunCall{name: "/usr/local/sbin/dmidecode", args: []string{"-t", "system"}},
+		fakeHostRunCall{name: "/usr/local/sbin/dmidecode", args: []string{"-t", "chassis"}},
+	)
+	if !reflect.DeepEqual(host.runCalls, wantCalls) {
+		t.Fatalf("currentDragonFlyDMIFacts() run calls = %#v, want %#v", host.runCalls, wantCalls)
 	}
 }
 

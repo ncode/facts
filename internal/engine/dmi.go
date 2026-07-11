@@ -188,13 +188,6 @@ func freeBSDDMIFacts(values map[string]string) []ResolvedFact {
 	return []ResolvedFact{{Name: "dmi", Value: dmi}}
 }
 
-func dragonFlyDMIFacts(values map[string]string, biosOutput, systemOutput, chassisOutput string) []ResolvedFact {
-	if facts := freeBSDDMIFacts(values); len(facts) > 0 {
-		return facts
-	}
-	return dragonFlyDMIDecodeFacts(biosOutput, systemOutput, chassisOutput)
-}
-
 func dragonFlyDMIDecodeFacts(biosOutput, systemOutput, chassisOutput string) []ResolvedFact {
 	biosValues := parseColonValues(biosOutput)
 	systemValues := parseColonValues(systemOutput)

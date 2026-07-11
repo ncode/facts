@@ -130,21 +130,88 @@ func TestSnapshotTreeReturnsDeepCopy(t *testing.T) {
 	}
 }
 
-func TestSnapshotFactsReturnsDeepCopies(t *testing.T) {
-	snap := newSnapshot([]ResolvedFact{
-		{Name: "root", Value: map[string]any{"child": []any{"original"}}},
-	}, discardLog())
-
-	facts := snap.Facts()
-	facts[0].Value.(map[string]any)["child"].([]any)[0] = "mutated"
-
-	got, err := snap.Value("root.child.0")
-	if err != nil || got != "original" {
-		t.Fatalf("Value(root.child.0) after Facts mutation = %#v, %v, want original", got, err)
+func TestSnapshotOutputProjectionReturnsDeepCopies(t *testing.T) {
+	type node struct {
+		Value string
+		Next  *node
 	}
-	fresh := snap.Facts()
-	if got := fresh[0].Value.(map[string]any)["child"].([]any)[0]; got != "original" {
-		t.Fatalf("fresh Facts()[0] = %#v, want original", got)
+	type payload struct {
+		First   map[string]any
+		Second  map[string]any
+		Slice   []string
+		Array   [1]*node
+		Pointer *node
+	}
+
+	shared := map[string]any{"value": "original"}
+	cycle := &node{Value: "original"}
+	cycle.Next = cycle
+	snap := newSnapshot([]ResolvedFact{{
+		Name: "root",
+		Value: payload{
+			First:   shared,
+			Second:  shared,
+			Slice:   []string{"original"},
+			Array:   [1]*node{cycle},
+			Pointer: cycle,
+		},
+	}}, discardLog())
+
+	projected := snap.OutputProjection(false).FullTree()["root"].(payload)
+	if reflect.ValueOf(projected.First).Pointer() != reflect.ValueOf(projected.Second).Pointer() {
+		t.Fatal("OutputProjection() did not preserve a shared map alias")
+	}
+	if projected.Array[0] != projected.Pointer {
+		t.Fatal("OutputProjection() did not preserve a shared pointer alias")
+	}
+	if projected.Pointer.Next != projected.Pointer {
+		t.Fatal("OutputProjection() did not preserve a pointer cycle")
+	}
+	projected.First["value"] = "mutated"
+	projected.Slice[0] = "mutated"
+	projected.Pointer.Value = "mutated"
+
+	fresh := snap.OutputProjection(false).FullTree()["root"].(payload)
+	if got := fresh.First["value"]; got != "original" {
+		t.Fatalf("fresh OutputProjection().First[value] = %#v, want original", got)
+	}
+	if got := fresh.Second["value"]; got != "original" {
+		t.Fatalf("fresh OutputProjection().Second[value] = %#v, want original", got)
+	}
+	if got := fresh.Slice[0]; got != "original" {
+		t.Fatalf("fresh OutputProjection().Slice[0] = %#v, want original", got)
+	}
+	if got := fresh.Array[0].Value; got != "original" {
+		t.Fatalf("fresh OutputProjection().Array[0].Value = %#v, want original", got)
+	}
+	if got := fresh.Pointer.Value; got != "original" {
+		t.Fatalf("fresh OutputProjection().Pointer.Value = %#v, want original", got)
+	}
+}
+
+func TestSnapshotOutputProjectionKeepsForceDotSeparate(t *testing.T) {
+	snap := newSnapshot([]ResolvedFact{{Name: "a.b.c", Value: "external", Type: "external"}}, discardLog())
+	wantTree := snap.Tree()
+
+	presentation := snap.OutputProjection(true)
+	got := presentation.FullTree()["a"].(map[string]any)["b"].(map[string]any)["c"]
+	if got != "external" {
+		t.Fatalf("force-dot OutputProjection().FullTree()[a][b][c] = %#v, want external", got)
+	}
+	presentation.FullTree()["a"].(map[string]any)["b"].(map[string]any)["c"] = "mutated"
+
+	if got := snap.Tree(); !reflect.DeepEqual(got, wantTree) {
+		t.Fatalf("Tree() after force-dot presentation mutation = %#v, want %#v", got, wantTree)
+	}
+	if got, err := snap.Value("a.b"); got != nil || !errors.Is(err, ErrFactNotFound) {
+		t.Fatalf("Value(a.b) = %#v, %v, want ErrFactNotFound", got, err)
+	}
+	var names []string
+	for name := range snap.All() {
+		names = append(names, name)
+	}
+	if want := []string{"a.b.c"}; !reflect.DeepEqual(names, want) {
+		t.Fatalf("All() names = %#v, want %#v", names, want)
 	}
 }
 
@@ -169,11 +236,11 @@ func TestSnapshotCopiesPointerValues(t *testing.T) {
 		t.Fatalf("fresh Value(root) after pointer mutation = %#v, want original", got)
 	}
 
-	facts := snap.Facts()
-	(*facts[0].Value.(*map[string]any))["child"] = "mutated"
-	fresh := snap.Facts()
-	if got := (*fresh[0].Value.(*map[string]any))["child"]; got != "original" {
-		t.Fatalf("fresh Facts()[0] after pointer mutation = %#v, want original", got)
+	projected := snap.OutputProjection(false).FullTree()["root"].(*map[string]any)
+	(*projected)["child"] = "mutated"
+	fresh := snap.OutputProjection(false).FullTree()["root"].(*map[string]any)
+	if got := (*fresh)["child"]; got != "original" {
+		t.Fatalf("fresh OutputProjection().FullTree()[root] after pointer mutation = %#v, want original", got)
 	}
 
 	tree := snap.Tree()

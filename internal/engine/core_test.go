@@ -80,15 +80,7 @@ func TestPathEntries_splitsAndDropsEmpty(t *testing.T) {
 	}
 }
 
-func TestRootedPathAndIsSymlinkHelpers(t *testing.T) {
-	if got, want := rootedPath("/", "var/cache"), "/var/cache"; got != want {
-		t.Fatalf("rootedPath(/) = %q, want %q", got, want)
-	}
-	root := t.TempDir()
-	if got, want := rootedPath(root, "var/cache"), filepath.Join(root, "var/cache"); got != want {
-		t.Fatalf("rootedPath(temp) = %q, want %q", got, want)
-	}
-
+func TestIsSymlinkHelper(t *testing.T) {
 	lstat := func(path string) (os.FileInfo, error) {
 		switch path {
 		case "/link":

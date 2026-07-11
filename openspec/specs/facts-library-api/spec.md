@@ -34,7 +34,7 @@ An Engine SHALL be immutable after construction, with all fact registrations and
 - **THEN** each Snapshot reflects only its own Engine's configuration, with no cross-engine interference and no data races
 
 ### Requirement: Canonical tree queries and generic decode
-A Snapshot SHALL expose the canonical tree — the same fact names, nesting, and value normalization the output contract pins — through pure query operations using Facter dot-notation, and a generic decode (`facts.As[T]`) SHALL convert any queried subtree into a caller-supplied type. Decode MUST read from the resolved canonical tree and MUST NOT resolve facts independently. Snapshot value lookup SHALL use the same internal projection semantics as CLI query projection where their contracts overlap, while preserving the library distinction between missing facts and resolved nil registered/external facts.
+A Snapshot SHALL expose the canonical tree — the same fact names, nesting, and value normalization the output contract pins — through pure query operations using Facter dot-notation, and a generic decode (`facts.As[T]`) SHALL convert any queried subtree into a caller-supplied type. Decode MUST read from the resolved canonical tree and MUST NOT resolve facts independently. Snapshot value lookup SHALL use the same internal projection semantics as CLI query projection where their contracts overlap, while preserving the library distinction between missing facts and resolved nil registered/external facts. Internal presentation consumers MUST receive a defensive Projection rather than raw Snapshot records, and that Projection MUST NOT expand the public Snapshot API or permit mutation of Snapshot state.
 
 #### Scenario: Dotted query resolution
 - **WHEN** a consumer queries `snapshot.Value("os.release.major")`
@@ -47,6 +47,26 @@ A Snapshot SHALL expose the canonical tree — the same fact names, nesting, and
 #### Scenario: Decode shape mismatch fails loudly
 - **WHEN** an operator-supplied fact has reshaped a name (e.g. an external fact redefines `os` as a string) and a consumer decodes it into an incompatible type
 - **THEN** `facts.As[T]` returns a non-nil error describing the mismatch and never returns a partially or silently coerced value
+
+#### Scenario: Presentation cannot mutate a Snapshot
+- **WHEN** the internal CLI adapter formats a Snapshot through a presentation Projection and formatter or custom-value code mutates a returned map, slice, pointer, array, or exported struct field
+- **THEN** subsequent `Snapshot.Value`, `Snapshot.Tree`, `Snapshot.All`, and `facts.As[T]` calls MUST observe the original immutable Snapshot values
+
+#### Scenario: Internal presentation boundary hides resolved records
+- **WHEN** `internal/app` obtains a Snapshot's defensive presentation Projection
+- **THEN** no Snapshot method or app-visible Projection selection or iterator operation SHALL expose its backing `[]ResolvedFact` records
+- **AND** normal app and formatter paths MUST consume only Projection shape, value, name, and missing-query views
+- **AND** the version-query fast path MAY construct its separate synthetic resolved fact solely to build its independent presentation Projection
+
+#### Scenario: Force-dot presentation does not replace the canonical tree
+- **WHEN** the CLI requests force-dot presentation for dotted external or registered facts
+- **THEN** the internal presentation Projection MAY merge those dotted facts for query/output behavior
+- **AND** the Snapshot's canonical tree and public query/decode results MUST retain the existing non-force-dot semantics
+
+#### Scenario: Public Snapshot surface remains unchanged
+- **WHEN** the internal raw-fact formatter escape is replaced by a presentation Projection
+- **THEN** the public Snapshot SHALL continue to expose only its existing canonical tree, value lookup, ordered iteration, and generic decode operations
+- **AND** no public raw resolved-fact or Projection accessor SHALL be added
 
 ### Requirement: Error semantics
 The library SHALL distinguish missing facts from nil-valued facts via an `ErrFactNotFound` sentinel, SHALL return partial results with aggregated errors on partial discovery failure, and SHALL NOT treat not-applicable facts as failures.
@@ -96,4 +116,26 @@ Engine diagnostics SHALL flow through `log/slog` with the contract-pinned messag
 
 - **WHEN** an Engine constructed with `WithLogger` raises an error-class diagnostic (a collection collision, an unsupported cache group for an external fact, or an unparseable TTL unit)
 - **THEN** the diagnostic is emitted to the supplied logger at error severity, even though the facts CLI's stderr handler drops error-class lines
+
+### Requirement: Discovery uses one input plan per run
+The library SHALL derive source loading, blocklist, cache, and query-selection policy from one internal discovery plan for each `Discover` call. The plan MUST be recomputed per discovery so config files, external fact directories, environment facts, executable facts, and cache contents remain fresh across repeated discovery on the same immutable Engine.
+
+#### Scenario: Config is read at discovery time
+- **WHEN** an Engine configured with `WithConfigFile` discovers facts, the config file changes, and the same Engine discovers facts again
+- **THEN** the second Snapshot reflects the updated config-derived external dirs, blocklists, and cache TTL/group policy
+
+#### Scenario: Query selection happens in discovery
+- **WHEN** a consumer calls `Discover(ctx, "os.family")`
+- **THEN** the returned Snapshot is backed by facts selected with the same projection semantics used by CLI query projection where the contracts overlap
+- **AND** the public `Discover(ctx, queries...)` method shape remains unchanged
+
+#### Scenario: Cache policy stays discovery-scoped
+- **WHEN** an Engine is configured with cache enabled and config-derived TTL/group policy
+- **THEN** discovery applies cache resolution and cache refresh according to the per-discovery plan
+- **AND** the Engine does not memoize resolved fact values between discoveries
+
+#### Scenario: Force-dot resolution is not public library configuration
+- **WHEN** a library consumer constructs an Engine through public `facts` options
+- **THEN** no public option exists for force-dot resolution
+- **AND** the canonical Snapshot tree preserves existing dotted external and registered fact behavior
 

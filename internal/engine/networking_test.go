@@ -1860,7 +1860,34 @@ func TestLinuxDHCPServerFromLeaseDirStopsAtMatchingLeaseWithoutServer(t *testing
 	}
 }
 
-func TestLinuxDHClientDHCPServerForInterfaceFallsBackWhenInterfaceIsOutsideLeaseBlock(t *testing.T) {
+func TestLinuxDHClientDHCPServerForInterfaceStateTracksMatchAndExplicit(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		content  string
+		server   string
+		matched  bool
+		explicit bool
+	}{
+		{name: "no interface", content: `lease { option dhcp-server-identifier 10.32.10.163; }`},
+		{name: "other interface", content: `lease { interface "eth1"; option dhcp-server-identifier 10.99.99.99; }`, explicit: true},
+		{name: "matched without server", content: `lease { interface "eth0"; option host-name "edge"; }`, matched: true, explicit: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			server, matched, explicit := linuxDHClientDHCPServerForInterfaceState(tt.content, "eth0")
+			if server != tt.server || matched != tt.matched || explicit != tt.explicit {
+				t.Fatalf("linuxDHClientDHCPServerForInterfaceState() = (%q, %v, %v), want (%q, %v, %v)", server, matched, explicit, tt.server, tt.matched, tt.explicit)
+			}
+		})
+	}
+}
+
+func TestLinuxDHClientDHCPServerForInterfaceStateFallsBackWhenInterfaceIsOutsideLeaseBlock(t *testing.T) {
 	t.Parallel()
 
 	content := `interface "eth0";
@@ -1868,12 +1895,12 @@ lease {
   option dhcp-server-identifier 10.32.10.163;
 }`
 
-	got, ok := linuxDHClientDHCPServerForInterface(content, "eth0")
-	if !ok {
-		t.Fatal("linuxDHClientDHCPServerForInterface() ok = false, want true")
+	got, matched, explicit := linuxDHClientDHCPServerForInterfaceState(content, "eth0")
+	if !matched || !explicit {
+		t.Fatalf("linuxDHClientDHCPServerForInterfaceState() state = (%v, %v), want (true, true)", matched, explicit)
 	}
 	if got != "10.32.10.163" {
-		t.Fatalf("linuxDHClientDHCPServerForInterface() = %q, want 10.32.10.163", got)
+		t.Fatalf("linuxDHClientDHCPServerForInterfaceState() = %q, want 10.32.10.163", got)
 	}
 
 	content = `interface "eth0";
@@ -1884,12 +1911,12 @@ lease {
   interface "eth1";
   option dhcp-server-identifier 10.99.99.99;
 }`
-	got, ok = linuxDHClientDHCPServerForInterface(content, "eth0")
-	if !ok {
-		t.Fatal("linuxDHClientDHCPServerForInterface(mixed) ok = false, want true")
+	got, matched, explicit = linuxDHClientDHCPServerForInterfaceState(content, "eth0")
+	if !matched || !explicit {
+		t.Fatalf("linuxDHClientDHCPServerForInterfaceState(mixed) state = (%v, %v), want (true, true)", matched, explicit)
 	}
 	if got != "" {
-		t.Fatalf("linuxDHClientDHCPServerForInterface(mixed) = %q, want empty ambiguous mixed lease", got)
+		t.Fatalf("linuxDHClientDHCPServerForInterfaceState(mixed) = %q, want empty ambiguous mixed lease", got)
 	}
 
 	content = `interface "eth0";
@@ -1899,16 +1926,16 @@ lease {
 lease {
   option dhcp-server-identifier 10.99.99.99;
 }`
-	got, ok = linuxDHClientDHCPServerForInterface(content, "eth0")
-	if !ok {
-		t.Fatal("linuxDHClientDHCPServerForInterface(multiple unqualified) ok = false, want true")
+	got, matched, explicit = linuxDHClientDHCPServerForInterfaceState(content, "eth0")
+	if !matched || !explicit {
+		t.Fatalf("linuxDHClientDHCPServerForInterfaceState(multiple unqualified) state = (%v, %v), want (true, true)", matched, explicit)
 	}
 	if got != "10.99.99.99" {
-		t.Fatalf("linuxDHClientDHCPServerForInterface(multiple unqualified) = %q, want latest matching lease", got)
+		t.Fatalf("linuxDHClientDHCPServerForInterfaceState(multiple unqualified) = %q, want latest matching lease", got)
 	}
 }
 
-func TestLinuxDHClientDHCPServerForInterfaceIgnoresCommentAndQuotedBraces(t *testing.T) {
+func TestLinuxDHClientDHCPServerForInterfaceStateIgnoresCommentAndQuotedBraces(t *testing.T) {
 	t.Parallel()
 
 	content := `# lease { ignored }
@@ -1923,16 +1950,16 @@ lease {
   option dhcp-server-identifier 10.99.99.99;
 }`
 
-	got, ok := linuxDHClientDHCPServerForInterface(content, "eth0")
-	if !ok {
-		t.Fatal("linuxDHClientDHCPServerForInterface() ok = false, want true")
+	got, matched, explicit := linuxDHClientDHCPServerForInterfaceState(content, "eth0")
+	if !matched || !explicit {
+		t.Fatalf("linuxDHClientDHCPServerForInterfaceState() state = (%v, %v), want (true, true)", matched, explicit)
 	}
 	if got != "10.32.10.163" {
-		t.Fatalf("linuxDHClientDHCPServerForInterface() = %q, want 10.32.10.163", got)
+		t.Fatalf("linuxDHClientDHCPServerForInterfaceState() = %q, want 10.32.10.163", got)
 	}
 }
 
-func TestLinuxDHClientDHCPServerForInterfaceSkipsHeaderAndInterfaceComments(t *testing.T) {
+func TestLinuxDHClientDHCPServerForInterfaceStateSkipsHeaderAndInterfaceComments(t *testing.T) {
 	t.Parallel()
 
 	content := `lease # dhclient permits comments in whitespace
@@ -1947,34 +1974,34 @@ lease # another header comment
   option dhcp-server-identifier 10.99.99.99;
 }`
 
-	got, ok := linuxDHClientDHCPServerForInterface(content, "eth0")
-	if !ok {
-		t.Fatal("linuxDHClientDHCPServerForInterface() ok = false, want true")
+	got, matched, explicit := linuxDHClientDHCPServerForInterfaceState(content, "eth0")
+	if !matched || !explicit {
+		t.Fatalf("linuxDHClientDHCPServerForInterfaceState() state = (%v, %v), want (true, true)", matched, explicit)
 	}
 	if got != "10.32.10.163" {
-		t.Fatalf("linuxDHClientDHCPServerForInterface() = %q, want 10.32.10.163", got)
+		t.Fatalf("linuxDHClientDHCPServerForInterfaceState() = %q, want 10.32.10.163", got)
 	}
 	if blocks := linuxDHClientLeaseBlocks(content); len(blocks) != 2 {
 		t.Fatalf("linuxDHClientLeaseBlocks() found %d blocks, want 2", len(blocks))
 	}
 }
 
-func TestLinuxDHClientDHCPServerForInterfaceMatchesInlineInterfaceStatement(t *testing.T) {
+func TestLinuxDHClientDHCPServerForInterfaceStateMatchesInlineInterfaceStatement(t *testing.T) {
 	t.Parallel()
 
 	content := `lease { interface "eth1"; option dhcp-server-identifier 10.99.99.99; }
 lease { interface "eth0"; option dhcp-server-identifier 10.32.10.163; }`
 
-	got, ok := linuxDHClientDHCPServerForInterface(content, "eth0")
-	if !ok {
-		t.Fatal("linuxDHClientDHCPServerForInterface() ok = false, want true")
+	got, matched, explicit := linuxDHClientDHCPServerForInterfaceState(content, "eth0")
+	if !matched || !explicit {
+		t.Fatalf("linuxDHClientDHCPServerForInterfaceState() state = (%v, %v), want (true, true)", matched, explicit)
 	}
 	if got != "10.32.10.163" {
-		t.Fatalf("linuxDHClientDHCPServerForInterface() = %q, want 10.32.10.163", got)
+		t.Fatalf("linuxDHClientDHCPServerForInterfaceState() = %q, want 10.32.10.163", got)
 	}
 }
 
-func TestLinuxDHClientDHCPServerForInterfaceLatestMatchingLeaseWithoutServerWins(t *testing.T) {
+func TestLinuxDHClientDHCPServerForInterfaceStateLatestMatchingLeaseWithoutServerWins(t *testing.T) {
 	t.Parallel()
 
 	content := `lease {
@@ -1987,16 +2014,16 @@ lease {
   # option dhcp-server-identifier 10.99.99.99;
 }`
 
-	got, ok := linuxDHClientDHCPServerForInterface(content, "eth0")
-	if !ok {
-		t.Fatal("linuxDHClientDHCPServerForInterface() ok = false, want true")
+	got, matched, explicit := linuxDHClientDHCPServerForInterfaceState(content, "eth0")
+	if !matched || !explicit {
+		t.Fatalf("linuxDHClientDHCPServerForInterfaceState() state = (%v, %v), want (true, true)", matched, explicit)
 	}
 	if got != "" {
-		t.Fatalf("linuxDHClientDHCPServerForInterface() = %q, want empty latest matching lease server", got)
+		t.Fatalf("linuxDHClientDHCPServerForInterfaceState() = %q, want empty latest matching lease server", got)
 	}
 }
 
-func TestLinuxDHClientDHCPServerForInterfaceResyncsAfterMalformedLeaseBlock(t *testing.T) {
+func TestLinuxDHClientDHCPServerForInterfaceStateResyncsAfterMalformedLeaseBlock(t *testing.T) {
 	t.Parallel()
 
 	content := `lease {
@@ -2007,12 +2034,12 @@ lease {
   option dhcp-server-identifier 10.99.99.99;
 }`
 
-	got, ok := linuxDHClientDHCPServerForInterface(content, "eth0")
-	if !ok {
-		t.Fatal("linuxDHClientDHCPServerForInterface() ok = false, want true")
+	got, matched, explicit := linuxDHClientDHCPServerForInterfaceState(content, "eth0")
+	if !matched || !explicit {
+		t.Fatalf("linuxDHClientDHCPServerForInterfaceState() state = (%v, %v), want (true, true)", matched, explicit)
 	}
 	if got != "" {
-		t.Fatalf("linuxDHClientDHCPServerForInterface() = %q, want empty when only later valid block belongs to eth1", got)
+		t.Fatalf("linuxDHClientDHCPServerForInterfaceState() = %q, want empty when only later valid block belongs to eth1", got)
 	}
 
 	blocks := linuxDHClientLeaseBlocks(content)
@@ -2040,7 +2067,7 @@ func TestLinuxDHClientLeaseBlocksResyncsAcrossRepeatedMalformedBlocks(t *testing
 	}
 }
 
-func TestLinuxDHClientDHCPServerForInterfaceResyncsAfterUnterminatedQuotedString(t *testing.T) {
+func TestLinuxDHClientDHCPServerForInterfaceStateResyncsAfterUnterminatedQuotedString(t *testing.T) {
 	t.Parallel()
 
 	content := `lease {
@@ -2051,12 +2078,12 @@ lease {
   option dhcp-server-identifier 10.99.99.99;
 }`
 
-	got, ok := linuxDHClientDHCPServerForInterface(content, "eth0")
-	if !ok {
-		t.Fatal("linuxDHClientDHCPServerForInterface() ok = false, want true")
+	got, matched, explicit := linuxDHClientDHCPServerForInterfaceState(content, "eth0")
+	if !matched || !explicit {
+		t.Fatalf("linuxDHClientDHCPServerForInterfaceState() state = (%v, %v), want (true, true)", matched, explicit)
 	}
 	if got != "" {
-		t.Fatalf("linuxDHClientDHCPServerForInterface() = %q, want empty when only later valid block belongs to eth1", got)
+		t.Fatalf("linuxDHClientDHCPServerForInterfaceState() = %q, want empty when only later valid block belongs to eth1", got)
 	}
 
 	blocks := linuxDHClientLeaseBlocks(content)

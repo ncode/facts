@@ -10,7 +10,7 @@ func TestProjectionKeepsTypedDottedFactFlatByDefault(t *testing.T) {
 		{Name: "a.b.c", Value: "external", Type: "external"},
 	}
 
-	selected := NewProjection(facts, false).Select([]string{"a.b.c"})
+	selected := NewProjection(facts, false).selectFacts([]string{"a.b.c"})
 	if len(selected) != 1 {
 		t.Fatalf("Select() returned %d facts, want 1", len(selected))
 	}
@@ -24,7 +24,7 @@ func TestProjectionUnmatchedQueryWithRegexMetacharacterReturnsNilFact(t *testing
 		{Name: "a_loaded_fact", Type: "custom"},
 	}
 
-	selected := NewProjection(facts, false).Select([]string{"regex(string"})
+	selected := NewProjection(facts, false).selectFacts([]string{"regex(string"})
 	if len(selected) != 1 {
 		t.Fatalf("Select() returned %d facts, want 1", len(selected))
 	}
@@ -50,7 +50,7 @@ func TestProjectionMatchesWildcardFactNameLikeRubyQueryParser(t *testing.T) {
 		{Name: "os.family", Value: "Debian", Type: "core"},
 	}
 
-	selected := NewProjection(facts, false).Select([]string{"ipaddress_ens160"})
+	selected := NewProjection(facts, false).selectFacts([]string{"ipaddress_ens160"})
 	if len(selected) != 1 {
 		t.Fatalf("Select() returned %d facts, want 1", len(selected))
 	}
@@ -72,7 +72,7 @@ func TestProjectionWildcardFactNameEscapesOtherRegexpCharacters(t *testing.T) {
 		{Name: "metric[prod].*", Value: "literal", Type: "external"},
 	}
 
-	selected := NewProjection(facts, false).Select([]string{"metric[prod]cpu"})
+	selected := NewProjection(facts, false).selectFacts([]string{"metric[prod]cpu"})
 	if len(selected) != 1 {
 		t.Fatalf("Select() returned %d facts, want 1", len(selected))
 	}
@@ -92,7 +92,7 @@ func TestProjectionDoesNotMatchWildcardNameForDottedStructuredQuery(t *testing.T
 		{Name: "ssh", Value: map[string]any{"rsa": map[string]any{"key": "structured"}}, Type: "core"},
 	}
 
-	selected := NewProjection(facts, false).Select([]string{"ssh.rsa.key"})
+	selected := NewProjection(facts, false).selectFacts([]string{"ssh.rsa.key"})
 	if len(selected) != 1 {
 		t.Fatalf("Select() returned %d facts, want 1", len(selected))
 	}

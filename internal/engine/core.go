@@ -157,26 +157,8 @@ func missingFileReader(string) ([]byte, error) {
 	return nil, os.ErrNotExist
 }
 
-func rootedPath(root, path string) string {
-	if root == "/" {
-		return "/" + strings.TrimPrefix(path, "/")
-	}
-	return filepath.Join(root, path)
-}
-
 func (s *Session) commandOutput(name string, args ...string) string {
 	return s.host.run(s.ctx, name, args...)
-}
-
-func bytesToMB(value any) any {
-	number, ok := numericValue(value)
-	if !ok {
-		return nil
-	}
-	if number <= 0 {
-		return 0.0
-	}
-	return number / (1024.0 * 1024.0)
 }
 
 func bytesToHumanReadable(value any) any {

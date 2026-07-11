@@ -8,31 +8,35 @@ import (
 func TestBuildFormatterMatchesRubyFormatterFactory(t *testing.T) {
 	t.Parallel()
 
+	facts := []ResolvedFact{{Name: "kernel", Value: "Darwin"}}
 	tests := []struct {
 		name string
 		opts FormatOptions
 		want string
 	}{
-		{name: "json", opts: FormatOptions{JSON: true}, want: "json"},
-		{name: "yaml", opts: FormatOptions{YAML: true}, want: "yaml"},
-		{name: "hocon", opts: FormatOptions{HOCON: true}, want: "hocon"},
-		{name: "legacy", opts: FormatOptions{}, want: "legacy"},
-		{name: "json preferred over yaml", opts: FormatOptions{JSON: true, YAML: true}, want: "json"},
+		{name: "json", opts: FormatOptions{JSON: true}, want: "{\n  \"kernel\": \"Darwin\"\n}"},
+		{name: "yaml", opts: FormatOptions{YAML: true}, want: "kernel: \"Darwin\"\n"},
+		{name: "hocon", opts: FormatOptions{HOCON: true}, want: "kernel=Darwin\n"},
+		{name: "legacy", opts: FormatOptions{}, want: "kernel => Darwin"},
+		{name: "json preferred over yaml", opts: FormatOptions{JSON: true, YAML: true}, want: "{\n  \"kernel\": \"Darwin\"\n}"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			got := BuildFormatter(tt.opts)
-			if got.Name() != tt.want {
-				t.Fatalf("BuildFormatter(%#v).Name() = %q, want %q", tt.opts, got.Name(), tt.want)
+			got, err := BuildFormatter(tt.opts)(NewProjection(facts, false))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != tt.want {
+				t.Fatalf("BuildFormatter(%#v)() = %q, want %q", tt.opts, got, tt.want)
 			}
 		})
 	}
 }
 
-func TestBuildFormatterWiresDottedAndColorOptions(t *testing.T) {
+func TestBuildFormatterConsumesProjectionAndColorOptions(t *testing.T) {
 	facts := []ResolvedFact{
 		{Name: "os.name", Value: "Darwin"},
 		{Name: "site.role", Value: "web", Type: "external"},
@@ -40,52 +44,53 @@ func TestBuildFormatterWiresDottedAndColorOptions(t *testing.T) {
 	tests := []struct {
 		name string
 		opts FormatOptions
-		want func([]ResolvedFact) (string, error)
+		want func(*Projection) (string, error)
 	}{
 		{
 			name: "json dotted",
-			opts: FormatOptions{JSON: true, IncludeTypedDotted: true},
-			want: func(facts []ResolvedFact) (string, error) {
-				return FormatJSONWithDottedFacts(facts, true)
+			opts: FormatOptions{JSON: true},
+			want: func(projection *Projection) (string, error) {
+				return FormatJSON(projection)
 			},
 		},
 		{
 			name: "yaml dotted",
-			opts: FormatOptions{YAML: true, IncludeTypedDotted: true},
-			want: func(facts []ResolvedFact) (string, error) {
-				return FormatYAMLWithDottedFacts(facts, true), nil
+			opts: FormatOptions{YAML: true},
+			want: func(projection *Projection) (string, error) {
+				return FormatYAML(projection), nil
 			},
 		},
 		{
 			name: "hocon dotted",
-			opts: FormatOptions{HOCON: true, IncludeTypedDotted: true},
-			want: func(facts []ResolvedFact) (string, error) {
-				return FormatHOCONWithDottedFacts(facts, true), nil
+			opts: FormatOptions{HOCON: true},
+			want: func(projection *Projection) (string, error) {
+				return FormatHOCON(projection), nil
 			},
 		},
 		{
 			name: "legacy dotted color",
-			opts: FormatOptions{IncludeTypedDotted: true, Colorize: true},
-			want: func(facts []ResolvedFact) (string, error) {
-				return FormatLegacyColored(facts, true, true), nil
+			opts: FormatOptions{Colorize: true},
+			want: func(projection *Projection) (string, error) {
+				return FormatLegacyColored(projection, true), nil
 			},
 		},
 		{
 			name: "legacy plain",
 			opts: FormatOptions{},
-			want: func(facts []ResolvedFact) (string, error) {
-				return FormatLegacyColored(facts, false, false), nil
+			want: func(projection *Projection) (string, error) {
+				return FormatLegacy(projection), nil
 			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := BuildFormatter(tt.opts).Format(facts)
+			projection := NewProjection(facts, true)
+			got, err := BuildFormatter(tt.opts)(projection)
 			if err != nil {
 				t.Fatal(err)
 			}
-			want, err := tt.want(facts)
+			want, err := tt.want(projection)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -105,20 +110,21 @@ func TestBuildFormatterMachineFormatsIgnoreColorize(t *testing.T) {
 		name string
 		opts FormatOptions
 	}{
-		{name: "json", opts: FormatOptions{JSON: true, IncludeTypedDotted: true}},
-		{name: "yaml", opts: FormatOptions{YAML: true, IncludeTypedDotted: true}},
-		{name: "hocon", opts: FormatOptions{HOCON: true, IncludeTypedDotted: true}},
+		{name: "json", opts: FormatOptions{JSON: true}},
+		{name: "yaml", opts: FormatOptions{YAML: true}},
+		{name: "hocon", opts: FormatOptions{HOCON: true}},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			plain, err := BuildFormatter(tt.opts).Format(facts)
+			projection := NewProjection(facts, true)
+			plain, err := BuildFormatter(tt.opts)(projection)
 			if err != nil {
 				t.Fatal(err)
 			}
 			colorizedOpts := tt.opts
 			colorizedOpts.Colorize = true
-			colorized, err := BuildFormatter(colorizedOpts).Format(facts)
+			colorized, err := BuildFormatter(colorizedOpts)(projection)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -209,7 +215,7 @@ func TestFormatJSON_noUserQueryBuildsStructuredFacts(t *testing.T) {
 		{Name: "os.architecture", Value: "x86_64"},
 	}
 
-	got, err := FormatJSON(facts)
+	got, err := FormatJSON(NewProjection(facts, false))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -225,7 +231,7 @@ func TestFormatJSON_userQueriesUseOriginalQueryKeys(t *testing.T) {
 		{Name: "os.family", Value: "Darwin", UserQuery: "os.family"},
 	}
 
-	got, err := FormatJSON(facts)
+	got, err := FormatJSON(NewProjection(facts, false))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -243,7 +249,7 @@ func TestFormatJSON_userQueriesRenderStructuredEdgeValues(t *testing.T) {
 		{Name: "a.b", Value: map[string]any{"c": "d"}, UserQuery: "a.b"},
 	}
 
-	got, err := FormatJSON(facts)
+	got, err := FormatJSON(NewProjection(facts, false))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -260,7 +266,7 @@ func TestFormatYAML_noUserQueryBuildsStructuredFacts(t *testing.T) {
 		{Name: "os.architecture", Value: "x86_64"},
 	}
 
-	got := FormatYAML(facts)
+	got := FormatYAML(NewProjection(facts, false))
 	want := "os:\n  architecture: x86_64\n  family: \"Darwin\"\n  name: \"Darwin\"\n"
 	if got != want {
 		t.Fatalf("FormatYAML() = %q, want %q", got, want)
@@ -272,7 +278,7 @@ func TestFormatYAML_singleUserQueryUsesOriginalQueryKey(t *testing.T) {
 		{Name: "os.name", Value: "Darwin", UserQuery: "os.name"},
 	}
 
-	got := FormatYAML(facts)
+	got := FormatYAML(NewProjection(facts, false))
 	want := "os.name: \"Darwin\"\n"
 	if got != want {
 		t.Fatalf("FormatYAML() = %q, want %q", got, want)
@@ -285,7 +291,7 @@ func TestFormatYAML_multipleUserQueriesUseOriginalQueryKeys(t *testing.T) {
 		{Name: "os.family", Value: "Darwin", UserQuery: "os.family"},
 	}
 
-	got := FormatYAML(facts)
+	got := FormatYAML(NewProjection(facts, false))
 	want := "os.family: \"Darwin\"\nos.name: \"Darwin\"\n"
 	if got != want {
 		t.Fatalf("FormatYAML() = %q, want %q", got, want)
@@ -317,7 +323,7 @@ func TestFormatYAML_quotesUnsafeKeys(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := FormatYAML([]ResolvedFact{tt.fact})
+			got := FormatYAML(NewProjection([]ResolvedFact{tt.fact}, false))
 			if got != tt.want {
 				t.Fatalf("FormatYAML() = %q, want %q", got, tt.want)
 			}
@@ -330,7 +336,7 @@ func TestFormatYAML_formatsArrayValuesAsSequences(t *testing.T) {
 		{Name: "arr_ext_fact", Value: []any{"ex1", "ex2"}, UserQuery: "arr_ext_fact"},
 	}
 
-	got := FormatYAML(facts)
+	got := FormatYAML(NewProjection(facts, false))
 	want := "arr_ext_fact:\n- ex1\n- ex2\n"
 	if got != want {
 		t.Fatalf("FormatYAML() = %q, want %q", got, want)
@@ -342,7 +348,7 @@ func TestFormatYAML_quotesWindowsPath(t *testing.T) {
 		{Name: "path", Value: `C:\Program Files\Puppet Labs\Puppet\bin;C:\cygwin64\bin`},
 	}
 
-	got := FormatYAML(facts)
+	got := FormatYAML(NewProjection(facts, false))
 	want := "path: \"C:\\\\Program Files\\\\Puppet Labs\\\\Puppet\\\\bin;C:\\\\cygwin64\\\\bin\"\n"
 	if got != want {
 		t.Fatalf("FormatYAML() = %q, want %q", got, want)
@@ -354,7 +360,7 @@ func TestFormatYAML_formatsFloatWithoutQuotes(t *testing.T) {
 		{Name: "load_average", Value: 1.35},
 	}
 
-	got := FormatYAML(facts)
+	got := FormatYAML(NewProjection(facts, false))
 	want := "load_average: 1.35\n"
 	if got != want {
 		t.Fatalf("FormatYAML() = %q, want %q", got, want)
@@ -366,7 +372,7 @@ func TestFormatYAML_formatsNestedArrayValuesAsYAML(t *testing.T) {
 		{Name: "nested", Value: []any{[]any{"a", "b"}, map[string]any{"name": "c"}}, UserQuery: "nested"},
 	}
 
-	got := FormatYAML(facts)
+	got := FormatYAML(NewProjection(facts, false))
 	want := "nested:\n- [a, b]\n- name: c\n"
 	if got != want {
 		t.Fatalf("FormatYAML() = %q, want %q", got, want)
@@ -378,7 +384,7 @@ func TestFormatYAML_formatsMultiKeyMapsInSequencesAsValidYAML(t *testing.T) {
 		{Name: "nested", Value: []any{map[string]any{"b": 2, "a": "true"}}, UserQuery: "nested"},
 	}
 
-	got := FormatYAML(facts)
+	got := FormatYAML(NewProjection(facts, false))
 	want := "nested:\n- {a: 'true', b: 2}\n"
 	if got != want {
 		t.Fatalf("FormatYAML() = %q, want %q", got, want)
@@ -395,7 +401,7 @@ func TestFormatYAML_quotesStringValuesThatYAMLWouldParseAsScalars(t *testing.T) 
 		{Name: "feature.upper_empty", Value: "NULL"},
 	}
 
-	got := FormatYAML(facts)
+	got := FormatYAML(NewProjection(facts, false))
 	want := "feature:\n  disabled: 'false'\n  empty: \"null\"\n  enabled: 'true'\n  upper_disabled: \"FALSE\"\n  upper_empty: \"NULL\"\n  upper_enabled: \"TRUE\"\n"
 	if got != want {
 		t.Fatalf("FormatYAML() = %q, want %q", got, want)
@@ -412,7 +418,7 @@ func TestFormatYAML_userQueriesRenderMapsNilWindowsPathIPv6AndScalarQuoting(t *t
 		{Name: "under", Value: "x_y", UserQuery: "under"},
 	}
 
-	got := FormatYAML(facts)
+	got := FormatYAML(NewProjection(facts, false))
 	want := "empty: \"null\"\nenabled: 'true'\nnetworking:\n  ip6: \"::1\"\n  maybe: \"\"\npath: \"C:\\\\Program Files\\\\Puppet Labs\\\\Puppet\\\\bin\"\nroles:\n- web\n- db\nunder: \"x_y\"\n"
 	if got != want {
 		t.Fatalf("FormatYAML() = %q, want %q", got, want)
@@ -426,7 +432,7 @@ func TestFormatHOCON_noUserQueryBuildsStructuredFacts(t *testing.T) {
 		{Name: "os.architecture", Value: "x86_64"},
 	}
 
-	got := FormatHOCON(facts)
+	got := FormatHOCON(NewProjection(facts, false))
 	want := "os={\n    architecture=\"x86_64\"\n    family=Darwin\n    name=Darwin\n}\n"
 	if got != want {
 		t.Fatalf("FormatHOCON() = %q, want %q", got, want)
@@ -438,7 +444,7 @@ func TestFormatHOCON_singleUserQueryReturnsScalar(t *testing.T) {
 		{Name: "os.name", Value: "Darwin", UserQuery: "os.name"},
 	}
 
-	if got, want := FormatHOCON(facts), "Darwin"; got != want {
+	if got, want := FormatHOCON(NewProjection(facts, false)), "Darwin"; got != want {
 		t.Fatalf("FormatHOCON() = %q, want %q", got, want)
 	}
 }
@@ -449,7 +455,7 @@ func TestFormatHOCON_multipleUserQueriesUseQuotedQueryKeys(t *testing.T) {
 		{Name: "os.family", Value: "Darwin", UserQuery: "os.family"},
 	}
 
-	got := FormatHOCON(facts)
+	got := FormatHOCON(NewProjection(facts, false))
 	want := "\"os.family\"=Darwin\n\"os.name\"=Darwin\n"
 	if got != want {
 		t.Fatalf("FormatHOCON() = %q, want %q", got, want)
@@ -461,7 +467,7 @@ func TestFormatHOCON_quotesUnsafeKeys(t *testing.T) {
 		{Name: "bad\x07key", Value: "value", Type: "external"},
 	}
 
-	got := FormatHOCON(facts)
+	got := FormatHOCON(NewProjection(facts, false))
 	want := "\"bad\\u0007key\"=value\n"
 	if got != want {
 		t.Fatalf("FormatHOCON() = %q, want %q", got, want)
@@ -469,7 +475,7 @@ func TestFormatHOCON_quotesUnsafeKeys(t *testing.T) {
 }
 
 func TestFormatHOCON_emptyFactsReturnsEmptyOutput(t *testing.T) {
-	if got := FormatHOCON(nil); got != "" {
+	if got := FormatHOCON(NewProjection(nil, false)); got != "" {
 		t.Fatalf("FormatHOCON() = %q, want empty", got)
 	}
 }
@@ -479,7 +485,7 @@ func TestFormatHOCON_formatsArrayValues(t *testing.T) {
 		{Name: "processors.models", Value: []any{"Apple M4 Pro", "Apple M4 Max"}},
 	}
 
-	got := FormatHOCON(facts)
+	got := FormatHOCON(NewProjection(facts, false))
 	want := "processors={\n    models=[\"Apple M4 Pro\",\"Apple M4 Max\"]\n}\n"
 	if got != want {
 		t.Fatalf("FormatHOCON() = %q, want %q", got, want)
@@ -491,7 +497,7 @@ func TestFormatHOCON_quotesUnsafeStringValues(t *testing.T) {
 		{Name: "external.payload", Value: "a=b # not syntax"},
 	}
 
-	got := FormatHOCON(facts)
+	got := FormatHOCON(NewProjection(facts, false))
 	want := "external={\n    payload=\"a=b # not syntax\"\n}\n"
 	if got != want {
 		t.Fatalf("FormatHOCON() = %q, want %q", got, want)
@@ -503,7 +509,7 @@ func TestFormatHOCON_preservesFloatPrecision(t *testing.T) {
 		{Name: "load_average", Value: 1.35},
 	}
 
-	got := FormatHOCON(facts)
+	got := FormatHOCON(NewProjection(facts, false))
 	want := "load_average=1.35\n"
 	if got != want {
 		t.Fatalf("FormatHOCON() = %q, want %q", got, want)
@@ -515,7 +521,7 @@ func TestFormatHOCON_singleNilQueryReturnsEmptyScalar(t *testing.T) {
 		{Name: "my_external_fact", UserQuery: "my_external_fact", Value: nil},
 	}
 
-	if got := FormatHOCON(facts); got != "" {
+	if got := FormatHOCON(NewProjection(facts, false)); got != "" {
 		t.Fatalf("FormatHOCON() = %q, want empty", got)
 	}
 }
@@ -534,7 +540,7 @@ func TestFormatHOCON_singleQueriesRenderTypedSlicesAndGenericMaps(t *testing.T) 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			facts := []ResolvedFact{{Name: "query", UserQuery: "query", Value: tt.value}}
-			if got := FormatHOCON(facts); got != tt.want {
+			if got := FormatHOCON(NewProjection(facts, false)); got != tt.want {
 				t.Fatalf("FormatHOCON() = %q, want %q", got, tt.want)
 			}
 		})
@@ -551,7 +557,7 @@ func TestFormatLegacy_singleUserQueryDigsIntoArraysAndMaps(t *testing.T) {
 		},
 	}
 
-	if got, want := FormatLegacy([]ResolvedFact{fact}), "second"; got != want {
+	if got, want := FormatLegacy(NewProjection([]ResolvedFact{fact}, false)), "second"; got != want {
 		t.Fatalf("FormatLegacy() = %q, want %q", got, want)
 	}
 }
@@ -563,7 +569,7 @@ func TestFormatLegacy_wrongNestedQueryWithStringLeafReturnsEmpty(t *testing.T) {
 		Value:     map[string]any{"/tmp": "something"},
 	}
 
-	if got := FormatLegacy([]ResolvedFact{fact}); got != "" {
+	if got := FormatLegacy(NewProjection([]ResolvedFact{fact}, false)); got != "" {
 		t.Fatalf("FormatLegacy() = %q, want empty", got)
 	}
 }
@@ -575,7 +581,7 @@ func TestFormatLegacy_multipleQueriesPrintEmptyValues(t *testing.T) {
 	}
 
 	want := "nil_resolved_fact1 => \nresolved_fact2 => resolved_fact2_value"
-	if got := FormatLegacy(facts); got != want {
+	if got := FormatLegacy(NewProjection(facts, false)); got != want {
 		t.Fatalf("FormatLegacy() = %q, want %q", got, want)
 	}
 }
@@ -587,7 +593,7 @@ func TestFormatLegacy_multipleQueriesPrintNestedNilValuesWithUserQueryKey(t *tes
 	}
 
 	want := "my.nested.fact2 => \nnil_resolved_fact1 => "
-	if got := FormatLegacy(facts); got != want {
+	if got := FormatLegacy(NewProjection(facts, false)); got != want {
 		t.Fatalf("FormatLegacy() = %q, want %q", got, want)
 	}
 }
@@ -599,7 +605,7 @@ func TestFormatLegacy_noUserQueryOmitsNilFacts(t *testing.T) {
 	}
 
 	want := "resolved_fact2 => resolved_fact2_value"
-	if got := FormatLegacy(facts); got != want {
+	if got := FormatLegacy(NewProjection(facts, false)); got != want {
 		t.Fatalf("FormatLegacy() = %q, want %q", got, want)
 	}
 }
@@ -610,7 +616,7 @@ func TestFormatLegacy_noUserQueryPreservesNewlinesInValues(t *testing.T) {
 	}
 
 	want := "custom_fact => value1 \n value2"
-	if got := FormatLegacy(facts); got != want {
+	if got := FormatLegacy(NewProjection(facts, false)); got != want {
 		t.Fatalf("FormatLegacy() = %q, want %q", got, want)
 	}
 }
@@ -621,7 +627,7 @@ func TestFormatLegacy_quotesIPv6StringsInsideMaps(t *testing.T) {
 	}
 
 	want := "{\n  ip6 => \"::1\"\n}"
-	if got := FormatLegacy(facts); got != want {
+	if got := FormatLegacy(NewProjection(facts, false)); got != want {
 		t.Fatalf("FormatLegacy() = %q, want %q", got, want)
 	}
 }
@@ -632,7 +638,7 @@ func TestFormatLegacy_noUserQueryPreservesWindowsPathFactNames(t *testing.T) {
 	}
 
 	want := `C:\Program Files\App => bin_dir`
-	if got := FormatLegacy(facts); got != want {
+	if got := FormatLegacy(NewProjection(facts, false)); got != want {
 		t.Fatalf("FormatLegacy() = %q, want %q", got, want)
 	}
 }
@@ -643,7 +649,7 @@ func TestFormatLegacy_noUserQueryPreservesWindowsPathValues(t *testing.T) {
 	}
 
 	want := `path => C:\Program Files\Puppet Labs\Puppet\bin;C:\cygwin64\bin`
-	if got := FormatLegacy(facts); got != want {
+	if got := FormatLegacy(NewProjection(facts, false)); got != want {
 		t.Fatalf("FormatLegacy() = %q, want %q", got, want)
 	}
 }
@@ -666,7 +672,7 @@ func TestFormatLegacy_noUserQueryQuotesNestedStringsAndSeparatesEntriesWithComma
 	}
 
 	want := "identity => {\n  gid => 20,\n  group => \"staff\",\n  privileged => false,\n  uid => 501,\n  user => \"ncode\"\n}\nkernel => Darwin"
-	if got := FormatLegacy(facts); got != want {
+	if got := FormatLegacy(NewProjection(facts, false)); got != want {
 		t.Fatalf("FormatLegacy() = %q, want %q", got, want)
 	}
 }
@@ -680,7 +686,7 @@ func TestFormatLegacy_noUserQueryRendersArraysMultiLine(t *testing.T) {
 	}
 
 	want := "processors => {\n  count => 2,\n  models => [\n    \"Apple M4\",\n    \"Apple M4\"\n  ]\n}"
-	if got := FormatLegacy(facts); got != want {
+	if got := FormatLegacy(NewProjection(facts, false)); got != want {
 		t.Fatalf("FormatLegacy() = %q, want %q", got, want)
 	}
 }
@@ -691,7 +697,7 @@ func TestFormatLegacy_noUserQueryRendersTopLevelArray(t *testing.T) {
 	}
 
 	want := "roles => [\n  \"web\",\n  \"db\"\n]"
-	if got := FormatLegacy(facts); got != want {
+	if got := FormatLegacy(NewProjection(facts, false)); got != want {
 		t.Fatalf("FormatLegacy() = %q, want %q", got, want)
 	}
 }
@@ -703,7 +709,7 @@ func TestFormatLegacy_noUserQueryStripsCommaBetweenAdjacentTopLevelMaps(t *testi
 	}
 
 	want := "a => {\n  x => 1\n}\nb => {\n  y => 2\n}"
-	if got := FormatLegacy(facts); got != want {
+	if got := FormatLegacy(NewProjection(facts, false)); got != want {
 		t.Fatalf("FormatLegacy() = %q, want %q", got, want)
 	}
 }
@@ -714,7 +720,7 @@ func TestFormatLegacy_noUserQueryRendersFloatsLikeRuby(t *testing.T) {
 	}
 
 	want := "load_averages => {\n  15m => 1.35,\n  1m => 1.46,\n  5m => 1.4\n}"
-	if got := FormatLegacy(facts); got != want {
+	if got := FormatLegacy(NewProjection(facts, false)); got != want {
 		t.Fatalf("FormatLegacy() = %q, want %q", got, want)
 	}
 }
@@ -724,7 +730,7 @@ func TestFormatLegacy_noUserQueryRendersEmptyMap(t *testing.T) {
 		{Name: "mountpoints", Value: map[string]any{}},
 	}
 
-	if got, want := FormatLegacy(facts), "mountpoints => {}"; got != want {
+	if got, want := FormatLegacy(NewProjection(facts, false)), "mountpoints => {}"; got != want {
 		t.Fatalf("FormatLegacy() = %q, want %q", got, want)
 	}
 }
@@ -734,7 +740,7 @@ func TestFormatLegacy_noUserQueryUnescapesQuotesInTopLevelStringValues(t *testin
 		{Name: "motd", Value: `say "hi" now`},
 	}
 
-	if got, want := FormatLegacy(facts), `motd => say "hi" now`; got != want {
+	if got, want := FormatLegacy(NewProjection(facts, false)), `motd => say "hi" now`; got != want {
 		t.Fatalf("FormatLegacy() = %q, want %q", got, want)
 	}
 }
@@ -748,7 +754,7 @@ func TestFormatLegacy_valueContainingKeyDelimiterManglesExactlyLikeRuby(t *testi
 		{Name: "weird", Value: `x": y`},
 	}
 
-	if got, want := FormatLegacy(facts), `weird => x\ => y`; got != want {
+	if got, want := FormatLegacy(NewProjection(facts, false)), `weird => x\ => y`; got != want {
 		t.Fatalf("FormatLegacy() = %q, want %q", got, want)
 	}
 }
@@ -762,7 +768,7 @@ func TestFormatLegacy_multipleQueriesUnquoteTopLevelStringsAndRenderNilEmpty(t *
 	}
 
 	want := "identity.user => ncode\nkernel => Darwin\nload => 1.35\nmissing => "
-	if got := FormatLegacy(facts); got != want {
+	if got := FormatLegacy(NewProjection(facts, false)); got != want {
 		t.Fatalf("FormatLegacy() = %q, want %q", got, want)
 	}
 }
@@ -774,7 +780,7 @@ func TestFormatLegacy_multipleQueriesKeepNestedQuotingAndCommas(t *testing.T) {
 	}
 
 	want := "identity => {\n  gid => 20,\n  user => \"ncode\"\n}\nkernel => Darwin"
-	if got := FormatLegacy(facts); got != want {
+	if got := FormatLegacy(NewProjection(facts, false)); got != want {
 		t.Fatalf("FormatLegacy() = %q, want %q", got, want)
 	}
 }
@@ -789,7 +795,7 @@ func TestFormatLegacy_singleQueryKeepsBracesCommasAndNestedQuotes(t *testing.T) 
 	}
 
 	want := "{\n  gid => 20,\n  group => \"staff\",\n  user => \"ncode\"\n}"
-	if got := FormatLegacy(facts); got != want {
+	if got := FormatLegacy(NewProjection(facts, false)); got != want {
 		t.Fatalf("FormatLegacy() = %q, want %q", got, want)
 	}
 }
@@ -800,7 +806,7 @@ func TestFormatLegacy_singleQueryRendersArrayMultiLineWithQuotedElements(t *test
 	}
 
 	want := "[\n  \"Apple M4\",\n  \"Apple M4\"\n]"
-	if got := FormatLegacy(facts); got != want {
+	if got := FormatLegacy(NewProjection(facts, false)); got != want {
 		t.Fatalf("FormatLegacy() = %q, want %q", got, want)
 	}
 }
@@ -813,7 +819,7 @@ func TestFormatLegacy_singleQueryDoesNotExpandEmbeddedNewlines(t *testing.T) {
 	}
 
 	want := "{\n  key => \"a\\nb\"\n}"
-	if got := FormatLegacy(facts); got != want {
+	if got := FormatLegacy(NewProjection(facts, false)); got != want {
 		t.Fatalf("FormatLegacy() = %q, want %q", got, want)
 	}
 }
@@ -824,7 +830,7 @@ func TestFormatLegacy_noUserQueryExpandsEmbeddedNewlines(t *testing.T) {
 	}
 
 	want := "sshfp => SSHFP 1 1 abc\nSSHFP 2 2 def"
-	if got := FormatLegacy(facts); got != want {
+	if got := FormatLegacy(NewProjection(facts, false)); got != want {
 		t.Fatalf("FormatLegacy() = %q, want %q", got, want)
 	}
 }
@@ -843,7 +849,7 @@ func TestFormatLegacy_singleQueryNonStringScalars(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			facts := []ResolvedFact{{Name: "q", UserQuery: "q", Value: tt.value}}
-			if got := FormatLegacy(facts); got != tt.want {
+			if got := FormatLegacy(NewProjection(facts, false)); got != tt.want {
 				t.Fatalf("FormatLegacy() = %q, want %q", got, tt.want)
 			}
 		})
@@ -862,7 +868,7 @@ func TestFormatLegacyColored_colorsKeysByNestingDepth(t *testing.T) {
 		"  }\n" +
 		"}\n" +
 		"\x1b[36mkernel\x1b[0m => Darwin"
-	if got := FormatLegacyColored(facts, false, true); got != want {
+	if got := FormatLegacyColored(NewProjection(facts, false), true); got != want {
 		t.Fatalf("FormatLegacyColored() = %q, want %q", got, want)
 	}
 }
@@ -872,7 +878,7 @@ func TestFormatLegacyColored_paletteCyclesPastDepthFive(t *testing.T) {
 	tree := map[string]any{"a": map[string]any{"b": map[string]any{"c": map[string]any{"d": map[string]any{"e": depth5}}}}}
 	facts := []ResolvedFact{{Name: "root", Value: tree}}
 
-	got := FormatLegacyColored(facts, false, true)
+	got := FormatLegacyColored(NewProjection(facts, false), true)
 	for _, want := range []string{
 		"\x1b[36mroot\x1b[0m => {",        // depth 0: cyan
 		"  \x1b[33ma\x1b[0m => {",         // depth 1: yellow
@@ -894,8 +900,8 @@ func TestFormatLegacyColored_offLeavesOutputByteIdentical(t *testing.T) {
 		{Name: "kernel", Value: "Darwin"},
 	}
 
-	plain := FormatLegacy(facts)
-	if got := FormatLegacyColored(facts, false, false); got != plain {
+	plain := FormatLegacy(NewProjection(facts, false))
+	if got := FormatLegacyColored(NewProjection(facts, false), false); got != plain {
 		t.Fatalf("FormatLegacyColored(colorize=false) = %q, want %q", got, plain)
 	}
 	if strings.Contains(plain, "\x1b[") {
@@ -909,7 +915,7 @@ func TestFormatLegacyColored_singleQueryColorsKeysOnly(t *testing.T) {
 	}
 
 	want := "{\n  \x1b[33mgid\x1b[0m => 20,\n  \x1b[33muser\x1b[0m => \"ncode\"\n}"
-	if got := FormatLegacyColored(facts, false, true); got != want {
+	if got := FormatLegacyColored(NewProjection(facts, false), true); got != want {
 		t.Fatalf("FormatLegacyColored() = %q, want %q", got, want)
 	}
 }
@@ -921,7 +927,7 @@ func TestFormatLegacyColored_multipleQueriesColorTopLevelKeys(t *testing.T) {
 	}
 
 	want := "\x1b[36midentity\x1b[0m => {\n  \x1b[33muser\x1b[0m => \"ncode\"\n}\n\x1b[36mkernel\x1b[0m => Darwin"
-	if got := FormatLegacyColored(facts, false, true); got != want {
+	if got := FormatLegacyColored(NewProjection(facts, false), true); got != want {
 		t.Fatalf("FormatLegacyColored() = %q, want %q", got, want)
 	}
 }
@@ -968,14 +974,14 @@ func TestFormatterScalarRendering(t *testing.T) {
 		t.Run("yaml/"+tt.name, func(t *testing.T) {
 			facts := []ResolvedFact{{Name: "value", UserQuery: "value", Value: tt.value}}
 			want := "value: " + tt.want + "\n"
-			if got := FormatYAML(facts); got != want {
+			if got := FormatYAML(NewProjection(facts, false)); got != want {
 				t.Fatalf("FormatYAML(%#v) = %q, want %q", tt.value, got, want)
 			}
 		})
 	}
 
 	facts := []ResolvedFact{{Name: "values", UserQuery: "values", Value: []any{"hello", 7, true}}}
-	if got, want := FormatHOCON(facts), `["hello",7,true]`; got != want {
+	if got, want := FormatHOCON(NewProjection(facts, false)), `["hello",7,true]`; got != want {
 		t.Fatalf("FormatHOCON() = %q, want %q", got, want)
 	}
 }

@@ -9,57 +9,36 @@ import (
 	"strings"
 )
 
-// FormatOptions selects the presentation format for resolved facts.
+// FormatOptions selects the presentation format for a Projection.
 type FormatOptions struct {
-	JSON               bool
-	YAML               bool
-	HOCON              bool
-	IncludeTypedDotted bool
-	Colorize           bool
-}
-
-// Formatter renders resolved facts in one presentation format.
-type Formatter interface {
-	Name() string
-	Format([]ResolvedFact) (string, error)
-}
-
-type formatterFunc struct {
-	name   string
-	format func([]ResolvedFact) (string, error)
-}
-
-func (f formatterFunc) Name() string { return f.name }
-
-func (f formatterFunc) Format(facts []ResolvedFact) (string, error) {
-	return f.format(facts)
+	JSON     bool
+	YAML     bool
+	HOCON    bool
+	Colorize bool
 }
 
 // BuildFormatter selects a formatter using Ruby's formatter factory precedence.
-func BuildFormatter(opts FormatOptions) Formatter {
+func BuildFormatter(opts FormatOptions) func(*Projection) (string, error) {
 	switch {
 	case opts.JSON:
-		return formatterFunc{name: "json", format: func(facts []ResolvedFact) (string, error) {
-			return FormatJSONWithDottedFacts(facts, opts.IncludeTypedDotted)
-		}}
+		return FormatJSON
 	case opts.YAML:
-		return formatterFunc{name: "yaml", format: func(facts []ResolvedFact) (string, error) {
-			return FormatYAMLWithDottedFacts(facts, opts.IncludeTypedDotted), nil
-		}}
+		return func(projection *Projection) (string, error) {
+			return FormatYAML(projection), nil
+		}
 	case opts.HOCON:
-		return formatterFunc{name: "hocon", format: func(facts []ResolvedFact) (string, error) {
-			return FormatHOCONWithDottedFacts(facts, opts.IncludeTypedDotted), nil
-		}}
+		return func(projection *Projection) (string, error) {
+			return FormatHOCON(projection), nil
+		}
 	default:
-		return formatterFunc{name: "legacy", format: func(facts []ResolvedFact) (string, error) {
-			return FormatLegacyColored(facts, opts.IncludeTypedDotted, opts.Colorize), nil
-		}}
+		return func(projection *Projection) (string, error) {
+			return FormatLegacyColored(projection, opts.Colorize), nil
+		}
 	}
 }
 
-// FormatJSONWithDottedFacts renders JSON and optionally merges dotted custom and external facts.
-func FormatJSONWithDottedFacts(facts []ResolvedFact, includeTypedDotted bool) (string, error) {
-	projection := NewProjection(facts, includeTypedDotted)
+// FormatJSON renders a Projection using Facter's JSON presentation contract.
+func FormatJSON(projection *Projection) (string, error) {
 	value := any(projection.MultiQueryValues())
 	if projection.Shape() == ShapeFullTree {
 		value = projection.FullTree()
@@ -72,9 +51,8 @@ func FormatJSONWithDottedFacts(facts []ResolvedFact, includeTypedDotted bool) (s
 	return string(out), nil
 }
 
-// FormatYAMLWithDottedFacts renders YAML and optionally merges dotted custom and external facts.
-func FormatYAMLWithDottedFacts(facts []ResolvedFact, includeTypedDotted bool) string {
-	projection := NewProjection(facts, includeTypedDotted)
+// FormatYAML renders a Projection using Facter's YAML presentation contract.
+func FormatYAML(projection *Projection) string {
 	value := any(projection.MultiQueryValues())
 	if projection.Shape() == ShapeFullTree {
 		value = projection.FullTree()
@@ -86,9 +64,8 @@ func FormatYAMLWithDottedFacts(facts []ResolvedFact, includeTypedDotted bool) st
 	return out + "\n"
 }
 
-// FormatHOCONWithDottedFacts renders HOCON and optionally merges dotted custom and external facts.
-func FormatHOCONWithDottedFacts(facts []ResolvedFact, includeTypedDotted bool) string {
-	projection := NewProjection(facts, includeTypedDotted)
+// FormatHOCON renders a Projection using Facter's HOCON presentation contract.
+func FormatHOCON(projection *Projection) string {
 	switch projection.Shape() {
 	case ShapeEmpty:
 		return ""
@@ -110,8 +87,7 @@ func FormatHOCONWithDottedFacts(facts []ResolvedFact, includeTypedDotted bool) s
 // key in an ANSI color chosen by its nesting depth. The rendering replicates
 // Ruby Facter's LegacyFactFormatter byte for byte: pretty-printed JSON rewritten
 // through Ruby's exact transform pipeline, quirks included.
-func FormatLegacyColored(facts []ResolvedFact, includeTypedDotted, colorize bool) string {
-	projection := NewProjection(facts, includeTypedDotted)
+func FormatLegacyColored(projection *Projection, colorize bool) string {
 	switch projection.Shape() {
 	case ShapeEmpty:
 		return ""
@@ -129,6 +105,11 @@ func FormatLegacyColored(facts []ResolvedFact, includeTypedDotted, colorize bool
 		out := legacyCollectionText(values, colorize)
 		return legacyTopLevelStringRE.ReplaceAllString(out, "$1 => $2")
 	}
+}
+
+// FormatLegacy renders a Projection using the uncolored legacy presentation.
+func FormatLegacy(projection *Projection) string {
+	return FormatLegacyColored(projection, false)
 }
 
 func yamlLines(value any, depth int) []string {
@@ -449,27 +430,6 @@ func needsQuotedYAMLString(value string) bool {
 		}
 	}
 	return false
-}
-
-func uniqueQueries(facts []ResolvedFact) []string {
-	seen := make(map[string]bool, len(facts))
-	queries := make([]string, 0, len(facts))
-	for _, fact := range facts {
-		if seen[fact.UserQuery] {
-			continue
-		}
-		seen[fact.UserQuery] = true
-		queries = append(queries, fact.UserQuery)
-	}
-	return queries
-}
-
-func factsForQueries(facts []ResolvedFact) map[string]any {
-	values := make(map[string]any, len(facts))
-	for _, fact := range facts {
-		values[fact.UserQuery] = ValueForQuery(fact)
-	}
-	return values
 }
 
 // legacyKeyPalette cycles per nesting depth when key coloring is enabled:

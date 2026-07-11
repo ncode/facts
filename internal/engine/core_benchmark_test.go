@@ -113,7 +113,6 @@ func BenchmarkParseMacOSSystemProfilerHardware(b *testing.B) {
 func BenchmarkUnitFormatting(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
-		_ = bytesToMB(256_586_343)
 		_ = bytesToHumanReadable(1_048_575)
 		_ = hertzToHumanReadable(2_365_000_000)
 	}
