@@ -24,7 +24,8 @@ The Go port SHALL treat Linux, macOS/Darwin, Windows, FreeBSD, OpenBSD, NetBSD, 
 - **AND** Oracle Solaris MUST remain outside the supported release target set until it has its own repeatable validation host
 
 ### Requirement: Core fact parity
-The Go port SHALL expose Ruby-compatible structured facts for each supported platform where Ruby Facter has comparable behavior, except for the intentionally removed Ruby runtime and Puppet package-version built-ins. Legacy alias facts are not part of the surface. Facts MAY expose Facts-native extensions when the native source is stable, the canonical fact spelling is schema-documented, and platform validation covers the behavior.
+
+The Go port SHALL expose Ruby-compatible structured facts for each supported platform where Ruby Facter has comparable behavior, except for the intentionally removed Ruby runtime and Puppet package-version built-ins. Legacy alias facts are not part of the surface. Facts MAY expose Facts-native extensions when the native source is stable, the canonical fact spelling is schema-documented, and platform validation covers the behavior. Linux DHCP lease attribution for interface-level networking facts MUST use the exact interface and lease-block semantics specified below.
 
 #### Scenario: Linux fact parity
 - **WHEN** Linux facts are resolved for OS/release/distro, SELinux, identity, networking, DHCP, memory, swap, processors, DMI, disks, partitions, filesystems, mountpoints, uptime, load averages, virtualization, hypervisors, cloud metadata, SSH, timezone, path, FIPS, and Augeas
@@ -60,6 +61,42 @@ The Go port SHALL expose Ruby-compatible structured facts for each supported pla
 - **THEN** the Go port MUST emit only schema-documented illumos facts backed by stable illumos sources and native validation
 - **AND** `os.family` MUST be `illumos`, `kernel.name` MUST be `SunOS`, and `os.name` MUST report the validated distribution such as `OmniOS`
 - **AND** Oracle Solaris-specific behavior MUST remain absent until the Oracle Solaris target is separately validated
+
+#### Scenario: Linux DHCP lease interface declarations match exactly
+- **WHEN** Linux DHCP lease files are scanned for `networking.interfaces.<name>.dhcp`
+- **AND** a lease file contains one or more explicit dhclient `interface "..."` declarations
+- **THEN** Facts MUST use that lease only when one non-comment declaration exactly equals the requested interface name
+- **AND** when a file contains multiple lease blocks, Facts MUST extract the DHCP server from the matching interface block rather than from a later block for another interface
+- **AND** Facts MUST parse lease block boundaries without treating braces inside comments or quoted strings as lease terminators
+- **AND** if a malformed lease block has no terminator or contains an unterminated quoted string, Facts MUST continue scanning later valid lease blocks rather than falling back to a whole-file DHCP server from another interface
+- **AND** malformed interface quoted values MUST NOT count as explicit interface declarations or suppress lease filename fallback
+- **AND** Facts MUST recognize explicit interface declarations even when dhclient writes multiple statements on one line
+- **AND** when an exact interface declaration appears outside the lease block, Facts MUST still use the file-level DHCP server identifier for that interface
+- **AND** when a file-level interface declaration matches and lease blocks omit per-block interface declarations, Facts MUST use the latest DHCP server identifier from those historical leases
+- **AND** when multiple lease blocks exactly match the requested interface, the latest matching block MUST control the DHCP server value even if it omits `dhcp-server-identifier`
+- **AND** commented or quoted `dhcp-server-identifier` text MUST NOT count as a DHCP server option
+- **AND** explicit lease blocks for other interfaces MUST NOT override a file-level declaration for the requested interface
+- **AND** Facts MUST NOT treat interface names that merely contain the requested name, such as `eth0-backup` for `eth0`, as a match
+- **AND** lease filename fallback MAY still apply when a lease file has no explicit interface declaration
+
+#### Scenario: YAML sequence map values preserve all keys
+- **WHEN** YAML output renders a sequence item whose value is a map with multiple keys
+- **THEN** Facts MUST render that map as valid YAML that preserves every key/value pair in the sequence item
+- **AND** the sequence item MUST NOT collapse the map into a scalar value for the first key
+
+#### Scenario: Plan 9 uptime duration fields use shared numeric types
+- **WHEN** Plan 9 uptime facts are emitted
+- **THEN** `system_uptime.days`, `system_uptime.hours`, and `system_uptime.seconds` MUST use 64-bit integer values
+- **AND** those fields MUST match the numeric value types emitted by other supported platforms
+
+#### Scenario: Snapshot accessors clone public mutable values
+- **WHEN** a Snapshot contains a mutable public fact value, including maps, slices, pointers, arrays, and exported struct fields
+- **THEN** Snapshot construction, value lookup, and copy-returning accessors MUST clone mutable values and pointed-to values in that public graph
+- **AND** mutating the source value or a returned value MUST NOT mutate the Snapshot
+- **AND** maps with pointer-bearing keys MUST NOT expose original key pointers when a copied key remains valid for the map key type
+- **AND** cyclic pointer, map, and slice values MUST preserve cycles inside the copied graph without linking back to the original graph
+- **AND** distinct slices that share backing storage MUST remain distinct copies when their visible lengths differ
+- **AND** unexported struct fields MAY be preserved by shallow value copy and are not part of the deep-clone guarantee
 
 ### Requirement: Resolver fallback and diagnostic parity
 The Go port SHALL preserve supported-platform Ruby resolver fallback order and diagnostics, and SHALL reach all host command execution and file reads through the resolution Session's host seam so that every platform resolver is exercisable with an injected fake host — no resolver reads files or runs commands outside an injectable seam.
@@ -396,4 +433,86 @@ The host-virtualization signal gather (on Linux: DMI reads plus the dmidecode/vi
 
 - **WHEN** the memoized gather input is classified for the `virtual` fact and for the `hypervisors` tree
 - **THEN** each consumer's classification produces the same fact names and values as before memoization, including their documented divergences
+
+### Requirement: DragonFly disk probes drop empty memory disks without dropping real storage
+
+Facts SHALL exclude DragonFly memory-disk and optical pseudo-devices (`md`, `cd`, matched by driver class — the device name with trailing digits stripped) from the DragonFly `disks` and `partitions` facts, while keeping real disks, their real slices, and attached file-backed (`vn`) disks.
+
+#### Scenario: empty memory disks are neither probed nor reported
+
+- **WHEN** `kern.disks` lists empty `md` memory disks alongside a real disk
+- **THEN** the probe MUST NOT spawn a `disklabel` subprocess for the `md` devices
+- **AND** `disks` and `partitions` MUST NOT report them
+
+#### Scenario: real disks and attached file-backed disks are unchanged
+
+- **WHEN** a real disk (`da0`) or an attached file-backed disk (a configured `vn0`) is present
+- **THEN** its `disks` and `partitions` facts MUST be identical to before this change
+
+### Requirement: The DragonFly partition probe enumerates only existing slices
+
+Facts SHALL probe only the slices that actually exist for a DragonFly device — discovered by enumerating `/dev/<device>s<N>` slice nodes — rather than a fixed `s1`–`s4` set plus the whole disk, so discovery does not spawn wasted `disklabel` processes on hosts with many devices.
+
+#### Scenario: no fan-out to non-existent slices
+
+- **WHEN** the DragonFly probe enumerates a device's partitions
+- **THEN** it MUST issue `disklabel` only for slice targets that exist on the device
+- **AND** it MUST NOT issue a fixed `device + s1..s4` set of `disklabel` calls per device
+- **AND** it MUST NOT issue `disklabel` on the whole-disk device (the DragonFly label lives on the slice)
+
+### Requirement: Supported targets report their native installed-package sources
+
+Facts SHALL resolve the `packages` fact on each supported release target using the package source(s) native to that target.
+
+#### Scenario: Linux targets report their package database and cross-distro sources
+
+- **WHEN** packages are discovered on a supported Linux target
+- **THEN** Debian and Ubuntu MUST report `packages.dpkg`
+- **AND** the RHEL family and SUSE MUST report `packages.rpm`
+- **AND** Arch MUST report `packages.pacman` and Alpine MUST report `packages.apk`
+- **AND** `packages.snap` and `packages.flatpak` MUST be reported wherever those system databases are present
+- **AND** `packages.nix` MUST be reported wherever a Nix profile is present
+
+#### Scenario: BSD and illumos targets report their package database
+
+- **WHEN** packages are discovered on a supported BSD or illumos target
+- **THEN** FreeBSD and DragonFly MUST report `packages.pkg`
+- **AND** OpenBSD MUST report `packages.openbsd_pkg`
+- **AND** NetBSD MUST report `packages.pkgsrc`
+- **AND** illumos MUST report `packages.ips`
+
+#### Scenario: macOS reports receipts, apps, and optional homebrew
+
+- **WHEN** packages are discovered on macOS
+- **THEN** `packages.receipts` MUST be reported from the installer receipt database
+- **AND** `packages.apps` MUST be reported from the installed `.app` inventory and MUST NOT be merged into `receipts`
+- **AND** `packages.homebrew` MUST be reported only when a Homebrew prefix exists
+
+#### Scenario: Windows reports registry and appx
+
+- **WHEN** packages are discovered on Windows
+- **THEN** `packages.registry` MUST be reported from both HKLM uninstall hives
+- **AND** `packages.appx` MUST be reported from the provisioned set plus the collector context
+
+#### Scenario: Plan 9 reports no packages
+
+- **WHEN** packages are discovered on Plan 9
+- **THEN** no `packages` subtree MUST be emitted
+
+### Requirement: Package collection stays cheap and context-bounded
+
+Facts SHALL collect each package source with a single cheap read and SHALL report only system-global databases plus the collector's own execution context.
+
+#### Scenario: no per-package process spawning or network
+
+- **WHEN** a package source is collected
+- **THEN** it MUST be read with one on-disk database read or one batch query
+- **AND** it MUST NOT spawn one process per package
+- **AND** it MUST NOT perform any network request
+
+#### Scenario: other users' per-user installs are not enumerated
+
+- **WHEN** a host has per-user installs owned by other users (homebrew, nix profiles, Windows HKCU, per-user flatpak or appx)
+- **THEN** discovery MUST NOT drop privileges or walk other users' homes to enumerate them
+- **AND** the under-report MUST be documented
 
