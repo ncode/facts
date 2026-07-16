@@ -31,7 +31,7 @@ fact-groups : {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
-		if _, err := ParseConfig(path, discardLog()); err != nil {
+		if _, err := parseConfigForTest(path, discardLog()); err != nil {
 			b.Fatal(err)
 		}
 	}

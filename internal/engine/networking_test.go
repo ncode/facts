@@ -201,11 +201,12 @@ func TestNetworkingInterfacesWindowsLogsFailureLikeRubyResolver(t *testing.T) {
 	}
 }
 
-func TestNetworkingInterfacesForPlatformPlan9UsesSessionGlob(t *testing.T) {
+func TestNetworkingCoreFactsPlan9UsesSessionGlob(t *testing.T) {
 	t.Parallel()
 
 	s := NewSession()
-	s.host = &fakeHostOS{
+	host := &fakeHostOS{
+		platform: "plan9",
 		files: map[string][]byte{
 			"/net/ipifc/0/status": []byte(plan9Fixture(t, "ipifc_status")),
 			"/net/ether0/addr":    []byte(plan9Fixture(t, "ether0_addr")),
@@ -214,17 +215,22 @@ func TestNetworkingInterfacesForPlatformPlan9UsesSessionGlob(t *testing.T) {
 			"/net/ipifc/*/status": {"/net/ipifc/0/status"},
 		},
 	}
-	calledSnapshotProvider := false
+	s.host = host
 
-	got := networkingInterfacesForPlatform(s, "plan9", func() ([]networkInterfaceSnapshot, error) {
-		calledSnapshotProvider = true
-		return nil, nil
-	})
-	if calledSnapshotProvider {
-		t.Fatal("networkingInterfacesForPlatform(plan9) called snapshot provider")
+	facts := Collection(networkingCoreFacts(s))
+	networking, ok := facts["networking"].(map[string]any)
+	if !ok {
+		t.Fatalf("networkingCoreFacts(plan9) = %#v, want networking map", facts)
 	}
-	if _, ok := got["ether0"]; !ok {
-		t.Fatalf("networkingInterfacesForPlatform(plan9) = %#v, want ether0", got)
+	interfaces, ok := networking["interfaces"].(map[string]any)
+	if !ok {
+		t.Fatalf("networking.interfaces = %#v, want map", networking["interfaces"])
+	}
+	if _, ok := interfaces["ether0"]; !ok {
+		t.Fatalf("networking.interfaces = %#v, want ether0", interfaces)
+	}
+	if want := []string{"/net/ipifc/*/status"}; !reflect.DeepEqual(host.globCalls, want) {
+		t.Fatalf("glob calls = %#v, want %#v", host.globCalls, want)
 	}
 }
 

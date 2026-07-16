@@ -15,8 +15,9 @@ import (
 var Version = "dev" // ponytail: var, not const, so the build pipeline can inject the git tag
 
 // CoreFacts returns the small cross-platform fact set used by the initial Go
-// CLI. disabled is the resolution-gating set: single-output categories whose
-// top-level fact name it contains skip resolution entirely (ADR-0015). The
+// CLI. disabled is the resolution-gating set: a gateable category skips
+// resolution when it contains every top-level root the category can emit
+// (ADR-0015). The
 // result is memoized per Session, keyed by a fingerprint of the disabled set, so
 // a repeat call with the same set reuses the build while a call with a different
 // set rebuilds (the gating depends on disabled, so a stale memo would misgate).
@@ -58,9 +59,13 @@ func disabledFingerprint(disabled map[string]bool) string {
 // historical assembly order for reviewability.
 func buildCoreFacts(s *Session, disabled map[string]bool) []ResolvedFact {
 	build := newCoreFactBuild(s)
+	return resolveCoreFactDescriptors(build, disabled, coreFactDescriptors)
+}
+
+func resolveCoreFactDescriptors(build *coreFactBuild, disabled map[string]bool, descriptors []coreFactDescriptor) []ResolvedFact {
 	facts := make([]ResolvedFact, 0)
-	for _, descriptor := range coreFactDescriptors {
-		if descriptor.class == coreFactStandalone && disabled[descriptor.root] {
+	for _, descriptor := range descriptors {
+		if !descriptor.shouldRun(disabled) {
 			continue
 		}
 		facts = append(facts, descriptor.assemble(build)...)

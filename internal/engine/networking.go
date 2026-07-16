@@ -165,9 +165,6 @@ func networkingInterfaces(s *Session) map[string]any {
 }
 
 func networkingInterfacesForPlatform(s *Session, goos string, snapshotProvider func() ([]networkInterfaceSnapshot, error)) map[string]any {
-	if goos == "plan9" {
-		return currentPlan9Interfaces(s.readFile, s.glob)
-	}
 	snapshots, err := snapshotProvider()
 	if err != nil {
 		if goos == "windows" {

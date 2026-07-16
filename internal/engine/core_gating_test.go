@@ -22,41 +22,17 @@ func hasRoot(facts []ResolvedFact, root string) bool {
 	return rootNames(facts)[root]
 }
 
-func TestBuildCoreFacts_resolutionGatesSingleOutputCategories(t *testing.T) {
-	// buildCoreFacts performs no filtering, so a fact root that is absent here
-	// can only be absent because its resolver was skipped — exactly the
-	// resolution-gating contract.
-	baseline := buildCoreFacts(NewSession(), nil)
-	for _, fact := range standaloneCoreFactRoots() {
-		if !hasRoot(baseline, fact) {
-			// Not every category resolves on this host (e.g. augeas/xen). Only
-			// assert gating for the ones that do produce output by default.
-			continue
-		}
-		// Each gated build also disables packages: its probe is the most
-		// expensive (plutil over every .app; PowerShell spawns on Windows
-		// runners), and gates are independent, so disabling it alongside does
-		// not affect the fact under test — it just keeps ~9 full package
-		// probes out of every CI run. The packages iteration itself still
-		// asserts its own gating.
-		gated := buildCoreFacts(NewSession(), map[string]bool{fact: true, "packages": true})
-		if hasRoot(gated, fact) {
-			t.Fatalf("buildCoreFacts(disabled=%q) still emitted %q root; resolver was not gated", fact, fact)
-		}
-	}
-}
-
-func TestBuildCoreFacts_multiOutputCategoryStaysEager(t *testing.T) {
-	// Disabling the multi-output root `os` must NOT gate osCoreFacts: it stays
-	// eager (resolve-then-prune) so its sibling kernel/filesystems outputs are
-	// not collateral. buildCoreFacts still emits os.* because it never prunes.
+func TestBuildCoreFacts_multiOutputResolverRunsForKeptSibling(t *testing.T) {
+	// Disabling only the multi-output root `os` must not gate osCoreFacts because
+	// its kernel/filesystems siblings remain enabled. buildCoreFacts still emits
+	// os.* because pruning happens later in discovery.
 	facts := buildCoreFacts(NewSession(), map[string]bool{"os": true})
 	if !hasRoot(facts, "os") {
-		t.Fatal("buildCoreFacts(disabled=os) dropped os.*; multi-output category must stay eager")
+		t.Fatal("buildCoreFacts(disabled=os) dropped os.*; resolver must run for a kept sibling")
 	}
 }
 
-func TestBuildCoreFacts_multiOutputSubfactStaysEagerThenPruned(t *testing.T) {
+func TestBuildCoreFacts_multiOutputSubfactDisableRunsResolverThenPrunes(t *testing.T) {
 	disabled := map[string]bool{"os.release": true}
 	facts := buildCoreFacts(NewSession(), disabled)
 	// The resolver still runs (os.name present) and still emits os.release;
@@ -135,6 +111,226 @@ func hostReadFileMatching(h *fakeHostOS, substr string) bool {
 	return false
 }
 
+func hostReadFileCount(h *fakeHostOS, substr string) int {
+	count := 0
+	for _, path := range h.readFileCalls {
+		if strings.Contains(path, substr) {
+			count++
+		}
+	}
+	return count
+}
+
+func hostReadDirCount(h *fakeHostOS, substr string) int {
+	count := 0
+	for _, path := range h.readDirCalls {
+		if strings.Contains(path, substr) {
+			count++
+		}
+	}
+	return count
+}
+
+func hostRunCount(h *fakeHostOS, name string) int {
+	count := 0
+	for _, call := range h.runCalls {
+		if call.name == name {
+			count++
+		}
+	}
+	return count
+}
+
+func TestResolveCoreFactDescriptors_probeCountsEveryCatalogRow(t *testing.T) {
+	for i, descriptor := range coreFactDescriptors {
+		t.Run(descriptor.root, func(t *testing.T) {
+			calls := 0
+			observed := descriptor
+			observed.assemble = func(*coreFactBuild) []ResolvedFact {
+				calls++
+				return nil
+			}
+
+			allDisabled := make(map[string]bool, len(descriptor.emittedRoots))
+			for _, root := range descriptor.emittedRoots {
+				allDisabled[root] = true
+			}
+			resolveCoreFactDescriptors(&coreFactBuild{}, allDisabled, []coreFactDescriptor{observed})
+			want := 0
+			if descriptor.policy == coreFactAlwaysEager {
+				want = 1
+			}
+			if calls != want {
+				t.Fatalf("catalog row %d all-disabled resolver calls = %d, want %d", i, calls, want)
+			}
+
+			if descriptor.policy != coreFactGateable {
+				return
+			}
+			calls = 0
+			delete(allDisabled, descriptor.emittedRoots[0])
+			resolveCoreFactDescriptors(&coreFactBuild{}, allDisabled, []coreFactDescriptor{observed})
+			if calls != 1 {
+				t.Fatalf("catalog row %d one-kept resolver calls = %d, want 1", i, calls)
+			}
+		})
+	}
+}
+
+func TestBuildCoreFacts_DMIProbeRunsOnlyForKeptDMIOrGCE(t *testing.T) {
+	tests := []struct {
+		name     string
+		disabled map[string]bool
+		want     int
+	}{
+		{
+			name:     "both consumers disabled",
+			disabled: map[string]bool{"cloud": true, "dmi": true, "gce": true, "packages": true},
+			want:     0,
+		},
+		{
+			name:     "dmi kept",
+			disabled: map[string]bool{"cloud": true, "gce": true, "packages": true},
+			want:     1,
+		},
+		{
+			name:     "gce kept",
+			disabled: map[string]bool{"dmi": true, "packages": true},
+			want:     1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			host := &fakeHostOS{
+				platform:        "linux",
+				emptyRunDefault: true,
+				files: map[string][]byte{
+					"/sys/class/dmi/id/board_vendor": []byte("Example"),
+				},
+			}
+			buildCoreFacts(gatingProbeSession(host), tt.disabled)
+			if got := hostReadFileCount(host, "/sys/class/dmi/id/board_vendor"); got != tt.want {
+				t.Fatalf("DMI probe count = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBuildCoreFacts_multiOutputProbesRunOnlyForKeptRoots(t *testing.T) {
+	tests := []struct {
+		name   string
+		roots  []string
+		probes func(*fakeHostOS) int
+	}{
+		{
+			name:  "operating system",
+			roots: []string{"filesystems", "kernel", "os", "system_profiler"},
+			probes: func(host *fakeHostOS) int {
+				return hostReadFileCount(host, "/etc/os-release")
+			},
+		},
+		{
+			name:  "disks",
+			roots: []string{"disks", "mountpoints", "partitions", "zfs", "zpool"},
+			probes: func(host *fakeHostOS) int {
+				return hostReadDirCount(host, "/sys/block")
+			},
+		},
+		{
+			name:  "uptime",
+			roots: []string{"load_averages", "system_uptime"},
+			probes: func(host *fakeHostOS) int {
+				return hostReadFileCount(host, "/proc/uptime")
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			allDisabled := map[string]bool{"packages": true}
+			for _, root := range tt.roots {
+				allDisabled[root] = true
+			}
+
+			host := &fakeHostOS{platform: "linux", emptyRunDefault: true}
+			buildCoreFacts(gatingProbeSession(host), allDisabled)
+			if got := tt.probes(host); got != 0 {
+				t.Fatalf("all emitted roots disabled: probe count = %d, want 0", got)
+			}
+
+			oneKept := make(map[string]bool, len(allDisabled)-1)
+			for root := range allDisabled {
+				oneKept[root] = true
+			}
+			delete(oneKept, tt.roots[0])
+			host = &fakeHostOS{platform: "linux", emptyRunDefault: true}
+			buildCoreFacts(gatingProbeSession(host), oneKept)
+			if got := tt.probes(host); got == 0 {
+				t.Fatal("one emitted root kept: probe count = 0, want resolver to run")
+			}
+		})
+	}
+}
+
+func TestBuildCoreFacts_identityProbeRunsOnlyForKeptIdentityOrSSH(t *testing.T) {
+	tests := []struct {
+		name     string
+		disabled map[string]bool
+		want     int
+	}{
+		{name: "both consumers disabled", disabled: map[string]bool{"identity": true, "packages": true, "ssh": true}, want: 0},
+		{name: "identity kept", disabled: map[string]bool{"packages": true, "ssh": true}, want: 1},
+		{name: "ssh kept", disabled: map[string]bool{"identity": true, "packages": true}, want: 1},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			host := &fakeHostOS{platform: "windows", emptyRunDefault: true}
+			buildCoreFacts(gatingProbeSession(host), tt.disabled)
+			if got := hostRunCount(host, "whoami"); got != tt.want {
+				t.Fatalf("identity probe count = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBuildCoreFacts_cloudProvidersRunForSharedCloudRoot(t *testing.T) {
+	tests := []struct {
+		name         string
+		providerRoot string
+		disabled     map[string]bool
+	}{
+		{name: "azure", providerRoot: "az_metadata", disabled: map[string]bool{"az_metadata": true}},
+		{name: "ec2", providerRoot: "ec2_metadata", disabled: map[string]bool{"ec2_metadata": true, "ec2_userdata": true}},
+		{name: "gce", providerRoot: "gce", disabled: map[string]bool{"gce": true}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			keptCloud := make(map[string]bool, len(tt.disabled)+1)
+			for root := range tt.disabled {
+				keptCloud[root] = true
+			}
+			keptCloud["packages"] = true
+			facts := buildCoreFacts(gatingProbeSession(&fakeHostOS{platform: "linux", emptyRunDefault: true}), keptCloud)
+			if !hasRoot(facts, tt.providerRoot) {
+				t.Fatalf("cloud kept: resolver did not emit %q", tt.providerRoot)
+			}
+
+			allDisabled := make(map[string]bool, len(keptCloud)+1)
+			for root := range keptCloud {
+				allDisabled[root] = true
+			}
+			allDisabled["cloud"] = true
+			facts = buildCoreFacts(gatingProbeSession(&fakeHostOS{platform: "linux", emptyRunDefault: true}), allDisabled)
+			if hasRoot(facts, tt.providerRoot) {
+				t.Fatalf("all emitted roots disabled: resolver still emitted %q", tt.providerRoot)
+			}
+		})
+	}
+}
+
 // TestBuildCoreFacts_resolutionGatingSkipsProbeWork proves the gate skips real
 // work, not just output: each gated category's distinctive host probe must run
 // when the category is enabled and must NOT run when it is disabled. A display
@@ -177,6 +373,10 @@ func TestBuildCoreFacts_resolutionGatingSkipsProbeWork(t *testing.T) {
 		{
 			category: "fips_enabled",
 			probed:   func(h *fakeHostOS) bool { return hostReadFileMatching(h, "/proc/sys/crypto/fips_enabled") },
+		},
+		{
+			category: "packages",
+			probed:   func(h *fakeHostOS) bool { return hostReadFileMatching(h, "/var/lib/dpkg/status") },
 		},
 		// timezone is intentionally omitted: on every non-Windows host it derives
 		// the zone from Go's time.Now().Format("MST") with no host probe at all,

@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"log/slog"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -8,6 +9,10 @@ import (
 	"strings"
 	"testing"
 )
+
+func parseConfigForTest(path string, log *slog.Logger) (Config, error) {
+	return ParseConfig(path, log, CurrentDiscoveryDefaults())
+}
 
 func TestParseConfig_returnsAllConfiguredSections(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "facter.conf")
@@ -35,7 +40,7 @@ fact-groups : {
 		t.Fatal(err)
 	}
 
-	got, err := ParseConfig(path, discardLog())
+	got, err := parseConfigForTest(path, discardLog())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,7 +157,7 @@ cli : {
 		t.Fatal(err)
 	}
 
-	got, err := ParseConfig(path, discardLog())
+	got, err := parseConfigForTest(path, discardLog())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,7 +184,7 @@ cli : {
 		t.Fatal(err)
 	}
 
-	got, err := ParseConfig(path, discardLog())
+	got, err := parseConfigForTest(path, discardLog())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -202,7 +207,7 @@ func TestParseConfig_ignoresRetiredCustomFactKeys(t *testing.T) {
 	var warnings []string
 	logger := captureLogger(nil, &warnings, nil)
 
-	got, err := ParseConfig(path, logger)
+	got, err := parseConfigForTest(path, logger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -376,9 +381,6 @@ func TestPlatformNativeDefaultConfigPath(t *testing.T) {
 // facts-native facts.conf is consulted first, the facter-compatible
 // facter.conf second, and the first existing file wins.
 func TestParseConfig_nativeDefaultConfigDiscovery(t *testing.T) {
-	dir := t.TempDir()
-	nativePath := filepath.Join(dir, "facts.conf")
-	compatPath := filepath.Join(dir, "facter.conf")
 	nativeContent := []byte(`global : { external-dir : "/native/external" }`)
 	compatContent := []byte(`global : { external-dir : "/compat/external" }`)
 
@@ -396,12 +398,10 @@ func TestParseConfig_nativeDefaultConfigDiscovery(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if err := os.RemoveAll(nativePath); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.RemoveAll(compatPath); err != nil {
-				t.Fatal(err)
-			}
+			t.Parallel()
+			dir := t.TempDir()
+			nativePath := filepath.Join(dir, "facts.conf")
+			compatPath := filepath.Join(dir, "facter.conf")
 			if tt.native {
 				if err := os.WriteFile(nativePath, nativeContent, 0o600); err != nil {
 					t.Fatal(err)
@@ -412,16 +412,10 @@ func TestParseConfig_nativeDefaultConfigDiscovery(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			oldNative := NativeDefaultConfigPath
-			oldCompat := DefaultConfigPath
-			NativeDefaultConfigPath = func() string { return nativePath }
-			DefaultConfigPath = func() string { return compatPath }
-			t.Cleanup(func() {
-				NativeDefaultConfigPath = oldNative
-				DefaultConfigPath = oldCompat
+			got, err := ParseConfig("", discardLog(), DiscoveryDefaults{
+				NativeConfigPath:     nativePath,
+				CompatibleConfigPath: compatPath,
 			})
-
-			got, err := ParseConfig("", discardLog())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -441,7 +435,7 @@ func TestParseConfig_acceptsBareDirectoryPaths(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := ParseConfig(path, discardLog())
+	got, err := parseConfigForTest(path, discardLog())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -455,7 +449,7 @@ func TestParseConfig_warnsAndIgnoresUnreadableConfig(t *testing.T) {
 	warnings := []string{}
 	logger := captureLogger(nil, &warnings, nil)
 
-	got, err := ParseConfig(path, logger)
+	got, err := parseConfigForTest(path, logger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -478,7 +472,7 @@ func TestParseConfig_warnsAndIgnoresInvalidConfig(t *testing.T) {
 	warnings := []string{}
 	logger := captureLogger(nil, &warnings, nil)
 
-	got, err := ParseConfig(path, logger)
+	got, err := parseConfigForTest(path, logger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -501,7 +495,7 @@ func TestParseConfig_emptyReadableConfigReturnsEmptySections(t *testing.T) {
 	warnings := []string{}
 	logger := captureLogger(nil, &warnings, nil)
 
-	options, err := ParseConfig(path, logger)
+	options, err := parseConfigForTest(path, logger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -509,7 +503,7 @@ func TestParseConfig_emptyReadableConfigReturnsEmptySections(t *testing.T) {
 		t.Fatalf("ParseConfig() = %#v, want empty options", options)
 	}
 
-	config, err := ParseConfig(path, discardLog())
+	config, err := parseConfigForTest(path, discardLog())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -542,7 +536,7 @@ cli : {
 		t.Fatal(err)
 	}
 
-	got, err := ParseConfig(path, discardLog())
+	got, err := parseConfigForTest(path, discardLog())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -566,7 +560,7 @@ func TestParseConfig_retiredShowLegacyKeyIsInert(t *testing.T) {
 	warnings := []string{}
 	logger := captureLogger(nil, &warnings, nil)
 
-	got, err := ParseConfig(path, logger)
+	got, err := parseConfigForTest(path, logger)
 	if err != nil {
 		t.Fatalf("ParseConfig() error = %v, want nil for retired show-legacy key", err)
 	}
@@ -587,7 +581,7 @@ func TestParseConfig_readsConfiguredSequentialLikeRubyOptionStore(t *testing.T) 
 		t.Fatal(err)
 	}
 
-	got, err := ParseConfig(path, discardLog())
+	got, err := parseConfigForTest(path, discardLog())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -611,7 +605,7 @@ cli : {
 		t.Fatal(err)
 	}
 
-	config, err := ParseConfig(path, discardLog())
+	config, err := parseConfigForTest(path, discardLog())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -630,7 +624,7 @@ func TestParseConfig_nativeDisableKeyPopulatesDisabledSet(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	config, err := ParseConfig(path, discardLog())
+	config, err := parseConfigForTest(path, discardLog())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -650,7 +644,7 @@ func TestParseConfig_nativeDisableKeySupersedesBlocklist(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	config, err := ParseConfig(path, discardLog())
+	config, err := parseConfigForTest(path, discardLog())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -669,7 +663,7 @@ func TestParseConfig_acceptsBareEntries(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	config, err := ParseConfig(path, discardLog())
+	config, err := parseConfigForTest(path, discardLog())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -696,7 +690,7 @@ facts : {
 		t.Fatal(err)
 	}
 
-	options, err := ParseConfig(path, discardLog())
+	options, err := parseConfigForTest(path, discardLog())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -707,7 +701,7 @@ facts : {
 		t.Fatal("NoExternalFacts = true, want commented true value ignored")
 	}
 
-	config, err := ParseConfig(path, discardLog())
+	config, err := parseConfigForTest(path, discardLog())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -730,7 +724,7 @@ func TestParseConfig_returnsConfiguredFactTTLs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	config, err := ParseConfig(path, discardLog())
+	config, err := parseConfigForTest(path, discardLog())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -761,7 +755,7 @@ facts : {
 		t.Fatal(err)
 	}
 
-	config, err := ParseConfig(path, discardLog())
+	config, err := parseConfigForTest(path, discardLog())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -784,7 +778,7 @@ func TestParseConfig_acceptsBareFactNamesAndValues(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	config, err := ParseConfig(path, discardLog())
+	config, err := parseConfigForTest(path, discardLog())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1165,7 +1159,7 @@ func TestParseConfig_returnsConfiguredFactGroups(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	config, err := ParseConfig(path, discardLog())
+	config, err := parseConfigForTest(path, discardLog())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1188,7 +1182,7 @@ func TestParseConfig_acceptsQuotedGroupNamesWithSpaces(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	config, err := ParseConfig(path, discardLog())
+	config, err := parseConfigForTest(path, discardLog())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1208,7 +1202,7 @@ func TestParseConfig_acceptsBareFactNames(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	config, err := ParseConfig(path, discardLog())
+	config, err := parseConfigForTest(path, discardLog())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1228,7 +1222,7 @@ func TestParseConfig_acceptsScalarFactGroupValue(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	config, err := ParseConfig(path, discardLog())
+	config, err := parseConfigForTest(path, discardLog())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1257,7 +1251,7 @@ func TestConfigParser_pinnedSubsetBoundary(t *testing.T) {
 		path := writeConfig(t, `global = {
   external-dir = [ "/json/external" ]
 }`)
-		got, err := ParseConfig(path, discardLog())
+		got, err := parseConfigForTest(path, discardLog())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1270,7 +1264,7 @@ func TestConfigParser_pinnedSubsetBoundary(t *testing.T) {
 		path := writeConfig(t, `cli : {
   log-level : 'trace',
 }`)
-		got, err := ParseConfig(path, discardLog())
+		got, err := parseConfigForTest(path, discardLog())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1284,7 +1278,7 @@ func TestConfigParser_pinnedSubsetBoundary(t *testing.T) {
 global : {
   external-dir : [ "${base-dir}" ],
 }`)
-		got, err := ParseConfig(path, discardLog())
+		got, err := parseConfigForTest(path, discardLog())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1307,7 +1301,7 @@ global : {
 			t.Fatal(err)
 		}
 
-		got, err := ParseConfig(path, discardLog())
+		got, err := parseConfigForTest(path, discardLog())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1321,7 +1315,7 @@ global : {
 		var warnings []string
 		logger := captureLogger(nil, &warnings, nil)
 
-		got, err := ParseConfig(path, logger)
+		got, err := parseConfigForTest(path, logger)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1338,7 +1332,7 @@ global : {
   external-dir : [ "/kept" ], # comment with , and : inside
   no-external-facts : true // trailing comment
 }`)
-		got, err := ParseConfig(path, discardLog())
+		got, err := parseConfigForTest(path, discardLog())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1355,7 +1349,7 @@ global : {
   external-dir : [ "/kept" ],
 }
 # no newline`)
-		got, err := ParseConfig(path, discardLog())
+		got, err := parseConfigForTest(path, discardLog())
 		if err != nil {
 			t.Fatal(err)
 		}

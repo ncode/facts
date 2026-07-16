@@ -142,7 +142,7 @@ func TestWithConfigFile_loadsConfiguredDirs(t *testing.T) {
 }
 
 func TestWithConfigFile_recomputesDiscoveryPolicyEachDiscover(t *testing.T) {
-	cacheDir := redirectCacheDir(t)
+	cacheDir, defaults := cacheDefaults(t)
 	firstDir := t.TempDir()
 	writeTestFile(t, firstDir, "site.txt", "site_location=first\n")
 	writeTestFile(t, firstDir, "blocked.txt", "blocked_probe=blocked\n")
@@ -162,6 +162,7 @@ facts : {
 		WithCache(),
 		WithConfigFile(configPath),
 		WithFact("cache_probe", func(context.Context) (any, error) { return "cached", nil }),
+		defaults,
 	)
 	if err != nil {
 		t.Fatal(err)

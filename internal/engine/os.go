@@ -108,24 +108,6 @@ func architectureName(goos, machine string) string {
 	return machine
 }
 
-func windowsHardwareArchitecture(processor string, level int) (string, string) {
-	switch strings.ToUpper(strings.TrimSpace(processor)) {
-	case "AMD64":
-		return "x86_64", "x64"
-	case "ARM", "ARM64":
-		return "arm", "arm"
-	case "IA64":
-		return "ia64", "ia64"
-	case "INTEL", "386":
-		if level > 0 && level < 5 {
-			return "i" + strconv.Itoa(level) + "86", "x86"
-		}
-		return "i686", "x86"
-	default:
-		return "unknown", "unknown"
-	}
-}
-
 func windowsHardwareFromGoArch(goarch string) string {
 	switch goarch {
 	case "amd64":
@@ -263,22 +245,6 @@ type windowsOSVersionInfo struct {
 	ProductType string
 	Version     string
 	MajorMinor  string
-}
-
-type windowsOSDescription struct {
-	ConsumerRelease bool
-	Description     string
-}
-
-func currentWindowsOSDescription(input string) *windowsOSDescription {
-	info := parseWindowsOSVersionInfo(input)
-	if info.ProductType == "" && info.Description == "" {
-		return nil
-	}
-	return &windowsOSDescription{
-		ConsumerRelease: info.ProductType == "1",
-		Description:     info.Description,
-	}
 }
 
 // currentWindowsKernel returns the Windows kernel name, release, and version

@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -13,9 +14,8 @@ import (
 	"github.com/ncode/facts/internal/engine"
 )
 
-func TestMain(m *testing.M) {
-	defaultExternalFactDirs = func() []string { return nil }
-	os.Exit(m.Run())
+func runForTest(stdout, stderr io.Writer, args []string) error {
+	return runWithDefaults(stdout, stderr, args, engine.DiscoveryDefaults{})
 }
 
 func seedAppCacheFile(t *testing.T, path string, data map[string]any) {
@@ -47,7 +47,7 @@ func TestRun_version(t *testing.T) {
 func TestRun_shortVersion(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
-	if err := Run(&stdout, &stderr, []string{"-v"}); err != nil {
+	if err := runForTest(&stdout, &stderr, []string{"-v"}); err != nil {
 		t.Fatal(err)
 	}
 	if got, want := stdout.String(), engine.Version+"\n"; got != want {
@@ -64,7 +64,7 @@ func TestRun_shortVersion(t *testing.T) {
 func TestRun_facterversionJSONFastPathBytes(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
-	if err := Run(&stdout, &stderr, []string{"--json", "facterversion"}); err != nil {
+	if err := runForTest(&stdout, &stderr, []string{"--json", "facterversion"}); err != nil {
 		t.Fatal(err)
 	}
 	want := "{\n  \"facterversion\": \"" + engine.Version + "\"\n}\n"
@@ -79,7 +79,7 @@ func TestRun_facterversionJSONFastPathBytes(t *testing.T) {
 func TestRun_facterversionHOCONFastPathBytes(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
-	if err := Run(&stdout, &stderr, []string{"--hocon", "facterversion"}); err != nil {
+	if err := runForTest(&stdout, &stderr, []string{"--hocon", "facterversion"}); err != nil {
 		t.Fatal(err)
 	}
 	if got, want := stdout.String(), engine.Version+"\n"; got != want {
@@ -103,7 +103,7 @@ func TestRun_facterversionFastPathIgnoresColorAndForceDotResolution(t *testing.T
 		t.Run(tt.name, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
 
-			if err := Run(&stdout, &stderr, tt.args); err != nil {
+			if err := runForTest(&stdout, &stderr, tt.args); err != nil {
 				t.Fatal(err)
 			}
 			if got, want := stdout.String(), engine.Version+"\n"; got != want {
@@ -123,7 +123,7 @@ func TestRun_facterversionQueryAllowsExternalOverride(t *testing.T) {
 	}
 	var stdout, stderr bytes.Buffer
 
-	if err := Run(&stdout, &stderr, []string{"--external-dir", dir, "facterversion"}); err != nil {
+	if err := runForTest(&stdout, &stderr, []string{"--external-dir", dir, "facterversion"}); err != nil {
 		t.Fatal(err)
 	}
 	if got, want := strings.TrimSpace(stdout.String()), "external"; got != want {
@@ -147,11 +147,11 @@ func TestRun_acceptsCompatibilityFlagsAndConfigToggles(t *testing.T) {
 		{"--log-level", "trace", "facterversion"},
 	} {
 		var stdout, stderr bytes.Buffer
-		if err := Run(&stdout, &stderr, args); err != nil {
-			t.Fatalf("Run(%v) err = %v, want compatibility options accepted", args, err)
+		if err := runForTest(&stdout, &stderr, args); err != nil {
+			t.Fatalf("runForTest(%v) err = %v, want compatibility options accepted", args, err)
 		}
 		if got, want := stdout.String(), engine.Version+"\n"; got != want {
-			t.Fatalf("Run(%v) stdout = %q, want %q", args, got, want)
+			t.Fatalf("runForTest(%v) stdout = %q, want %q", args, got, want)
 		}
 	}
 }
@@ -159,7 +159,7 @@ func TestRun_acceptsCompatibilityFlagsAndConfigToggles(t *testing.T) {
 func TestRun_helpListsSupportedCompatibilityOptions(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
-	if err := Run(&stdout, &stderr, []string{"--help"}); err != nil {
+	if err := runForTest(&stdout, &stderr, []string{"--help"}); err != nil {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
@@ -191,7 +191,7 @@ func TestRun_helpListsSupportedCompatibilityOptions(t *testing.T) {
 func TestRun_manPrintsManual(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
-	if err := Run(&stdout, &stderr, []string{"--man"}); err != nil {
+	if err := runForTest(&stdout, &stderr, []string{"--man"}); err != nil {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
@@ -213,7 +213,7 @@ func TestRun_manPrintsManual(t *testing.T) {
 func TestRun_queryJSON(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
-	if err := Run(&stdout, &stderr, []string{"--json", "os.name"}); err != nil {
+	if err := runForTest(&stdout, &stderr, []string{"--json", "os.name"}); err != nil {
 		t.Fatal(err)
 	}
 	var got map[string]string
@@ -229,7 +229,7 @@ func TestRun_warnsAndIgnoresUnreadableConfig(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "missing.conf")
 	var stdout, stderr bytes.Buffer
 
-	if err := Run(&stdout, &stderr, []string{"--config", configPath, "facterversion"}); err != nil {
+	if err := runForTest(&stdout, &stderr, []string{"--config", configPath, "facterversion"}); err != nil {
 		t.Fatal(err)
 	}
 	if strings.TrimSpace(stdout.String()) != engine.Version {
@@ -244,7 +244,7 @@ func TestRun_warnsAndIgnoresUnreadableConfig(t *testing.T) {
 func TestRun_noQueryJSONReturnsFullFactMap(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
-	if err := Run(&stdout, &stderr, []string{"--json"}); err != nil {
+	if err := runForTest(&stdout, &stderr, []string{"--json"}); err != nil {
 		t.Fatal(err)
 	}
 	var got map[string]any
@@ -276,7 +276,7 @@ func TestRun_configBlocklistSkipsExternalFactFile(t *testing.T) {
 	}
 	var stdout, stderr bytes.Buffer
 
-	if err := Run(&stdout, &stderr, []string{"--config", configPath, "--external-dir", dir, "--json", "site_location", "site_owner"}); err != nil {
+	if err := runForTest(&stdout, &stderr, []string{"--config", configPath, "--external-dir", dir, "--json", "site_location", "site_owner"}); err != nil {
 		t.Fatal(err)
 	}
 	var got map[string]any
@@ -312,7 +312,7 @@ fact-groups : {
 	}
 	var stdout, stderr bytes.Buffer
 
-	if err := Run(&stdout, &stderr, []string{"--config", configPath, "--external-dir", dir, "--json", "site_role", "site_owner"}); err != nil {
+	if err := runForTest(&stdout, &stderr, []string{"--config", configPath, "--external-dir", dir, "--json", "site_role", "site_owner"}); err != nil {
 		t.Fatal(err)
 	}
 	var got map[string]any
@@ -345,12 +345,12 @@ func TestRun_rejectsInvalidOptionPairsFromConfig(t *testing.T) {
 	}
 	var stdout, stderr bytes.Buffer
 
-	err := Run(&stdout, &stderr, []string{"--config", configPath, "facterversion"})
+	err := runForTest(&stdout, &stderr, []string{"--config", configPath, "facterversion"})
 	if err == nil {
-		t.Fatal("Run() err = nil, want configured option conflict")
+		t.Fatal("runForTest() err = nil, want configured option conflict")
 	}
 	if got, want := err.Error(), "--no-external-facts and --external-dir options conflict: please specify only one"; got != want {
-		t.Fatalf("Run() err = %q, want %q", got, want)
+		t.Fatalf("runForTest() err = %q, want %q", got, want)
 	}
 	assertUsageOutput(t, stdout.String())
 	if stderr.Len() != 0 {
@@ -370,7 +370,7 @@ func TestRun_externalExecutableStderrIsWrittenAsWarning(t *testing.T) {
 	}
 	var stdout, stderr bytes.Buffer
 
-	if err := Run(&stdout, &stderr, []string{"--external-dir", dir, "script_one"}); err != nil {
+	if err := runForTest(&stdout, &stderr, []string{"--external-dir", dir, "script_one"}); err != nil {
 		t.Fatal(err)
 	}
 	if got, want := stdout.String(), "two\n"; got != want {
@@ -394,7 +394,7 @@ func TestRun_colorOutputsYellowWarnings(t *testing.T) {
 	}
 	var stdout, stderr bytes.Buffer
 
-	if err := Run(&stdout, &stderr, []string{"--color", "--external-dir", dir, "script_one"}); err != nil {
+	if err := runForTest(&stdout, &stderr, []string{"--color", "--external-dir", dir, "script_one"}); err != nil {
 		t.Fatal(err)
 	}
 	if got, want := stdout.String(), "two\n"; got != want {
@@ -416,12 +416,9 @@ func TestRun_loadsDefaultConfigWhenConfigFlagIsOmitted(t *testing.T) {
 	if err := os.WriteFile(configPath, []byte(conf), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	oldDefaultConfigPath := engine.DefaultConfigPath
-	engine.DefaultConfigPath = func() string { return configPath }
-	t.Cleanup(func() { engine.DefaultConfigPath = oldDefaultConfigPath })
 	var stdout, stderr bytes.Buffer
 
-	if err := Run(&stdout, &stderr, []string{"site_location"}); err != nil {
+	if err := runWithDefaults(&stdout, &stderr, []string{"site_location"}, engine.DiscoveryDefaults{CompatibleConfigPath: configPath}); err != nil {
 		t.Fatal(err)
 	}
 	if got, want := stdout.String(), "lab\n"; got != want {
@@ -440,7 +437,7 @@ func TestRun_configCliDebugEmitsDebugLogs(t *testing.T) {
 	}
 	var stdout, stderr bytes.Buffer
 
-	if err := Run(&stdout, &stderr, []string{"--config", configPath, "facterversion"}); err != nil {
+	if err := runForTest(&stdout, &stderr, []string{"--config", configPath, "facterversion"}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(stderr.String(), "DEBUG Facts - resolving facts") {
@@ -456,7 +453,7 @@ func TestRun_configCliVerboseEmitsInfoLogs(t *testing.T) {
 	}
 	var stdout, stderr bytes.Buffer
 
-	if err := Run(&stdout, &stderr, []string{"--config", configPath, "facterversion"}); err != nil {
+	if err := runForTest(&stdout, &stderr, []string{"--config", configPath, "facterversion"}); err != nil {
 		t.Fatal(err)
 	}
 	if got, want := stdout.String(), engine.Version+"\n"; got != want {
@@ -478,7 +475,7 @@ func TestRun_configCliLogLevelDebugEmitsDebugLogs(t *testing.T) {
 	}
 	var stdout, stderr bytes.Buffer
 
-	if err := Run(&stdout, &stderr, []string{"--config", configPath, "facterversion"}); err != nil {
+	if err := runForTest(&stdout, &stderr, []string{"--config", configPath, "facterversion"}); err != nil {
 		t.Fatal(err)
 	}
 	if got, want := stdout.String(), engine.Version+"\n"; got != want {
@@ -497,12 +494,12 @@ func TestRun_rejectsUnsupportedConfiguredLogLevel(t *testing.T) {
 	}
 	var stdout, stderr bytes.Buffer
 
-	err := Run(&stdout, &stderr, []string{"--config", configPath, "facterversion"})
+	err := runForTest(&stdout, &stderr, []string{"--config", configPath, "facterversion"})
 	if err == nil {
-		t.Fatal("Run() err = nil, want unsupported configured log-level error")
+		t.Fatal("runForTest() err = nil, want unsupported configured log-level error")
 	}
 	if got, want := err.Error(), "unsupported log level loud"; got != want {
-		t.Fatalf("Run() err = %q, want %q", got, want)
+		t.Fatalf("runForTest() err = %q, want %q", got, want)
 	}
 	assertUsageOutput(t, stdout.String())
 	if stderr.Len() != 0 {
@@ -518,12 +515,12 @@ func TestRun_rejectsConflictingConfiguredLogOptions(t *testing.T) {
 	}
 	var stdout, stderr bytes.Buffer
 
-	err := Run(&stdout, &stderr, []string{"--config", configPath, "facterversion"})
+	err := runForTest(&stdout, &stderr, []string{"--config", configPath, "facterversion"})
 	if err == nil {
-		t.Fatal("Run() err = nil, want configured log option conflict")
+		t.Fatal("runForTest() err = nil, want configured log option conflict")
 	}
 	if got, want := err.Error(), "debug, verbose, and log-level options conflict: please specify only one."; got != want {
-		t.Fatalf("Run() err = %q, want %q", got, want)
+		t.Fatalf("runForTest() err = %q, want %q", got, want)
 	}
 	assertUsageOutput(t, stdout.String())
 	if stderr.Len() != 0 {
@@ -547,7 +544,7 @@ func TestRun_cliExternalDirOverridesConfiguredExternalDir(t *testing.T) {
 	}
 	var stdout, stderr bytes.Buffer
 
-	if err := Run(&stdout, &stderr, []string{"--config", configPath, "--external-dir", cliDir, "--json", "site_location", "config_only"}); err != nil {
+	if err := runForTest(&stdout, &stderr, []string{"--config", configPath, "--external-dir", cliDir, "--json", "site_location", "config_only"}); err != nil {
 		t.Fatal(err)
 	}
 	var got map[string]any
@@ -577,12 +574,10 @@ func TestRun_configTTLsUseFreshCachedFact(t *testing.T) {
 		t.Fatal(err)
 	}
 	cacheDir := t.TempDir()
-	oldDefaultCachePath := engine.DefaultCachePath
-	engine.DefaultCachePath = func() string { return cacheDir }
-	t.Cleanup(func() { engine.DefaultCachePath = oldDefaultCachePath })
+	defaults := engine.DiscoveryDefaults{CachePath: cacheDir}
 
 	var stdout, stderr bytes.Buffer
-	if err := Run(&stdout, &stderr, []string{"--config", configPath, "--external-dir", dir, "site_role"}); err != nil {
+	if err := runWithDefaults(&stdout, &stderr, []string{"--config", configPath, "--external-dir", dir, "site_role"}, defaults); err != nil {
 		t.Fatal(err)
 	}
 	if got, want := stdout.String(), "web\n"; got != want {
@@ -597,7 +592,7 @@ func TestRun_configTTLsUseFreshCachedFact(t *testing.T) {
 
 	stdout.Reset()
 	stderr.Reset()
-	if err := Run(&stdout, &stderr, []string{"--config", configPath, "--external-dir", dir, "site_role"}); err != nil {
+	if err := runWithDefaults(&stdout, &stderr, []string{"--config", configPath, "--external-dir", dir, "site_role"}, defaults); err != nil {
 		t.Fatal(err)
 	}
 	if got, want := stdout.String(), "web\n"; got != want {
@@ -620,13 +615,11 @@ func TestRun_noCacheIgnoresFreshCachedFact(t *testing.T) {
 		t.Fatal(err)
 	}
 	cacheDir := t.TempDir()
-	oldDefaultCachePath := engine.DefaultCachePath
-	engine.DefaultCachePath = func() string { return cacheDir }
-	t.Cleanup(func() { engine.DefaultCachePath = oldDefaultCachePath })
+	defaults := engine.DiscoveryDefaults{CachePath: cacheDir}
 	seedAppCacheFile(t, filepath.Join(cacheDir, "site_role"), map[string]any{"site_role": "from-cache"})
 	var stdout, stderr bytes.Buffer
 
-	if err := Run(&stdout, &stderr, []string{"--no-cache", "--config", configPath, "--external-dir", dir, "site_role"}); err != nil {
+	if err := runWithDefaults(&stdout, &stderr, []string{"--no-cache", "--config", configPath, "--external-dir", dir, "site_role"}, defaults); err != nil {
 		t.Fatal(err)
 	}
 	if got, want := stdout.String(), "fresh\n"; got != want {
@@ -640,13 +633,13 @@ func TestRun_noCacheIgnoresFreshCachedFact(t *testing.T) {
 func TestRun_strictLogsMissingFactErrorWhenQueriedFactIsMissing(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
-	err := Run(&stdout, &stderr, []string{"--strict", "--json", "os.name", "missing_fact"})
+	err := runForTest(&stdout, &stderr, []string{"--strict", "--json", "os.name", "missing_fact"})
 	status, ok := err.(ExitStatus)
 	if !ok {
-		t.Fatalf("Run() err = %T %[1]v, want ExitStatus", err)
+		t.Fatalf("runForTest() err = %T %[1]v, want ExitStatus", err)
 	}
 	if status.Code() != 1 {
-		t.Fatalf("Run() status = %d, want 1", status.Code())
+		t.Fatalf("runForTest() status = %d, want 1", status.Code())
 	}
 	var got map[string]any
 	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
@@ -704,18 +697,18 @@ func TestRun_noCacheDisabledQueriedFactKeepsProjectionPlaceholder(t *testing.T) 
 		t.Run(tt.name, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
 
-			err := Run(&stdout, &stderr, tt.args)
+			err := runForTest(&stdout, &stderr, tt.args)
 			if tt.wantStatus == 0 {
 				if err != nil {
-					t.Fatalf("Run(%v) err = %v, want nil", tt.args, err)
+					t.Fatalf("runForTest(%v) err = %v, want nil", tt.args, err)
 				}
 			} else {
 				status, ok := err.(ExitStatus)
 				if !ok {
-					t.Fatalf("Run(%v) err = %T %[2]v, want ExitStatus", tt.args, err)
+					t.Fatalf("runForTest(%v) err = %T %[2]v, want ExitStatus", tt.args, err)
 				}
 				if status.Code() != tt.wantStatus {
-					t.Fatalf("Run(%v) status = %d, want %d", tt.args, status.Code(), tt.wantStatus)
+					t.Fatalf("runForTest(%v) status = %d, want %d", tt.args, status.Code(), tt.wantStatus)
 				}
 			}
 			if got := stdout.String(); got != tt.wantStdout {
@@ -731,7 +724,7 @@ func TestRun_noCacheDisabledQueriedFactKeepsProjectionPlaceholder(t *testing.T) 
 func TestRun_queryNoJSONUsesLegacyOutput(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
-	if err := Run(&stdout, &stderr, []string{"--no-json", "facterversion"}); err != nil {
+	if err := runForTest(&stdout, &stderr, []string{"--no-json", "facterversion"}); err != nil {
 		t.Fatal(err)
 	}
 	if got, want := stdout.String(), engine.Version+"\n"; got != want {
@@ -747,7 +740,7 @@ func TestRun_noFormatCompatibilityFlagsAreAcceptedAndInert(t *testing.T) {
 		t.Run(flag, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
 
-			if err := Run(&stdout, &stderr, []string{flag, "facterversion"}); err != nil {
+			if err := runForTest(&stdout, &stderr, []string{flag, "facterversion"}); err != nil {
 				t.Fatal(err)
 			}
 			if got, want := stdout.String(), engine.Version+"\n"; got != want {
@@ -763,7 +756,7 @@ func TestRun_noFormatCompatibilityFlagsAreAcceptedAndInert(t *testing.T) {
 func TestRun_timingPrintsResolutionDuration(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
-	if err := Run(&stdout, &stderr, []string{"--timing", "facterversion"}); err != nil {
+	if err := runForTest(&stdout, &stderr, []string{"--timing", "facterversion"}); err != nil {
 		t.Fatal(err)
 	}
 	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
@@ -785,13 +778,13 @@ func TestRun_timingPrintsResolutionDuration(t *testing.T) {
 func TestRun_sharedPresentationProjectionPreservesTimingOutputAndStrictOrder(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
-	err := Run(&stdout, &stderr, []string{"--timing", "--strict", "--json", "os.name", "missing_fact", "missing_fact"})
+	err := runForTest(&stdout, &stderr, []string{"--timing", "--strict", "--json", "os.name", "missing_fact", "missing_fact"})
 	status, ok := err.(ExitStatus)
 	if !ok {
-		t.Fatalf("Run() err = %T %[1]v, want ExitStatus", err)
+		t.Fatalf("runForTest() err = %T %[1]v, want ExitStatus", err)
 	}
 	if status.Code() != 1 {
-		t.Fatalf("Run() status = %d, want 1", status.Code())
+		t.Fatalf("runForTest() status = %d, want 1", status.Code())
 	}
 
 	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
@@ -840,12 +833,12 @@ func TestRun_rejectsRemovedCustomFactOptions(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
-			err := Run(&stdout, &stderr, tt.args)
+			err := runForTest(&stdout, &stderr, tt.args)
 			if err == nil {
-				t.Fatalf("Run(%v) err = nil, want unknown option error", tt.args)
+				t.Fatalf("runForTest(%v) err = nil, want unknown option error", tt.args)
 			}
 			if got, want := err.Error(), "unrecognised option '"+tt.option+"'"; got != want {
-				t.Fatalf("Run(%v) err = %q, want %q", tt.args, got, want)
+				t.Fatalf("runForTest(%v) err = %q, want %q", tt.args, got, want)
 			}
 			assertUsageOutput(t, stdout.String())
 			if stderr.Len() != 0 {
@@ -869,12 +862,12 @@ func TestRun_rejectsRemovedPuppetOptions(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
-			err := Run(&stdout, &stderr, tt.args)
+			err := runForTest(&stdout, &stderr, tt.args)
 			if err == nil {
-				t.Fatalf("Run(%v) err = nil, want unknown option error", tt.args)
+				t.Fatalf("runForTest(%v) err = nil, want unknown option error", tt.args)
 			}
 			if got, want := err.Error(), "unrecognised option '"+tt.option+"'"; got != want {
-				t.Fatalf("Run(%v) err = %q, want %q", tt.args, got, want)
+				t.Fatalf("runForTest(%v) err = %q, want %q", tt.args, got, want)
 			}
 			assertUsageOutput(t, stdout.String())
 			if stderr.Len() != 0 {
@@ -887,7 +880,7 @@ func TestRun_rejectsRemovedPuppetOptions(t *testing.T) {
 func TestRun_queryYAML(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
-	if err := Run(&stdout, &stderr, []string{"--yaml", "os.name"}); err != nil {
+	if err := runForTest(&stdout, &stderr, []string{"--yaml", "os.name"}); err != nil {
 		t.Fatal(err)
 	}
 	if got := stdout.String(); !strings.HasPrefix(got, "os.name: ") || strings.TrimSpace(strings.TrimPrefix(got, "os.name: ")) == "" {
@@ -898,7 +891,7 @@ func TestRun_queryYAML(t *testing.T) {
 func TestRun_queryFacterversionYAMLHasSingleTrailingNewline(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
-	if err := Run(&stdout, &stderr, []string{"--yaml", "facterversion"}); err != nil {
+	if err := runForTest(&stdout, &stderr, []string{"--yaml", "facterversion"}); err != nil {
 		t.Fatal(err)
 	}
 	if got, want := stdout.String(), "facterversion: "+engine.Version+"\n"; got != want {
@@ -909,7 +902,7 @@ func TestRun_queryFacterversionYAMLHasSingleTrailingNewline(t *testing.T) {
 func TestRun_queryHOCON(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
-	if err := Run(&stdout, &stderr, []string{"--hocon", "os.name"}); err != nil {
+	if err := runForTest(&stdout, &stderr, []string{"--hocon", "os.name"}); err != nil {
 		t.Fatal(err)
 	}
 	if got := strings.TrimSpace(stdout.String()); got == "" {
@@ -920,7 +913,7 @@ func TestRun_queryHOCON(t *testing.T) {
 func TestRun_queryLegacy(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
-	if err := Run(&stdout, &stderr, []string{"facterversion"}); err != nil {
+	if err := runForTest(&stdout, &stderr, []string{"facterversion"}); err != nil {
 		t.Fatal(err)
 	}
 	if got, want := stdout.String(), engine.Version+"\n"; got != want {
@@ -931,7 +924,7 @@ func TestRun_queryLegacy(t *testing.T) {
 func TestRun_acceptsLogLevelCompatibilityFlag(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
-	if err := Run(&stdout, &stderr, []string{"--log-level", "none", "facterversion"}); err != nil {
+	if err := runForTest(&stdout, &stderr, []string{"--log-level", "none", "facterversion"}); err != nil {
 		t.Fatal(err)
 	}
 	if got, want := stdout.String(), engine.Version+"\n"; got != want {
@@ -945,7 +938,7 @@ func TestRun_acceptsLogLevelCompatibilityFlag(t *testing.T) {
 func TestRun_acceptsLogLevelPlaceholderCompatibilityValue(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
-	if err := Run(&stdout, &stderr, []string{"--log-level", "log_level", "facterversion"}); err != nil {
+	if err := runForTest(&stdout, &stderr, []string{"--log-level", "log_level", "facterversion"}); err != nil {
 		t.Fatal(err)
 	}
 	if got, want := stdout.String(), engine.Version+"\n"; got != want {
@@ -971,7 +964,7 @@ func TestRun_logLevelDebugOutputsDebugLogs(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
 
-			if err := Run(&stdout, &stderr, tt.args); err != nil {
+			if err := runForTest(&stdout, &stderr, tt.args); err != nil {
 				t.Fatal(err)
 			}
 			if got, want := stdout.String(), engine.Version+"\n"; got != want {
@@ -991,7 +984,7 @@ func TestRun_debugColorOutputsColorizedDebugLogs(t *testing.T) {
 	t.Setenv("TERM", "xterm-256color")
 	var stdout, stderr bytes.Buffer
 
-	if err := Run(&stdout, &stderr, []string{"--debug", "--color", "facterversion"}); err != nil {
+	if err := runForTest(&stdout, &stderr, []string{"--debug", "--color", "facterversion"}); err != nil {
 		t.Fatal(err)
 	}
 	if got, want := stdout.String(), engine.Version+"\n"; got != want {
@@ -1008,7 +1001,7 @@ func TestRun_debugColorOutputsColorizedDebugLogs(t *testing.T) {
 func TestRun_verboseOutputsInfoLogs(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
-	if err := Run(&stdout, &stderr, []string{"--verbose", "facterversion"}); err != nil {
+	if err := runForTest(&stdout, &stderr, []string{"--verbose", "facterversion"}); err != nil {
 		t.Fatal(err)
 	}
 	if got, want := stdout.String(), engine.Version+"\n"; got != want {
@@ -1025,7 +1018,7 @@ func TestRun_verboseOutputsInfoLogs(t *testing.T) {
 func TestRun_verboseColorOutputsGreenInfoLogs(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
-	if err := Run(&stdout, &stderr, []string{"--verbose", "--color", "facterversion"}); err != nil {
+	if err := runForTest(&stdout, &stderr, []string{"--verbose", "--color", "facterversion"}); err != nil {
 		t.Fatal(err)
 	}
 	if got, want := stdout.String(), engine.Version+"\n"; got != want {
@@ -1053,7 +1046,7 @@ func TestRun_acceptsNoOpCompatibilityFlags(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
 
-			if err := Run(&stdout, &stderr, tt.args); err != nil {
+			if err := runForTest(&stdout, &stderr, tt.args); err != nil {
 				t.Fatal(err)
 			}
 			if got, want := stdout.String(), engine.Version+"\n"; got != want {
@@ -1069,7 +1062,7 @@ func TestRun_acceptsNoOpCompatibilityFlags(t *testing.T) {
 func TestRun_queryStructuredRootFactJSON(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
-	if err := Run(&stdout, &stderr, []string{"--json", "os"}); err != nil {
+	if err := runForTest(&stdout, &stderr, []string{"--json", "os"}); err != nil {
 		t.Fatal(err)
 	}
 	var got map[string]map[string]any
@@ -1105,7 +1098,7 @@ func TestRun_colorColorsDefaultFormatKeysByDepth(t *testing.T) {
 	dir := colorTreeExternalDir(t)
 	var stdout, stderr bytes.Buffer
 
-	if err := Run(&stdout, &stderr, []string{"--color", "--external-dir", dir, "colortree", "simple"}); err != nil {
+	if err := runForTest(&stdout, &stderr, []string{"--color", "--external-dir", dir, "colortree", "simple"}); err != nil {
 		t.Fatal(err)
 	}
 	want := "\x1b[36mcolortree\x1b[0m => {\n" +
@@ -1130,11 +1123,11 @@ func TestRun_defaultFormatHasNoANSIWithoutColor(t *testing.T) {
 		{"--no-color", "--external-dir", dir, "colortree", "simple"},
 	} {
 		var stdout, stderr bytes.Buffer
-		if err := Run(&stdout, &stderr, args); err != nil {
-			t.Fatalf("Run(%v) err = %v", args, err)
+		if err := runForTest(&stdout, &stderr, args); err != nil {
+			t.Fatalf("runForTest(%v) err = %v", args, err)
 		}
 		if strings.Contains(stdout.String(), "\x1b[") {
-			t.Fatalf("Run(%v) stdout = %q, want no ANSI escape sequences", args, stdout.String())
+			t.Fatalf("runForTest(%v) stdout = %q, want no ANSI escape sequences", args, stdout.String())
 		}
 	}
 }
@@ -1146,10 +1139,10 @@ func TestRun_machineFormatsAreByteIdenticalWithAndWithoutColor(t *testing.T) {
 		t.Run(format, func(t *testing.T) {
 			var plain, colored bytes.Buffer
 			var stderr bytes.Buffer
-			if err := Run(&plain, &stderr, []string{format, "--external-dir", dir, "colortree", "simple"}); err != nil {
+			if err := runForTest(&plain, &stderr, []string{format, "--external-dir", dir, "colortree", "simple"}); err != nil {
 				t.Fatal(err)
 			}
-			if err := Run(&colored, &stderr, []string{format, "--color", "--external-dir", dir, "colortree", "simple"}); err != nil {
+			if err := runForTest(&colored, &stderr, []string{format, "--color", "--external-dir", dir, "colortree", "simple"}); err != nil {
 				t.Fatal(err)
 			}
 			if !bytes.Equal(plain.Bytes(), colored.Bytes()) {
@@ -1170,7 +1163,7 @@ func TestRun_queryExternalTxtFact(t *testing.T) {
 	}
 	var stdout, stderr bytes.Buffer
 
-	if err := Run(&stdout, &stderr, []string{"--external-dir", dir, "owner"}); err != nil {
+	if err := runForTest(&stdout, &stderr, []string{"--external-dir", dir, "owner"}); err != nil {
 		t.Fatal(err)
 	}
 	if got, want := stdout.String(), "platform=team\n"; got != want {
@@ -1181,26 +1174,23 @@ func TestRun_queryExternalTxtFact(t *testing.T) {
 	}
 }
 
-func defaultExternalFactDirForTest(t *testing.T) string {
+func defaultExternalFactDirForTest(t *testing.T) (string, engine.DiscoveryDefaults) {
 	t.Helper()
 	dir := filepath.Join(t.TempDir(), "facts.d")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	old := defaultExternalFactDirs
-	defaultExternalFactDirs = func() []string { return []string{dir} }
-	t.Cleanup(func() { defaultExternalFactDirs = old })
-	return dir
+	return dir, engine.DiscoveryDefaults{ExternalFactDirs: []string{dir}}
 }
 
 func TestRun_queryDefaultExternalFactDirectory(t *testing.T) {
-	dir := defaultExternalFactDirForTest(t)
+	dir, defaults := defaultExternalFactDirForTest(t)
 	if err := os.WriteFile(filepath.Join(dir, "site.txt"), []byte("site_location=default\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	var stdout, stderr bytes.Buffer
 
-	if err := Run(&stdout, &stderr, []string{"site_location"}); err != nil {
+	if err := runWithDefaults(&stdout, &stderr, []string{"site_location"}, defaults); err != nil {
 		t.Fatal(err)
 	}
 	if got, want := stdout.String(), "default\n"; got != want {
@@ -1212,7 +1202,7 @@ func TestRun_queryDefaultExternalFactDirectory(t *testing.T) {
 }
 
 func TestRun_externalDirOverridesDefaultExternalFactDirectory(t *testing.T) {
-	defaultDir := defaultExternalFactDirForTest(t)
+	defaultDir, defaults := defaultExternalFactDirForTest(t)
 	if err := os.WriteFile(filepath.Join(defaultDir, "site.txt"), []byte("site_location=default\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -1222,7 +1212,7 @@ func TestRun_externalDirOverridesDefaultExternalFactDirectory(t *testing.T) {
 	}
 	var stdout, stderr bytes.Buffer
 
-	if err := Run(&stdout, &stderr, []string{"--external-dir", cliDir, "site_location"}); err != nil {
+	if err := runWithDefaults(&stdout, &stderr, []string{"--external-dir", cliDir, "site_location"}, defaults); err != nil {
 		t.Fatal(err)
 	}
 	if got, want := stdout.String(), "cli\n"; got != want {
@@ -1241,7 +1231,7 @@ func TestRun_externalFactOverridesCoreFactInFullJSON(t *testing.T) {
 	}
 	var stdout, stderr bytes.Buffer
 
-	if err := Run(&stdout, &stderr, []string{"--external-dir", dir, "--json"}); err != nil {
+	if err := runForTest(&stdout, &stderr, []string{"--external-dir", dir, "--json"}); err != nil {
 		t.Fatal(err)
 	}
 	var got map[string]any
@@ -1264,7 +1254,7 @@ func TestRun_queryExternalEnvironmentFact(t *testing.T) {
 	t.Setenv("FACTER_site_location", "lab")
 	var stdout, stderr bytes.Buffer
 
-	if err := Run(&stdout, &stderr, []string{"site_location"}); err != nil {
+	if err := runForTest(&stdout, &stderr, []string{"site_location"}); err != nil {
 		t.Fatal(err)
 	}
 	if got, want := stdout.String(), "lab\n"; got != want {
@@ -1286,7 +1276,7 @@ func TestRun_queryExecutableExternalFact(t *testing.T) {
 	}
 	var stdout, stderr bytes.Buffer
 
-	if err := Run(&stdout, &stderr, []string{"--external-dir", dir, "dynamic_owner"}); err != nil {
+	if err := runForTest(&stdout, &stderr, []string{"--external-dir", dir, "dynamic_owner"}); err != nil {
 		t.Fatal(err)
 	}
 	if got, want := stdout.String(), "platform\n"; got != want {
@@ -1305,7 +1295,7 @@ func TestRun_queryExternalYAMLArrayIndex(t *testing.T) {
 	}
 	var stdout, stderr bytes.Buffer
 
-	if err := Run(&stdout, &stderr, []string{"--external-dir", dir, "arr_ext_fact.0"}); err != nil {
+	if err := runForTest(&stdout, &stderr, []string{"--external-dir", dir, "arr_ext_fact.0"}); err != nil {
 		t.Fatal(err)
 	}
 	if got, want := stdout.String(), "ex1\n"; got != want {
@@ -1329,7 +1319,7 @@ func TestRun_warnsAndSkipsExecutableExternalFactsDuringRecursiveResolution(t *te
 	}
 	var stdout, stderr bytes.Buffer
 
-	if err := Run(&stdout, &stderr, []string{"--external-dir", dir, "--json"}); err != nil {
+	if err := runForTest(&stdout, &stderr, []string{"--external-dir", dir, "--json"}); err != nil {
 		t.Fatal(err)
 	}
 	var got map[string]any
@@ -1355,12 +1345,12 @@ func TestRun_rejectsNoExternalFactsWithExternalDir(t *testing.T) {
 	}
 	var stdout, stderr bytes.Buffer
 
-	err := Run(&stdout, &stderr, []string{"--external-dir", dir, "--no-external-facts", "owner"})
+	err := runForTest(&stdout, &stderr, []string{"--external-dir", dir, "--no-external-facts", "owner"})
 	if err == nil {
-		t.Fatal("Run() err = nil, want conflicting option error")
+		t.Fatal("runForTest() err = nil, want conflicting option error")
 	}
 	if !strings.Contains(err.Error(), "--no-external-facts and --external-dir options conflict") {
-		t.Fatalf("Run() err = %q, want external-dir conflict", err)
+		t.Fatalf("runForTest() err = %q, want external-dir conflict", err)
 	}
 	assertUsageOutput(t, stdout.String())
 }
@@ -1369,12 +1359,12 @@ func TestRun_rejectsNoExternalFactsWithExternalDirEquals(t *testing.T) {
 	dir := t.TempDir()
 	var stdout, stderr bytes.Buffer
 
-	err := Run(&stdout, &stderr, []string{"--external-dir=" + dir, "--no-external-facts", "owner"})
+	err := runForTest(&stdout, &stderr, []string{"--external-dir=" + dir, "--no-external-facts", "owner"})
 	if err == nil {
-		t.Fatal("Run() err = nil, want conflicting option error")
+		t.Fatal("runForTest() err = nil, want conflicting option error")
 	}
 	if !strings.Contains(err.Error(), "--no-external-facts and --external-dir options conflict") {
-		t.Fatalf("Run() err = %q, want external-dir conflict", err)
+		t.Fatalf("runForTest() err = %q, want external-dir conflict", err)
 	}
 	assertUsageOutput(t, stdout.String())
 }
@@ -1382,12 +1372,12 @@ func TestRun_rejectsNoExternalFactsWithExternalDirEquals(t *testing.T) {
 func TestRun_rejectsConflictingOutputFormats(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
-	err := Run(&stdout, &stderr, []string{"--json", "--yaml", "os.name"})
+	err := runForTest(&stdout, &stderr, []string{"--json", "--yaml", "os.name"})
 	if err == nil {
-		t.Fatal("Run() err = nil, want conflicting option error")
+		t.Fatal("runForTest() err = nil, want conflicting option error")
 	}
 	if !strings.Contains(err.Error(), "--json and --yaml options conflict") {
-		t.Fatalf("Run() err = %q, want output format conflict", err)
+		t.Fatalf("runForTest() err = %q, want output format conflict", err)
 	}
 	assertUsageOutput(t, stdout.String())
 }
@@ -1395,12 +1385,12 @@ func TestRun_rejectsConflictingOutputFormats(t *testing.T) {
 func TestRun_rejectsConflictingHOCONOutputToggle(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
-	err := Run(&stdout, &stderr, []string{"--hocon", "--no-hocon", "os.name"})
+	err := runForTest(&stdout, &stderr, []string{"--hocon", "--no-hocon", "os.name"})
 	if err == nil {
-		t.Fatal("Run() err = nil, want conflicting option error")
+		t.Fatal("runForTest() err = nil, want conflicting option error")
 	}
 	if !strings.Contains(err.Error(), "--hocon and --no-hocon options conflict") {
-		t.Fatalf("Run() err = %q, want hocon conflict", err)
+		t.Fatalf("runForTest() err = %q, want hocon conflict", err)
 	}
 	assertUsageOutput(t, stdout.String())
 }
@@ -1408,7 +1398,7 @@ func TestRun_rejectsConflictingHOCONOutputToggle(t *testing.T) {
 func TestRun_noQueryPrintsKnownCoreFacts(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
-	if err := Run(&stdout, &stderr, nil); err != nil {
+	if err := runForTest(&stdout, &stderr, nil); err != nil {
 		t.Fatal(err)
 	}
 	for _, want := range []string{"facterversion => " + engine.Version, "os => {", "name => \"" + runtimeOSName() + "\""} {
@@ -1442,12 +1432,12 @@ func TestRun_rejectsRemovedShowLegacyOptions(t *testing.T) {
 	for _, option := range []string{"--show-legacy", "--no-show-legacy"} {
 		t.Run(option, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
-			err := Run(&stdout, &stderr, []string{option})
+			err := runForTest(&stdout, &stderr, []string{option})
 			if err == nil {
-				t.Fatalf("Run(%s) err = nil, want unknown option error", option)
+				t.Fatalf("runForTest(%s) err = nil, want unknown option error", option)
 			}
 			if got, want := err.Error(), "unrecognised option '"+option+"'"; got != want {
-				t.Fatalf("Run(%s) err = %q, want %q", option, got, want)
+				t.Fatalf("runForTest(%s) err = %q, want %q", option, got, want)
 			}
 			assertUsageOutput(t, stdout.String())
 			if stderr.Len() != 0 {
@@ -1468,8 +1458,8 @@ func TestRun_configShowLegacyKeyIsInert(t *testing.T) {
 	}
 	var stdout, stderr bytes.Buffer
 
-	if err := Run(&stdout, &stderr, []string{"--config", configPath, "--json"}); err != nil {
-		t.Fatalf("Run() err = %v, want retired show-legacy key ignored", err)
+	if err := runForTest(&stdout, &stderr, []string{"--config", configPath, "--json"}); err != nil {
+		t.Fatalf("runForTest() err = %v, want retired show-legacy key ignored", err)
 	}
 	var got map[string]any
 	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
@@ -1497,7 +1487,7 @@ func TestRun_configBlocklistLegacyIsInertInDefaultOutput(t *testing.T) {
 	}
 	var withBlocklist, stderr bytes.Buffer
 
-	if err := Run(&withBlocklist, &stderr, []string{"-c", path, "--json"}); err != nil {
+	if err := runForTest(&withBlocklist, &stderr, []string{"-c", path, "--json"}); err != nil {
 		t.Fatal(err)
 	}
 	if stderr.Len() != 0 {
@@ -1523,7 +1513,7 @@ func TestRun_configAllowsNoExternalFactsWithEmptyExternalDir(t *testing.T) {
 	}
 	var stdout, stderr bytes.Buffer
 
-	if err := Run(&stdout, &stderr, []string{"--config", path, "facterversion"}); err != nil {
+	if err := runForTest(&stdout, &stderr, []string{"--config", path, "facterversion"}); err != nil {
 		t.Fatal(err)
 	}
 	if got, want := strings.TrimSpace(stdout.String()), engine.Version; got != want {
@@ -1546,7 +1536,7 @@ func TestRun_configForceDotResolutionAllowsPartialDottedExternalFactQuery(t *tes
 	}
 	var stdout, stderr bytes.Buffer
 
-	if err := Run(&stdout, &stderr, []string{"--config", configPath, "--json", "a.b"}); err != nil {
+	if err := runForTest(&stdout, &stderr, []string{"--config", configPath, "--json", "a.b"}); err != nil {
 		t.Fatal(err)
 	}
 	var got map[string]map[string]string
@@ -1568,7 +1558,7 @@ func TestRun_forceDotResolutionAllowsPartialDottedExternalFactQuery(t *testing.T
 	}
 	var stdout, stderr bytes.Buffer
 
-	if err := Run(&stdout, &stderr, []string{"--external-dir", externalDir, "--force-dot-resolution", "--json", "a.b"}); err != nil {
+	if err := runForTest(&stdout, &stderr, []string{"--external-dir", externalDir, "--force-dot-resolution", "--json", "a.b"}); err != nil {
 		t.Fatal(err)
 	}
 	var got map[string]map[string]string
@@ -1590,7 +1580,7 @@ func TestRun_forceDotResolutionMergesDottedExternalFactWithoutQuery(t *testing.T
 	}
 	var stdout, stderr bytes.Buffer
 
-	if err := Run(&stdout, &stderr, []string{"--external-dir", externalDir, "--force-dot-resolution", "--json"}); err != nil {
+	if err := runForTest(&stdout, &stderr, []string{"--external-dir", externalDir, "--force-dot-resolution", "--json"}); err != nil {
 		t.Fatal(err)
 	}
 	var got map[string]any
@@ -1621,7 +1611,7 @@ func TestRun_configBlocklistGroupSuppressesGroupFacts(t *testing.T) {
 	}
 	var stdout, stderr bytes.Buffer
 
-	if err := Run(&stdout, &stderr, []string{"--config", path, "--json"}); err != nil {
+	if err := runForTest(&stdout, &stderr, []string{"--config", path, "--json"}); err != nil {
 		t.Fatal(err)
 	}
 	var got map[string]any
@@ -1652,7 +1642,7 @@ func TestRun_noBlockIgnoresConfiguredBlocklist(t *testing.T) {
 	}
 	var stdout, stderr bytes.Buffer
 
-	if err := Run(&stdout, &stderr, []string{"--config", path, "--no-block", "--json"}); err != nil {
+	if err := runForTest(&stdout, &stderr, []string{"--config", path, "--no-block", "--json"}); err != nil {
 		t.Fatal(err)
 	}
 	var got map[string]any
@@ -1676,7 +1666,7 @@ func TestRun_noBlockIgnoresConfiguredBlocklist(t *testing.T) {
 func TestRun_concatenatedShortJSONAndDebugFlags(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
-	if err := Run(&stdout, &stderr, []string{"-jd", "os.name"}); err != nil {
+	if err := runForTest(&stdout, &stderr, []string{"-jd", "os.name"}); err != nil {
 		t.Fatal(err)
 	}
 	var got map[string]string
@@ -1694,7 +1684,7 @@ func TestRun_concatenatedShortJSONAndDebugFlags(t *testing.T) {
 func TestRun_concatenatedShortTimingAndDebugFlags(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
-	if err := Run(&stdout, &stderr, []string{"-td", "os.name"}); err != nil {
+	if err := runForTest(&stdout, &stderr, []string{"-td", "os.name"}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(stdout.String(), "fact 'os.name', took: ") {
@@ -1708,7 +1698,7 @@ func TestRun_concatenatedShortTimingAndDebugFlags(t *testing.T) {
 func TestRun_concatenatedShortJSONDebugAndTimingFlags(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
-	if err := Run(&stdout, &stderr, []string{"-jdt", "os.name"}); err != nil {
+	if err := runForTest(&stdout, &stderr, []string{"-jdt", "os.name"}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(stdout.String(), "\"os.name\"") {
@@ -1725,12 +1715,12 @@ func TestRun_concatenatedShortJSONDebugAndTimingFlags(t *testing.T) {
 func TestRun_concatenatedShortFlagsRejectUnknownOption(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
-	err := Run(&stdout, &stderr, []string{"-jdtz"})
+	err := runForTest(&stdout, &stderr, []string{"-jdtz"})
 	if err == nil {
-		t.Fatal("Run() err = nil, want unknown option")
+		t.Fatal("runForTest() err = nil, want unknown option")
 	}
 	if !strings.Contains(err.Error(), "unrecognised option '-z'") {
-		t.Fatalf("Run() err = %q, want unknown -z option", err)
+		t.Fatalf("runForTest() err = %q, want unknown -z option", err)
 	}
 	assertUsageOutput(t, stdout.String())
 }
@@ -1740,7 +1730,7 @@ func TestRun_helpPrintsUsage(t *testing.T) {
 		t.Run(arg, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
 
-			if err := Run(&stdout, &stderr, []string{arg}); err != nil {
+			if err := runForTest(&stdout, &stderr, []string{arg}); err != nil {
 				t.Fatal(err)
 			}
 			for _, want := range []string{"Usage", "facts [options] [query]", "--list-block-groups"} {
@@ -1767,8 +1757,8 @@ func assertUsageOutput(t *testing.T, got string) {
 func runAppOutput(t *testing.T, args ...string) (string, string) {
 	t.Helper()
 	var stdout, stderr bytes.Buffer
-	if err := Run(&stdout, &stderr, args); err != nil {
-		t.Fatalf("Run(%v) err = %v", args, err)
+	if err := runForTest(&stdout, &stderr, args); err != nil {
+		t.Fatalf("runForTest(%v) err = %v", args, err)
 	}
 	return stdout.String(), stderr.String()
 }
@@ -1826,8 +1816,8 @@ func TestRun_listTasksIgnoreTrailingTaskFlags(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
-			if err := Run(&stdout, &stderr, tt.args); err != nil {
-				t.Fatalf("Run(%v) err = %v, want nil", tt.args, err)
+			if err := runForTest(&stdout, &stderr, tt.args); err != nil {
+				t.Fatalf("runForTest(%v) err = %v, want nil", tt.args, err)
 			}
 			if !strings.Contains(stdout.String(), tt.want) {
 				t.Fatalf("stdout = %q, want substring %q", stdout.String(), tt.want)
@@ -1842,7 +1832,7 @@ func TestRun_listTasksIgnoreTrailingTaskFlags(t *testing.T) {
 func TestRun_listBlockGroupsPrintsFactGroups(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
-	if err := Run(&stdout, &stderr, []string{"--list-block-groups"}); err != nil {
+	if err := runForTest(&stdout, &stderr, []string{"--list-block-groups"}); err != nil {
 		t.Fatal(err)
 	}
 	for _, want := range []string{"networking", "- networking", "operating system", "- os"} {
@@ -1858,7 +1848,7 @@ func TestRun_listBlockGroupsPrintsFactGroups(t *testing.T) {
 func TestRun_listCacheGroupsPrintsFactGroups(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
-	if err := Run(&stdout, &stderr, []string{"--list-cache-groups"}); err != nil {
+	if err := runForTest(&stdout, &stderr, []string{"--list-cache-groups"}); err != nil {
 		t.Fatal(err)
 	}
 	for _, want := range []string{"networking", "- networking", "processor", "- processors"} {
@@ -1958,8 +1948,8 @@ func TestRun_listTasksScanWholeTailForConfigAndExternalDirs(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
-			if err := Run(&stdout, &stderr, tt.args); err != nil {
-				t.Fatalf("Run(%v) err = %v, want nil", tt.args, err)
+			if err := runForTest(&stdout, &stderr, tt.args); err != nil {
+				t.Fatalf("runForTest(%v) err = %v, want nil", tt.args, err)
 			}
 			if !strings.Contains(stdout.String(), tt.want) {
 				t.Fatalf("stdout = %q, want substring %q", stdout.String(), tt.want)
@@ -1981,7 +1971,7 @@ func TestRun_listCacheGroupsIncludesConfiguredFactGroups(t *testing.T) {
 	}
 	var stdout, stderr bytes.Buffer
 
-	if err := Run(&stdout, &stderr, []string{"--config", configPath, "--list-cache-groups"}); err != nil {
+	if err := runForTest(&stdout, &stderr, []string{"--config", configPath, "--list-cache-groups"}); err != nil {
 		t.Fatal(err)
 	}
 	for _, want := range []string{"cached-custom-facts", "- site_role", "- site_location"} {
@@ -2004,7 +1994,7 @@ func TestRun_listCacheGroupsAcceptsShortConfigEquals(t *testing.T) {
 	}
 	var stdout, stderr bytes.Buffer
 
-	if err := Run(&stdout, &stderr, []string{"-c=" + configPath, "--list-cache-groups"}); err != nil {
+	if err := runForTest(&stdout, &stderr, []string{"-c=" + configPath, "--list-cache-groups"}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(stdout.String(), "cached-custom-facts\n- site_role") {
@@ -2028,7 +2018,7 @@ func TestRun_listCacheGroupsIncludesExternalDirectoryEntries(t *testing.T) {
 	}
 	var stdout, stderr bytes.Buffer
 
-	if err := Run(&stdout, &stderr, []string{"--external-dir", dir, "--list-cache-groups"}); err != nil {
+	if err := runForTest(&stdout, &stderr, []string{"--external-dir", dir, "--list-cache-groups"}); err != nil {
 		t.Fatal(err)
 	}
 	for _, want := range []string{"site.yaml\n", ".ignored.yaml\n", "nested\n"} {
@@ -2051,7 +2041,7 @@ func TestRun_listCacheGroupsConfiguredGroupOverridesDefault(t *testing.T) {
 	}
 	var stdout, stderr bytes.Buffer
 
-	if err := Run(&stdout, &stderr, []string{"--config", configPath, "--list-cache-groups"}); err != nil {
+	if err := runForTest(&stdout, &stderr, []string{"--config", configPath, "--list-cache-groups"}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(stdout.String(), "memory\n- custom_memory_fact") {
@@ -2069,7 +2059,7 @@ func BenchmarkRunJSONSingleFact(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		var stdout, stderr bytes.Buffer
-		if err := Run(&stdout, &stderr, []string{"--no-cache", "--json", "facterversion"}); err != nil {
+		if err := runForTest(&stdout, &stderr, []string{"--no-cache", "--json", "facterversion"}); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -2079,7 +2069,7 @@ func BenchmarkRunLegacySingleFact(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		var stdout, stderr bytes.Buffer
-		if err := Run(&stdout, &stderr, []string{"--no-cache", "facterversion"}); err != nil {
+		if err := runForTest(&stdout, &stderr, []string{"--no-cache", "facterversion"}); err != nil {
 			b.Fatal(err)
 		}
 	}

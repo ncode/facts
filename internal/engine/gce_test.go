@@ -44,6 +44,7 @@ func TestLinuxGCEFactsFetchRecursiveMetadataAndNormalizeInstance(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	facts := linuxGCEFacts(context.Background(), "linux", "Google", newGCEClient(server.URL, server.Client()))
+	assertDescriptorDeclaresFacts(t, "gce", facts)
 	got := factValues(facts)
 
 	metadata, ok := got["gce"].(map[string]any)

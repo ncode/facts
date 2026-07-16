@@ -56,13 +56,12 @@ func TestNewEngineFreezesConfigAndNormalizesFactNames(t *testing.T) {
 	}}
 
 	eng, err := NewEngine(EngineConfig{
-		ExternalDirs:           externalDirs,
-		DisabledFacts:          blocked,
-		ConfigLoaded:           true,
-		Config:                 config,
-		DefaultExternalDirsSet: true,
-		DefaultExternalDirs:    defaultDirs,
-		Facts:                  facts,
+		ExternalDirs:  externalDirs,
+		DisabledFacts: blocked,
+		ConfigLoaded:  true,
+		Config:        config,
+		Defaults:      &DiscoveryDefaults{ExternalFactDirs: defaultDirs},
+		Facts:         facts,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -83,8 +82,8 @@ func TestNewEngineFreezesConfigAndNormalizesFactNames(t *testing.T) {
 	if got := eng.cfg.DisabledFacts["networking"]; !got {
 		t.Fatalf("DisabledFacts[networking] = false, want frozen true")
 	}
-	if got, want := eng.cfg.DefaultExternalDirs, []string{"/default"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("DefaultExternalDirs = %#v, want %#v", got, want)
+	if got, want := eng.cfg.Defaults.ExternalFactDirs, []string{"/default"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("Defaults.ExternalFactDirs = %#v, want %#v", got, want)
 	}
 	if got, want := eng.cfg.Config.Disabled, []string{"ssh"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("Config.Disabled = %#v, want %#v", got, want)
@@ -182,13 +181,12 @@ func TestPlanDiscoveryMergesLoadedConfig(t *testing.T) {
 
 func TestPlanDiscoveryPreservesExplicitInputsAndUsesDefaultDirs(t *testing.T) {
 	eng, err := NewEngine(EngineConfig{
-		ExternalDirs:           []string{"/explicit"},
-		DisabledFacts:          map[string]bool{"explicit": true},
-		ConfigLoaded:           true,
-		Config:                 Config{ExternalDirs: []string{"/config"}, Disabled: []string{"config"}},
-		SystemDefaults:         true,
-		DefaultExternalDirsSet: true,
-		DefaultExternalDirs:    []string{"/default"},
+		ExternalDirs:   []string{"/explicit"},
+		DisabledFacts:  map[string]bool{"explicit": true},
+		ConfigLoaded:   true,
+		Config:         Config{ExternalDirs: []string{"/config"}, Disabled: []string{"config"}},
+		SystemDefaults: true,
+		Defaults:       &DiscoveryDefaults{ExternalFactDirs: []string{"/default"}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -205,9 +203,8 @@ func TestPlanDiscoveryPreservesExplicitInputsAndUsesDefaultDirs(t *testing.T) {
 	}
 
 	defaultEng, err := NewEngine(EngineConfig{
-		SystemDefaults:         true,
-		DefaultExternalDirsSet: true,
-		DefaultExternalDirs:    []string{"/default"},
+		SystemDefaults: true,
+		Defaults:       &DiscoveryDefaults{ExternalFactDirs: []string{"/default"}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -226,14 +223,14 @@ func TestPlanDiscoveryPreservesExplicitInputsAndUsesDefaultDirs(t *testing.T) {
 	}
 }
 
-func TestDefaultExternalDirsWithoutOverrideUsesPlatformDefaults(t *testing.T) {
-	eng, err := NewEngine(EngineConfig{})
+func TestDefaultsForDiscoveryWithoutOverrideUsesPlatformDefaults(t *testing.T) {
+	eng, err := NewEngine(EngineConfig{SystemDefaults: true})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if got, want := eng.defaultExternalDirs(), CurrentDefaultExternalFactDirs(); !reflect.DeepEqual(got, want) {
-		t.Fatalf("defaultExternalDirs() = %#v, want platform defaults %#v", got, want)
+	if got, want := eng.defaultsForDiscovery().ExternalFactDirs, CurrentDefaultExternalFactDirs(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("defaultsForDiscovery().ExternalFactDirs = %#v, want platform defaults %#v", got, want)
 	}
 }
 
@@ -331,12 +328,11 @@ func TestEngineDiscoverReturnsPartialSnapshotWhenContextCancelled(t *testing.T) 
 
 func TestEngineDiscoverUsesCachedValueForConfiguredFacts(t *testing.T) {
 	cacheDir := t.TempDir()
-	oldDefaultCachePath := DefaultCachePath
-	DefaultCachePath = func() string { return cacheDir }
-	t.Cleanup(func() { DefaultCachePath = oldDefaultCachePath })
+	defaults := DiscoveryDefaults{CachePath: cacheDir}
 
 	eng, err := NewEngine(EngineConfig{
 		UseCache:     true,
+		Defaults:     &defaults,
 		ConfigLoaded: true,
 		Config:       Config{TTLs: []FactTTL{{Fact: "cache_probe", TTL: "30 days"}}},
 		Facts: []ProgrammaticFact{{
@@ -365,6 +361,7 @@ func TestEngineDiscoverUsesCachedValueForConfiguredFacts(t *testing.T) {
 	// The current cache contract is value precedence: a fresh cache entry wins.
 	cachedEng, err := NewEngine(EngineConfig{
 		UseCache:     true,
+		Defaults:     &defaults,
 		ConfigLoaded: true,
 		Config:       Config{TTLs: []FactTTL{{Fact: "cache_probe", TTL: "30 days"}}},
 		Facts: []ProgrammaticFact{{

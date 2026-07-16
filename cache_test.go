@@ -11,16 +11,15 @@ import (
 	"github.com/ncode/facts/internal/engine"
 )
 
-// redirectCacheDir points the engine's persistent-cache location at a temp dir
-// for the duration of the test, so WithCache exercises a real round trip
-// without reading or writing the host's actual fact cache.
-func redirectCacheDir(t *testing.T) string {
+// cacheDefaults points one Engine at a temp persistent-cache location so
+// WithCache exercises a real round trip without process-global mutation.
+func cacheDefaults(t *testing.T) (string, Option) {
 	t.Helper()
 	dir := t.TempDir()
-	original := engine.DefaultCachePath
-	engine.DefaultCachePath = func() string { return dir }
-	t.Cleanup(func() { engine.DefaultCachePath = original })
-	return dir
+	return dir, func(cfg *engine.EngineConfig) error {
+		cfg.Defaults = &engine.DiscoveryDefaults{CachePath: dir}
+		return nil
+	}
 }
 
 // writeTTLConfig writes a config file giving group a 30-day TTL, which is what
@@ -68,10 +67,10 @@ func cachingResolver(value string) func(context.Context) (any, error) {
 // contract: opting in with WithCache and a TTL'd group causes Discover to
 // persist the freshly resolved fact to the cache directory.
 func TestWithCache_persistsResolvedFactToDisk(t *testing.T) {
-	dir := redirectCacheDir(t)
+	dir, defaults := cacheDefaults(t)
 	conf := writeTTLConfig(t, "demo")
 
-	eng, err := New(WithCache(), WithConfigFile(conf), WithFact("demo", cachingResolver("fresh")))
+	eng, err := New(WithCache(), WithConfigFile(conf), WithFact("demo", cachingResolver("fresh")), defaults)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,11 +89,11 @@ func TestWithCache_persistsResolvedFactToDisk(t *testing.T) {
 // freshly resolved one. A different resolver value makes the substitution
 // observable.
 func TestWithCache_servesFreshCachedValueOverResolver(t *testing.T) {
-	dir := redirectCacheDir(t)
+	dir, defaults := cacheDefaults(t)
 	conf := writeTTLConfig(t, "demo")
 	seedCacheFile(t, filepath.Join(dir, "demo"), map[string]any{"demo": "from-cache"})
 
-	eng, err := New(WithCache(), WithConfigFile(conf), WithFact("demo", cachingResolver("fresh")))
+	eng, err := New(WithCache(), WithConfigFile(conf), WithFact("demo", cachingResolver("fresh")), defaults)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +112,7 @@ func TestWithCache_servesFreshCachedValueOverResolver(t *testing.T) {
 }
 
 func TestWithCache_selectsQueriedFactsThroughEngineCachePath(t *testing.T) {
-	dir := redirectCacheDir(t)
+	dir, defaults := cacheDefaults(t)
 	conf := writeTTLConfig(t, "demo")
 	seedCacheFile(t, filepath.Join(dir, "demo"), map[string]any{"demo": map[string]any{"child": "from-cache"}})
 
@@ -124,6 +123,7 @@ func TestWithCache_selectsQueriedFactsThroughEngineCachePath(t *testing.T) {
 			return map[string]any{"child": "fresh"}, nil
 		}),
 		WithFact("other", cachingResolver("fresh")),
+		defaults,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -144,11 +144,11 @@ func TestWithCache_selectsQueriedFactsThroughEngineCachePath(t *testing.T) {
 // cache that WithCache would serve is ignored when WithCache is absent, proving
 // the option — not some always-on path — is what enables caching.
 func TestWithoutCache_ignoresExistingCache(t *testing.T) {
-	dir := redirectCacheDir(t)
+	dir, defaults := cacheDefaults(t)
 	conf := writeTTLConfig(t, "demo")
 	seedCacheFile(t, filepath.Join(dir, "demo"), map[string]any{"demo": "from-cache"})
 
-	eng, err := New(WithConfigFile(conf), WithFact("demo", cachingResolver("fresh")))
+	eng, err := New(WithConfigFile(conf), WithFact("demo", cachingResolver("fresh")), defaults)
 	if err != nil {
 		t.Fatal(err)
 	}

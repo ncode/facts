@@ -182,6 +182,7 @@ func TestEC2Facts_returnsMetadataAndUserdataForAWSHypervisors(t *testing.T) {
 
 	client := newEC2Client(server.URL+"/latest", server.Client())
 	facts := ec2Facts(testSession, client, virtualization{Name: "aws", IsVirtual: true})
+	assertDescriptorDeclaresFacts(t, "ec2_metadata", facts)
 	got := Collection(facts)
 	metadata, ok := got["ec2_metadata"].(map[string]any)
 	if !ok {

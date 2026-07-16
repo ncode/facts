@@ -285,20 +285,22 @@ func TestPlan9NetworkingCoreFactsUseInjectedHostFiles(t *testing.T) {
 	t.Parallel()
 
 	s := NewSession()
-	s.host = &fakeHostOS{
+	host := &fakeHostOS{
 		files: map[string][]byte{
 			"/dev/sysname":        []byte(plan9Fixture(t, "sysname")),
 			"/net/ipifc/0/status": []byte(plan9Fixture(t, "ipifc_status")),
 			"/net/ether0/addr":    []byte(plan9Fixture(t, "ether0_addr")),
 			"/net/iproute":        []byte(plan9Fixture(t, "iproute")),
 		},
+		globs: map[string][]string{
+			"/net/ipifc/*/status": {"/net/ipifc/0/status"},
+		},
 	}
-	facts := Collection(plan9NetworkingCoreFactsWithGlob(s, func(pattern string) ([]string, error) {
-		if pattern != "/net/ipifc/*/status" {
-			t.Fatalf("glob pattern = %q, want /net/ipifc/*/status", pattern)
-		}
-		return []string{"/net/ipifc/0/status"}, nil
-	}))
+	s.host = host
+	facts := Collection(plan9NetworkingCoreFacts(s))
+	if want := []string{"/net/ipifc/*/status"}; !reflect.DeepEqual(host.globCalls, want) {
+		t.Fatalf("glob calls = %#v, want %#v", host.globCalls, want)
+	}
 	networking, ok := facts["networking"].(map[string]any)
 	if !ok {
 		t.Fatalf("networking = %#v, want map", facts["networking"])
@@ -470,14 +472,14 @@ func TestPlan9NetworkingCoreFactsEmitFirstSliceOnly(t *testing.T) {
 		"/net/iproute":        []byte(plan9Fixture(t, "iproute")),
 	}
 	s := NewSession()
-	s.host = &fakeHostOS{files: files}
+	s.host = &fakeHostOS{
+		files: files,
+		globs: map[string][]string{
+			"/net/ipifc/*/status": {"/net/ipifc/0/status"},
+		},
+	}
 
-	facts := plan9NetworkingCoreFactsWithGlob(s, func(pattern string) ([]string, error) {
-		if pattern != "/net/ipifc/*/status" {
-			t.Fatalf("glob pattern = %q, want /net/ipifc/*/status", pattern)
-		}
-		return []string{"/net/ipifc/0/status"}, nil
-	})
+	facts := plan9NetworkingCoreFacts(s)
 	got := Collection(facts)
 	networking, ok := got["networking"].(map[string]any)
 	if !ok {

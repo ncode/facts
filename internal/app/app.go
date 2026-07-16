@@ -14,10 +14,12 @@ import (
 	"github.com/ncode/facts/internal/engine"
 )
 
-var defaultExternalFactDirs = engine.CurrentDefaultExternalFactDirs
-
 // Run executes the facts command with the provided arguments.
 func Run(stdout, stderr io.Writer, args []string) error {
+	return runWithDefaults(stdout, stderr, args, engine.CurrentDiscoveryDefaults())
+}
+
+func runWithDefaults(stdout, stderr io.Writer, args []string, defaults engine.DiscoveryDefaults) error {
 	args = cli.PrepareArguments(args)
 	if err := cli.ValidateOptions(args); err != nil {
 		return optionError(stdout, err)
@@ -37,30 +39,30 @@ func Run(stdout, stderr io.Writer, args []string) error {
 		_, err := fmt.Fprintln(stdout, engine.Version)
 		return err
 	case "list_block_groups", "--list-block-groups":
-		groups, err := factGroups(args[1:])
+		groups, err := factGroups(args[1:], defaults)
 		if err != nil {
 			return err
 		}
 		_, err = fmt.Fprintln(stdout, engine.FormatFactGroups(groups))
 		return err
 	case "list_cache_groups", "--list-cache-groups":
-		groups, err := factGroups(args[1:])
+		groups, err := factGroups(args[1:], defaults)
 		if err != nil {
 			return err
 		}
 		_, err = fmt.Fprintln(stdout, engine.FormatFactGroups(groups))
 		return err
 	case "query":
-		return runQuery(stdout, stderr, args[1:])
+		return runQuery(stdout, stderr, args[1:], defaults)
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
 	}
 }
 
-func factGroups(args []string) ([]engine.FactGroup, error) {
+func factGroups(args []string, defaults engine.DiscoveryDefaults) ([]engine.FactGroup, error) {
 	options := parseListOptions(args)
 	groups := engine.BuiltinFactGroups()
-	config, err := engine.ParseConfig(options.ConfigPath, slog.New(slog.DiscardHandler))
+	config, err := engine.ParseConfig(options.ConfigPath, slog.New(slog.DiscardHandler), defaults)
 	if err != nil {
 		return nil, err
 	}
@@ -69,7 +71,7 @@ func factGroups(args []string) ([]engine.FactGroup, error) {
 	configuredExternalDirs := engine.DiscoveryExternalDirs(config, options.ExternalDirs, false, false, nil)
 	var defaultExternalDirs []string
 	if len(configuredExternalDirs) == 0 {
-		defaultExternalDirs = defaultExternalFactDirs()
+		defaultExternalDirs = defaults.ExternalFactDirs
 	}
 	externalDirs := engine.DiscoveryExternalDirs(config, options.ExternalDirs, false, true, defaultExternalDirs)
 	external, err := engine.ExternalFactGroups(externalDirs)
@@ -149,7 +151,7 @@ Format facts as JSON:
 	return b.String()
 }
 
-func runQuery(stdout, stderr io.Writer, args []string) error {
+func runQuery(stdout, stderr io.Writer, args []string, defaults engine.DiscoveryDefaults) error {
 	flags, options, err := parseOptions("query", stderr, args)
 	if err != nil {
 		return err
@@ -163,7 +165,7 @@ func runQuery(stdout, stderr io.Writer, args []string) error {
 	logHandler := &stderrLogHandler{stderr: stderr, color: colorDiagnostics}
 	logger := slog.New(logHandler)
 	configFile := options.ConfigPath
-	configOptions, configErr := engine.ParseConfig(configFile, logger)
+	configOptions, configErr := engine.ParseConfig(configFile, logger, defaults)
 	if configErr != nil {
 		return configErr
 	}
@@ -185,7 +187,7 @@ func runQuery(stdout, stderr io.Writer, args []string) error {
 	}
 	var defaultExternalDirs []string
 	if !options.NoExternalFacts && len(conflictExternalDirs) == 0 {
-		defaultExternalDirs = defaultExternalFactDirs()
+		defaultExternalDirs = defaults.ExternalFactDirs
 	}
 	discoveryExternalDirs := engine.DiscoveryExternalDirs(configOptions, options.ExternalDirs, options.NoExternalFacts, true, defaultExternalDirs)
 	disabledFactsForFastPath := map[string]bool{}
@@ -227,20 +229,19 @@ func runQuery(stdout, stderr io.Writer, args []string) error {
 	resolutionStart := time.Now()
 
 	eng, err := engine.NewEngine(engine.EngineConfig{
-		CLICompat:              true,
-		SystemDefaults:         true,
-		ConfigFile:             configFile,
-		ConfigLoaded:           true,
-		Config:                 configOptions,
-		ExternalDirs:           cliExternalDirs,
-		UseCache:               !options.NoCache,
-		NoExternalFacts:        options.NoExternalFacts,
-		DisabledFacts:          disabledFacts,
-		ExtraDisabled:          options.DisableEntries,
-		DefaultExternalDirsSet: true,
-		DefaultExternalDirs:    defaultExternalDirs,
-		IncludeTypedDotted:     mergeDottedFacts,
-		Logger:                 logger,
+		CLICompat:          true,
+		SystemDefaults:     true,
+		ConfigFile:         configFile,
+		ConfigLoaded:       true,
+		Config:             configOptions,
+		ExternalDirs:       cliExternalDirs,
+		UseCache:           !options.NoCache,
+		NoExternalFacts:    options.NoExternalFacts,
+		DisabledFacts:      disabledFacts,
+		ExtraDisabled:      options.DisableEntries,
+		Defaults:           &defaults,
+		IncludeTypedDotted: mergeDottedFacts,
+		Logger:             logger,
 	})
 	if err != nil {
 		return err

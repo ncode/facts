@@ -940,10 +940,6 @@ func parseNetBSDDkctlWedges(input string, sectorSize int) map[string]any {
 	return partitions
 }
 
-func partitionsFact(partitions, mountpoints map[string]any) map[string]any {
-	return partitionsFactWithMountEntries(partitions, nil, mountpoints)
-}
-
 // partitionsFacts returns the partitions fact, or nothing when device
 // enumeration yields no entries: Ruby Facter omits the fact instead of
 // emitting an empty map (the resting state on macOS).

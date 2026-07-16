@@ -27,7 +27,11 @@ var ErrNullByte = errors.New("external fact contains a null byte reference")
 // ErrExternalFactTooLarge reports an external fact source exceeding the byte cap.
 var ErrExternalFactTooLarge = errors.New("external fact exceeds size limit")
 
-const externalFactResolutionEnv = "FACTER_EXTERNAL_FACTS_RUNNING"
+const (
+	externalFactResolutionEnv  = "FACTER_EXTERNAL_FACTS_RUNNING"
+	externalFactCommandTimeout = 30 * time.Second
+	externalFactMaxBytes       = 1 << 20
+)
 
 // reservedDisableControlName is the resolved external-fact name reserved for the
 // disabled-set control variable. Any FACTS_*/FACTER_* variable resolving to this
@@ -36,8 +40,6 @@ const externalFactResolutionEnv = "FACTER_EXTERNAL_FACTS_RUNNING"
 const reservedDisableControlName = "disable"
 
 var errExternalFactOpen = errors.New("open external fact")
-var externalFactCommandTimeout = 30 * time.Second
-var externalFactMaxBytes = 1 << 20
 
 type externalFactLoaderMode int
 

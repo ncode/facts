@@ -6,6 +6,7 @@ import (
 
 type discoveryPlan struct {
 	externalDirs       []string
+	cachePath          string
 	noExternalFacts    bool
 	disabledFacts      map[string]bool
 	ambientDisabled    map[string]string
@@ -19,8 +20,13 @@ type discoveryPlan struct {
 }
 
 func (e *Engine) planDiscovery(s *Session, queries []string) (discoveryPlan, []error) {
+	return e.planDiscoveryWithDefaults(s, queries, e.defaultsForDiscovery())
+}
+
+func (e *Engine) planDiscoveryWithDefaults(s *Session, queries []string, defaults DiscoveryDefaults) (discoveryPlan, []error) {
 	plan := discoveryPlan{
 		externalDirs:       slices.Clone(e.cfg.ExternalDirs),
+		cachePath:          defaults.CachePath,
 		noExternalFacts:    e.cfg.NoExternalFacts,
 		disabledFacts:      cloneBoolMap(e.cfg.DisabledFacts),
 		useCache:           e.cfg.UseCache,
@@ -35,7 +41,7 @@ func (e *Engine) planDiscovery(s *Session, queries []string) (discoveryPlan, []e
 	}
 
 	var failures []error
-	config, ok, err := e.configForDiscovery(s)
+	config, ok, err := e.configForDiscovery(s, defaults)
 	if err != nil {
 		failures = append(failures, err)
 	} else if ok {
@@ -61,7 +67,7 @@ func (e *Engine) planDiscovery(s *Session, queries []string) (discoveryPlan, []e
 	var defaultExternalDirs []string
 	systemDefaults := e.cfg.SystemDefaults && !plan.noExternalFacts
 	if systemDefaults && len(plan.externalDirs) == 0 && len(config.ExternalDirs) == 0 {
-		defaultExternalDirs = e.defaultExternalDirs()
+		defaultExternalDirs = slices.Clone(defaults.ExternalFactDirs)
 	}
 	configForDirs := config
 	configForDirs.NoExternalFacts = false
@@ -142,22 +148,25 @@ func (e *Engine) unionDisabledFacts(s *Session, config Config, includeEnv bool) 
 	return disabled, ambient
 }
 
-func (e *Engine) configForDiscovery(s *Session) (Config, bool, error) {
+func (e *Engine) configForDiscovery(s *Session, defaults DiscoveryDefaults) (Config, bool, error) {
 	if e.cfg.ConfigLoaded {
 		return cloneConfig(e.cfg.Config), true, nil
 	}
 	if e.cfg.ConfigFile == "" && !e.cfg.SystemDefaults {
 		return Config{}, false, nil
 	}
-	config, err := ParseConfig(e.cfg.ConfigFile, s.logger)
+	config, err := ParseConfig(e.cfg.ConfigFile, s.logger, defaults)
 	return config, true, err
 }
 
-func (e *Engine) defaultExternalDirs() []string {
-	if e.cfg.DefaultExternalDirsSet {
-		return slices.Clone(e.cfg.DefaultExternalDirs)
+func (e *Engine) defaultsForDiscovery() DiscoveryDefaults {
+	if e.cfg.Defaults != nil {
+		return e.cfg.Defaults.clone()
 	}
-	return CurrentDefaultExternalFactDirs()
+	if e.cfg.SystemDefaults || e.cfg.UseCache {
+		return CurrentDiscoveryDefaults()
+	}
+	return DiscoveryDefaults{}
 }
 
 func cloneBoolMap(in map[string]bool) map[string]bool {

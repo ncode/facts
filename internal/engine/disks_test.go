@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-func TestPartitionsFactAddsFirstMountpointForDevice(t *testing.T) {
+func TestPartitionsFactWithMountEntriesAddsFirstMountpointForDevice(t *testing.T) {
 	partitions := map[string]any{
 		"/dev/sda2": map[string]any{
 			"filesystem": "btrfs",
@@ -27,7 +27,7 @@ func TestPartitionsFactAddsFirstMountpointForDevice(t *testing.T) {
 		},
 	}
 
-	got := partitionsFact(partitions, mountpoints)
+	got := partitionsFactWithMountEntries(partitions, nil, mountpoints)
 	want := map[string]any{
 		"/dev/sda2": map[string]any{
 			"filesystem": "btrfs",
@@ -38,7 +38,7 @@ func TestPartitionsFactAddsFirstMountpointForDevice(t *testing.T) {
 		},
 	}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("partitionsFact() = %#v, want %#v", got, want)
+		t.Fatalf("partitionsFactWithMountEntries() = %#v, want %#v", got, want)
 	}
 }
 
@@ -69,7 +69,7 @@ func TestPartitionsFactWithMountEntriesUsesResolverOrderForDuplicateDeviceLikeRu
 	}
 }
 
-func TestPartitionsFactMatchesFreeBSDGPTMountsByPartlabel(t *testing.T) {
+func TestPartitionsFactWithMountEntriesMatchesFreeBSDGPTMountsByPartlabel(t *testing.T) {
 	partitions := map[string]any{
 		"vtbd0p2": map[string]any{"partlabel": "efiesp"},
 		"vtbd0p5": map[string]any{"partlabel": "rootfs"},
@@ -79,7 +79,7 @@ func TestPartitionsFactMatchesFreeBSDGPTMountsByPartlabel(t *testing.T) {
 		"/boot/efi": map[string]any{"device": "/dev/gpt/efiesp", "filesystem": "msdosfs"},
 	}
 
-	got := partitionsFact(partitions, mountpoints)
+	got := partitionsFactWithMountEntries(partitions, nil, mountpoints)
 	root := got["vtbd0p5"].(map[string]any)
 	if root["mount"] != "/" || root["filesystem"] != "ufs" {
 		t.Fatalf("root partition = %#v, want mount and filesystem from mountpoint", root)
@@ -128,20 +128,20 @@ func TestPartitionForMountDeviceMatchesNamesLabelsAndUUIDs(t *testing.T) {
 	}
 }
 
-func TestPartitionsFactReturnsPartitionsWithoutMountpoints(t *testing.T) {
+func TestPartitionsFactWithMountEntriesReturnsPartitionsWithoutMountpoints(t *testing.T) {
 	partitions := map[string]any{
 		"/dev/sda1": map[string]any{"filesystem": "ext3"},
 	}
 
-	got := partitionsFact(partitions, nil)
+	got := partitionsFactWithMountEntries(partitions, nil, nil)
 	if !reflect.DeepEqual(got, partitions) {
-		t.Fatalf("partitionsFact() = %#v, want %#v", got, partitions)
+		t.Fatalf("partitionsFactWithMountEntries() = %#v, want %#v", got, partitions)
 	}
 }
 
-func TestPartitionsFactReturnsNilForEmptyPartitions(t *testing.T) {
-	if got := partitionsFact(map[string]any{}, map[string]any{"/": map[string]any{"device": "/dev/sda1"}}); got != nil {
-		t.Fatalf("partitionsFact() = %#v, want nil", got)
+func TestPartitionsFactWithMountEntriesReturnsNilForEmptyPartitions(t *testing.T) {
+	if got := partitionsFactWithMountEntries(map[string]any{}, nil, map[string]any{"/": map[string]any{"device": "/dev/sda1"}}); got != nil {
+		t.Fatalf("partitionsFactWithMountEntries() = %#v, want nil", got)
 	}
 }
 
@@ -678,14 +678,14 @@ func TestParseNetBSDDkctlWedges_returnsDevicePartitions(t *testing.T) {
 	}
 }
 
-func TestPartitionsFactJoinsAllOpenBSDMountpointsFromMountpointDevices(t *testing.T) {
+func TestPartitionsFactWithMountEntriesJoinsAllOpenBSDMountpointsFromMountpointDevices(t *testing.T) {
 	partitions := parseBSDDisklabelPartitions("sd0", openBSDDisklabelSD0)
 	mountpoints := openBSDMountpointsFact(`/dev/sd0a on / type ffs (local)
 /dev/sd0d on /usr type ffs (local, nodev)
 /dev/sd0e on /home type ffs (local, nodev, nosuid)
 `, "")
 
-	got := partitionsFact(partitions, mountpoints)
+	got := partitionsFactWithMountEntries(partitions, nil, mountpoints)
 	for _, tt := range []struct {
 		device string
 		mount  string
@@ -696,7 +696,7 @@ func TestPartitionsFactJoinsAllOpenBSDMountpointsFromMountpointDevices(t *testin
 	} {
 		partition, ok := got[tt.device].(map[string]any)
 		if !ok {
-			t.Fatalf("partitionsFact() = %#v, want partition %q", got, tt.device)
+			t.Fatalf("partitionsFactWithMountEntries() = %#v, want partition %q", got, tt.device)
 		}
 		if partition["mount"] != tt.mount {
 			t.Fatalf("%s mount = %#v, want %#v", tt.device, partition["mount"], tt.mount)
@@ -1598,7 +1598,9 @@ func TestCurrentZFSFactsRunsZFSAndZpoolUpgradeCommands(t *testing.T) {
 		}
 	}
 
-	got := factsByName(currentZFSFacts("freebsd", run))
+	facts := currentZFSFacts("freebsd", run)
+	assertDescriptorDeclaresFacts(t, "disks", facts)
+	got := factsByName(facts)
 	want := map[string]any{
 		"zfs.feature_numbers":   []string{"1", "2"},
 		"zfs.version":           "2",

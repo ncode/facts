@@ -15,7 +15,7 @@ func TestRun_disableOptionDropsNamedFacts(t *testing.T) {
 	}
 	var stdout, stderr bytes.Buffer
 
-	if err := Run(&stdout, &stderr, []string{"--external-dir", dir, "--disable", "alpha,beta", "--json"}); err != nil {
+	if err := runForTest(&stdout, &stderr, []string{"--external-dir", dir, "--disable", "alpha,beta", "--json"}); err != nil {
 		t.Fatal(err)
 	}
 	var got map[string]any
@@ -40,7 +40,7 @@ func TestRun_disableOptionRepeatableAcrossFlags(t *testing.T) {
 	}
 	var stdout, stderr bytes.Buffer
 
-	if err := Run(&stdout, &stderr, []string{"--external-dir", dir, "--disable", "alpha", "--disable", "beta", "--json"}); err != nil {
+	if err := runForTest(&stdout, &stderr, []string{"--external-dir", dir, "--disable", "alpha", "--disable", "beta", "--json"}); err != nil {
 		t.Fatal(err)
 	}
 	var got map[string]any
@@ -65,7 +65,7 @@ func TestRun_noBlockClearsDisableOption(t *testing.T) {
 	}
 	var stdout, stderr bytes.Buffer
 
-	if err := Run(&stdout, &stderr, []string{"--external-dir", dir, "--disable", "alpha", "--no-block", "--json", "alpha"}); err != nil {
+	if err := runForTest(&stdout, &stderr, []string{"--external-dir", dir, "--disable", "alpha", "--no-block", "--json", "alpha"}); err != nil {
 		t.Fatal(err)
 	}
 	var got map[string]any
@@ -86,7 +86,7 @@ func TestRun_facterversionDisabledByEnvFallsThrough(t *testing.T) {
 	t.Setenv("FACTS_DISABLE", "facterversion")
 	var stdout, stderr bytes.Buffer
 
-	if err := Run(&stdout, &stderr, []string{"facterversion"}); err != nil {
+	if err := runForTest(&stdout, &stderr, []string{"facterversion"}); err != nil {
 		t.Fatal(err)
 	}
 	if stdout.Len() != 0 {
@@ -100,7 +100,7 @@ func TestRun_facterversionDisabledByEnvFallsThrough(t *testing.T) {
 func TestRun_facterversionDisabledByFlagFallsThrough(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
-	if err := Run(&stdout, &stderr, []string{"--disable", "facterversion", "facterversion"}); err != nil {
+	if err := runForTest(&stdout, &stderr, []string{"--disable", "facterversion", "facterversion"}); err != nil {
 		t.Fatal(err)
 	}
 	if stdout.Len() != 0 {
