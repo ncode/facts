@@ -20,6 +20,7 @@ func TestAzureFactsFetchMetadataAndCloudProvider(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	facts := azureFacts(context.Background(), newAzureClient(server.URL, server.Client()), virtualization{Name: "hyperv", IsVirtual: true})
+	assertDescriptorDeclaresFacts(t, "az_metadata", facts)
 	got := factValues(facts)
 
 	metadata, ok := got["az_metadata"].(map[string]any)

@@ -2,24 +2,20 @@ package engine
 
 import "slices"
 
-type coreFactGatingClass string
+type coreFactSchedulingPolicy string
 
 const (
-	coreFactStandalone  coreFactGatingClass = "standalone"
-	coreFactMultiOutput coreFactGatingClass = "multiOutput"
-	coreFactSharedProbe coreFactGatingClass = "sharedProbe"
-	coreFactInlineEager coreFactGatingClass = "inlineEager"
+	coreFactGateable    coreFactSchedulingPolicy = "gateable"
+	coreFactAlwaysEager coreFactSchedulingPolicy = "alwaysEager"
 )
 
 type coreFactDescriptor struct {
-	root           string
-	group          string
-	groupOrder     int
-	class          coreFactGatingClass
-	assemble       func(*coreFactBuild) []ResolvedFact
-	emittedRoots   []string
-	probeConsumers []string
-	emitsUnder     string
+	root         string
+	group        string
+	groupOrder   int
+	policy       coreFactSchedulingPolicy
+	assemble     func(*coreFactBuild) []ResolvedFact
+	emittedRoots []string
 }
 
 type coreFactBuild struct {
@@ -28,19 +24,18 @@ type coreFactBuild struct {
 	virtualization virtualization
 	virtualFact    any
 	isVirtualFact  any
-	dmi            map[string]any
 }
 
 var coreFactDescriptors = []coreFactDescriptor{
 	{
 		root:         "facterversion",
-		class:        coreFactInlineEager,
+		policy:       coreFactAlwaysEager,
 		assemble:     func(*coreFactBuild) []ResolvedFact { return []ResolvedFact{{Name: "facterversion", Value: Version}} },
 		emittedRoots: []string{"facterversion"},
 	},
 	{
-		root:  "is_virtual",
-		class: coreFactInlineEager,
+		root:   "is_virtual",
+		policy: coreFactAlwaysEager,
 		assemble: func(b *coreFactBuild) []ResolvedFact {
 			return []ResolvedFact{{Name: "is_virtual", Value: b.isVirtualFact}}
 		},
@@ -50,26 +45,25 @@ var coreFactDescriptors = []coreFactDescriptor{
 		root:       "path",
 		group:      "path",
 		groupOrder: 5,
-		class:      coreFactInlineEager,
+		policy:     coreFactAlwaysEager,
 		assemble: func(b *coreFactBuild) []ResolvedFact {
 			return []ResolvedFact{{Name: "path", Value: currentPathEntries(b.goos, b.s.getenv)}}
 		},
 		emittedRoots: []string{"path"},
 	},
 	{
-		root:  "virtual",
-		class: coreFactInlineEager,
+		root:   "virtual",
+		policy: coreFactAlwaysEager,
 		assemble: func(b *coreFactBuild) []ResolvedFact {
 			return []ResolvedFact{{Name: "virtual", Value: b.virtualFact}}
 		},
-		emittedRoots:   []string{"virtual"},
-		probeConsumers: []string{"azure", "ec2", "gce", "hypervisors"},
+		emittedRoots: []string{"virtual"},
 	},
 	{
 		root:         "networking",
 		group:        "networking",
 		groupOrder:   2,
-		class:        coreFactStandalone,
+		policy:       coreFactGateable,
 		assemble:     func(b *coreFactBuild) []ResolvedFact { return networkingCoreFacts(b.s) },
 		emittedRoots: []string{"networking"},
 	},
@@ -77,7 +71,7 @@ var coreFactDescriptors = []coreFactDescriptor{
 		root:         "processors",
 		group:        "processor",
 		groupOrder:   6,
-		class:        coreFactStandalone,
+		policy:       coreFactGateable,
 		assemble:     func(b *coreFactBuild) []ResolvedFact { return processorsCoreFacts(b.s) },
 		emittedRoots: []string{"processors"},
 	},
@@ -85,7 +79,7 @@ var coreFactDescriptors = []coreFactDescriptor{
 		root:         "memory",
 		group:        "memory",
 		groupOrder:   1,
-		class:        coreFactStandalone,
+		policy:       coreFactGateable,
 		assemble:     func(b *coreFactBuild) []ResolvedFact { return memoryCoreFacts(b.s) },
 		emittedRoots: []string{"memory"},
 	},
@@ -93,71 +87,67 @@ var coreFactDescriptors = []coreFactDescriptor{
 		root:         "os",
 		group:        "operating system",
 		groupOrder:   3,
-		class:        coreFactMultiOutput,
+		policy:       coreFactGateable,
 		assemble:     func(b *coreFactBuild) []ResolvedFact { return osCoreFacts(b.s) },
 		emittedRoots: []string{"filesystems", "kernel", "os", "system_profiler"},
 	},
 	{
-		root:           "dmi",
-		class:          coreFactSharedProbe,
-		assemble:       func(b *coreFactBuild) []ResolvedFact { return dmiCoreFacts(b.s) },
-		emittedRoots:   []string{"dmi"},
-		probeConsumers: []string{"gce"},
+		root:         "dmi",
+		policy:       coreFactGateable,
+		assemble:     func(b *coreFactBuild) []ResolvedFact { return dmiCoreFacts(b.s) },
+		emittedRoots: []string{"dmi"},
 	},
 	{
 		root:         "disks",
-		class:        coreFactMultiOutput,
+		policy:       coreFactGateable,
 		assemble:     func(b *coreFactBuild) []ResolvedFact { return disksCoreFacts(b.s) },
 		emittedRoots: []string{"disks", "mountpoints", "partitions", "zfs", "zpool"},
 	},
 	{
-		root:           "ssh",
-		class:          coreFactStandalone,
-		assemble:       func(b *coreFactBuild) []ResolvedFact { return sshCoreFacts(b.s) },
-		emittedRoots:   []string{"ssh"},
-		probeConsumers: []string{"identity"},
+		root:         "ssh",
+		policy:       coreFactGateable,
+		assemble:     func(b *coreFactBuild) []ResolvedFact { return sshCoreFacts(b.s) },
+		emittedRoots: []string{"ssh"},
 	},
 	{
-		root:           "identity",
-		class:          coreFactSharedProbe,
-		assemble:       func(b *coreFactBuild) []ResolvedFact { return identityCoreFacts(b.s) },
-		emittedRoots:   []string{"identity"},
-		probeConsumers: []string{"ssh"},
+		root:         "identity",
+		policy:       coreFactGateable,
+		assemble:     func(b *coreFactBuild) []ResolvedFact { return identityCoreFacts(b.s) },
+		emittedRoots: []string{"identity"},
 	},
 	{
 		root:         "system_uptime",
-		class:        coreFactMultiOutput,
+		policy:       coreFactGateable,
 		assemble:     func(b *coreFactBuild) []ResolvedFact { return uptimeCoreFacts(b.s) },
 		emittedRoots: []string{"load_averages", "system_uptime"},
 	},
 	{
 		root:         "selinux",
-		class:        coreFactInlineEager,
+		policy:       coreFactAlwaysEager,
 		assemble:     func(b *coreFactBuild) []ResolvedFact { return selinuxCoreFacts(b.s) },
 		emittedRoots: []string{"os"},
-		emitsUnder:   "os.selinux",
 	},
 	{
 		root:         "fips_enabled",
-		class:        coreFactStandalone,
+		policy:       coreFactGateable,
 		assemble:     func(b *coreFactBuild) []ResolvedFact { return fipsCoreFacts(b.s) },
 		emittedRoots: []string{"fips_enabled"},
 	},
 	{
 		root:         "timezone",
-		class:        coreFactStandalone,
+		policy:       coreFactGateable,
 		assemble:     func(b *coreFactBuild) []ResolvedFact { return timezoneCoreFacts(b.s) },
 		emittedRoots: []string{"timezone"},
 	},
 	{
 		root:         "augeas",
-		class:        coreFactStandalone,
+		policy:       coreFactGateable,
 		assemble:     func(b *coreFactBuild) []ResolvedFact { return augeasCoreFacts(b.s) },
 		emittedRoots: []string{"augeas"},
 	},
 	{
 		root:         "xen",
-		class:        coreFactStandalone,
+		policy:       coreFactGateable,
 		assemble:     func(b *coreFactBuild) []ResolvedFact { return xenCoreFacts(b.s) },
 		emittedRoots: []string{"xen"},
 	},
@@ -165,51 +155,58 @@ var coreFactDescriptors = []coreFactDescriptor{
 		root:         "packages",
 		group:        "packages",
 		groupOrder:   4,
-		class:        coreFactStandalone,
+		policy:       coreFactGateable,
 		assemble:     func(b *coreFactBuild) []ResolvedFact { return packagesCoreFacts(b.s) },
 		emittedRoots: []string{"packages"},
 	},
 	{
-		root:           "hypervisors",
-		class:          coreFactSharedProbe,
-		assemble:       func(b *coreFactBuild) []ResolvedFact { return currentLinuxHypervisorFacts(b.s) },
-		emittedRoots:   []string{"hypervisors"},
-		probeConsumers: []string{"virtual"},
+		root:         "hypervisors",
+		policy:       coreFactGateable,
+		assemble:     func(b *coreFactBuild) []ResolvedFact { return currentLinuxHypervisorFacts(b.s) },
+		emittedRoots: []string{"hypervisors"},
 	},
 	{
-		root:           "hypervisors",
-		class:          coreFactSharedProbe,
-		assemble:       func(b *coreFactBuild) []ResolvedFact { return currentWindowsHypervisorFacts(b.s) },
-		emittedRoots:   []string{"hypervisors"},
-		probeConsumers: []string{"virtual"},
+		root:         "hypervisors",
+		policy:       coreFactGateable,
+		assemble:     func(b *coreFactBuild) []ResolvedFact { return currentWindowsHypervisorFacts(b.s) },
+		emittedRoots: []string{"hypervisors"},
 	},
 	{
-		root:  "az_metadata",
-		class: coreFactSharedProbe,
+		root:   "az_metadata",
+		policy: coreFactGateable,
 		assemble: func(b *coreFactBuild) []ResolvedFact {
 			return azureFacts(b.s.Context(), newAzureClient(azureMetadataBaseURL, nil), b.virtualization)
 		},
-		emittedRoots:   []string{"az_metadata", "cloud"},
-		probeConsumers: []string{"virtual"},
+		emittedRoots: []string{"az_metadata", "cloud"},
 	},
 	{
-		root:  "ec2_metadata",
-		class: coreFactSharedProbe,
+		root:   "ec2_metadata",
+		policy: coreFactGateable,
 		assemble: func(b *coreFactBuild) []ResolvedFact {
 			return ec2Facts(b.s, newEC2Client(ec2MetadataBaseURL, nil), b.virtualization)
 		},
-		emittedRoots:   []string{"cloud", "ec2_metadata", "ec2_userdata"},
-		probeConsumers: []string{"virtual"},
+		emittedRoots: []string{"cloud", "ec2_metadata", "ec2_userdata"},
 	},
 	{
-		root:  "gce",
-		class: coreFactSharedProbe,
+		root:   "gce",
+		policy: coreFactGateable,
 		assemble: func(b *coreFactBuild) []ResolvedFact {
-			return platformGCEFacts(b.s.Context(), b.goos, b.virtualization, dmiBIOSVendor(b.dmi), newGCEClient(gceMetadataBaseURL, nil))
+			return platformGCEFacts(b.s.Context(), b.goos, b.virtualization, dmiBIOSVendor(b.s.cachedDMI()), newGCEClient(gceMetadataBaseURL, nil))
 		},
-		emittedRoots:   []string{"cloud", "gce"},
-		probeConsumers: []string{"dmi", "virtual"},
+		emittedRoots: []string{"cloud", "gce"},
 	},
+}
+
+func (d coreFactDescriptor) shouldRun(disabled map[string]bool) bool {
+	if d.policy == coreFactAlwaysEager {
+		return true
+	}
+	for _, root := range d.emittedRoots {
+		if !disabled[root] {
+			return true
+		}
+	}
+	return false
 }
 
 func newCoreFactBuild(s *Session) *coreFactBuild {
@@ -222,18 +219,7 @@ func newCoreFactBuild(s *Session) *coreFactBuild {
 		virtualization: virtualization,
 		virtualFact:    virtualFact,
 		isVirtualFact:  isVirtualFact,
-		dmi:            s.cachedDMI(),
 	}
-}
-
-func standaloneCoreFactRoots() []string {
-	roots := make([]string, 0)
-	for _, descriptor := range coreFactDescriptors {
-		if descriptor.class == coreFactStandalone {
-			roots = append(roots, descriptor.root)
-		}
-	}
-	return roots
 }
 
 func builtinFactGroupsFromDescriptors() []FactGroup {

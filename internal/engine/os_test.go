@@ -373,13 +373,13 @@ func TestMacOSSystemProfilerProbesOmitEmptyOutput(t *testing.T) {
 	}
 }
 
-func TestCurrentWindowsOSDescriptionMatchesRubyResolver(t *testing.T) {
+func TestParseWindowsOSVersionInfoMatchesRubyResolverInput(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
 		name  string
 		input string
-		want  *windowsOSDescription
+		want  windowsOSVersionInfo
 	}{
 		{
 			name:  "query returns no result",
@@ -388,12 +388,12 @@ func TestCurrentWindowsOSDescriptionMatchesRubyResolver(t *testing.T) {
 		{
 			name:  "consumer release with empty description",
 			input: "ProductType=1\r\nOtherTypeDescription=\r\n",
-			want:  &windowsOSDescription{ConsumerRelease: true},
+			want:  windowsOSVersionInfo{ProductType: "1"},
 		},
 		{
 			name:  "missing product type keeps description and is not consumer",
 			input: "ProductType=\r\nOtherTypeDescription=description\r\n",
-			want:  &windowsOSDescription{Description: "description"},
+			want:  windowsOSVersionInfo{Description: "description"},
 		},
 	}
 
@@ -401,9 +401,9 @@ func TestCurrentWindowsOSDescriptionMatchesRubyResolver(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			got := currentWindowsOSDescription(tt.input)
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Fatalf("currentWindowsOSDescription() = %#v, want %#v", got, tt.want)
+			got := parseWindowsOSVersionInfo(tt.input)
+			if got != tt.want {
+				t.Fatalf("parseWindowsOSVersionInfo() = %#v, want %#v", got, tt.want)
 			}
 		})
 	}
@@ -678,34 +678,9 @@ func TestArchitectureName_matchesRubyFacterUnameCompatibility(t *testing.T) {
 	}
 }
 
-func TestWindowsHardwareArchitecture_matchesRubyResolver(t *testing.T) {
-	tests := []struct {
-		name             string
-		processor        string
-		level            int
-		wantHardware     string
-		wantArchitecture string
-	}{
-		{name: "amd64", processor: "AMD64", wantHardware: "x86_64", wantArchitecture: "x64"},
-		{name: "arm", processor: "ARM", wantHardware: "arm", wantArchitecture: "arm"},
-		{name: "ia64", processor: "IA64", wantHardware: "ia64", wantArchitecture: "ia64"},
-		{name: "intel level below 5", processor: "INTEL", level: 4, wantHardware: "i486", wantArchitecture: "x86"},
-		{name: "intel level above 5", processor: "INTEL", level: 8, wantHardware: "i686", wantArchitecture: "x86"},
-		{name: "unknown", wantHardware: "unknown", wantArchitecture: "unknown"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			hardware, architecture := windowsHardwareArchitecture(tt.processor, tt.level)
-			if hardware != tt.wantHardware || architecture != tt.wantArchitecture {
-				t.Fatalf("windowsHardwareArchitecture(%q, %d) = %q, %q, want %q, %q", tt.processor, tt.level, hardware, architecture, tt.wantHardware, tt.wantArchitecture)
-			}
-		})
-	}
-}
-
 func TestWindowsOSNameFamilyHardwareAndArchitectureMatchRubyFacts(t *testing.T) {
-	hardware, architecture := windowsHardwareArchitecture("AMD64", 0)
+	hardware := windowsHardwareFromGoArch("amd64")
+	architecture := windowsArchitectureFromHardware(hardware)
 
 	if got := osName("windows", linuxDistro{}); got != "windows" {
 		t.Fatalf("osName(windows) = %q, want windows", got)
@@ -751,6 +726,10 @@ func TestWindowsHardwareAndArchitectureMappings(t *testing.T) {
 	}{
 		{goarch: "amd64", wantHardware: "x86_64", wantArch: "x64"},
 		{goarch: "386", wantHardware: "i686", wantArch: "x86"},
+		{goarch: "arm", wantHardware: "arm", wantArch: "arm"},
+		{goarch: "arm64", wantHardware: "arm", wantArch: "arm"},
+		{goarch: "ia64", wantHardware: "ia64", wantArch: "ia64"},
+		{goarch: "unknown", wantHardware: "unknown", wantArch: "unknown"},
 		{goarch: "riscv64", wantHardware: "riscv64", wantArch: "riscv64"},
 	}
 	for _, tt := range tests {
@@ -2253,6 +2232,7 @@ func TestMacOSSystemProfilerFactsIncludesHardwareFacts(t *testing.T) {
 		HardwareUUID:       "11111111-2222-3333-4444-555555555555",
 		SubsystemVendorID:  "0x106b",
 	})
+	assertDescriptorDeclaresFacts(t, "os", facts)
 
 	collection := Collection(facts)
 	systemProfiler, ok := collection["system_profiler"].(map[string]any)

@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -13,6 +14,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -1548,36 +1550,34 @@ func TestLoadExternalFacts_ignoresFailedExecutableFact(t *testing.T) {
 }
 
 func TestLoadExternalFacts_timesOutHungExecutableFact(t *testing.T) {
-	oldTimeout := externalFactCommandTimeout
-	externalFactCommandTimeout = 10 * time.Millisecond
-	t.Cleanup(func() { externalFactCommandTimeout = oldTimeout })
+	synctest.Test(t, func(t *testing.T) {
+		var deadlineAfter time.Duration
+		host := &fakeExternalFactLoaderHost{
+			runCommandFunc: func(ctx context.Context, _ string, _ ...string) ([]byte, []byte, error) {
+				deadline, ok := ctx.Deadline()
+				if !ok {
+					t.Fatal("external executable context has no deadline")
+				}
+				deadlineAfter = time.Until(deadline)
+				<-ctx.Done()
+				return nil, nil, ctx.Err()
+			},
+		}
+		loader := externalFactLoader{s: NewSession(), host: host}
 
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "site.txt"), []byte("site=lab\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	path := filepath.Join(dir, "hung_fact")
-	if err := os.WriteFile(path, []byte("#!/bin/sh\nsleep 10\nprintf 'ignored=true\\n'\n"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-
-	got, err := loadExternalFactsForTest(testSession, []string{dir})
-	if err != nil {
-		t.Fatalf("loadExternalFactsForTest(testSession) err = %v, want nil for timed out executable fact", err)
-	}
-	want := []ResolvedFact{{Name: "site", Value: "lab", Type: "external"}}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("loadExternalFactsForTest(testSession) = %#v, want %#v", got, want)
-	}
+		_, err := loader.loadExternalCommandFacts("hung_fact", "hung_fact")
+		if !errors.Is(err, errExternalFactExec) {
+			t.Fatalf("loadExternalCommandFacts() error = %v, want errExternalFactExec", err)
+		}
+		if deadlineAfter != externalFactCommandTimeout {
+			t.Fatalf("executable deadline = %v, want %v", deadlineAfter, externalFactCommandTimeout)
+		}
+	})
 }
 
 func TestExternalFactLoader_rejectsOversizedStructuredFactFile(t *testing.T) {
-	oldLimit := externalFactMaxBytes
-	externalFactMaxBytes = 8
-	t.Cleanup(func() { externalFactMaxBytes = oldLimit })
-
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "huge.json"), []byte(`{"site":"larger than limit"}`), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "huge.json"), bytes.Repeat([]byte{'x'}, externalFactMaxBytes+1), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1652,17 +1652,10 @@ func TestExternalFactLoader_rejectsOversizedExecutableFactOutput(t *testing.T) {
 	}
 }
 
-func TestRunExternalFactCommand_rejectsOversizedStdout(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("uses /bin/sh")
-	}
-	oldLimit := externalFactMaxBytes
-	externalFactMaxBytes = 8
-	t.Cleanup(func() { externalFactMaxBytes = oldLimit })
-
-	out, stderr, err := runExternalFactCommand(context.Background(), "/bin/sh", "-c", "printf 'site=larger-than-limit\\n'")
+func TestReadExternalFactData_rejectsLimitPlusOne(t *testing.T) {
+	_, err := readExternalFactData(bytes.NewReader(bytes.Repeat([]byte{'x'}, externalFactMaxBytes+1)))
 	if !errors.Is(err, ErrExternalFactTooLarge) {
-		t.Fatalf("runExternalFactCommand() stdout=%q stderr=%q err=%v, want ErrExternalFactTooLarge", out, stderr, err)
+		t.Fatalf("readExternalFactData() error = %v, want ErrExternalFactTooLarge", err)
 	}
 }
 

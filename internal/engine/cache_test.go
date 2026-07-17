@@ -296,12 +296,11 @@ func TestDiscover_disabledFactIsNotServedFromFreshCache(t *testing.T) {
 		"cache_format_version": float64(1),
 		"networking.hostname":  "cached-host",
 	})
-	oldDefaultCachePath := DefaultCachePath
-	DefaultCachePath = func() string { return cacheDir }
-	t.Cleanup(func() { DefaultCachePath = oldDefaultCachePath })
+	defaults := DiscoveryDefaults{CachePath: cacheDir}
 
 	eng, err := NewEngine(EngineConfig{
 		UseCache:      true,
+		Defaults:      &defaults,
 		ConfigLoaded:  true,
 		Config:        Config{TTLs: []FactTTL{{Fact: "networking", TTL: "1 hour"}}},
 		ExtraDisabled: []string{"networking.hostname"},
@@ -321,12 +320,11 @@ func TestDiscover_disabledFactIsNotServedFromFreshCache(t *testing.T) {
 
 func TestDiscover_prunedSubfactIsNotCached(t *testing.T) {
 	cacheDir := t.TempDir()
-	oldDefaultCachePath := DefaultCachePath
-	DefaultCachePath = func() string { return cacheDir }
-	t.Cleanup(func() { DefaultCachePath = oldDefaultCachePath })
+	defaults := DiscoveryDefaults{CachePath: cacheDir}
 
 	eng, err := NewEngine(EngineConfig{
 		UseCache:     true,
+		Defaults:     &defaults,
 		ConfigLoaded: true,
 		Config: Config{
 			Disabled: []string{"os.release"},
@@ -534,19 +532,12 @@ func TestWarnCacheWriteFailureIgnoresNonPermissionErrors(t *testing.T) {
 	}
 }
 
-func TestFactCache_cacheFactsWarnsWhenCacheFileCannotBeWrittenLikeRubyCacheManager(t *testing.T) {
-	dir := t.TempDir()
-	originalWriteFile := cacheWriteFile
-	cacheWriteFile = func(string, []byte, os.FileMode) error { return os.ErrPermission }
-	t.Cleanup(func() {
-		cacheWriteFile = originalWriteFile
-	})
+func TestWarnCacheWriteFailureWarnsForPermissionErrors(t *testing.T) {
 	warnings := []string{}
 	logger := captureLogger(nil, &warnings, nil)
-	cache := NewFactCache(dir, []FactTTL{{Fact: "operating system", TTL: "1 hour"}}, nil, logger)
 
-	if err := cache.CacheFacts([]ResolvedFact{{Name: "os", Value: "Ubuntu", Type: "core"}}); err != nil {
-		t.Fatalf("CacheFacts() err = %v, want nil", err)
+	if !warnCacheWriteFailure(os.ErrPermission, logger) {
+		t.Fatal("warnCacheWriteFailure(os.ErrPermission) = false, want true")
 	}
 
 	if len(warnings) != 1 {
@@ -658,31 +649,11 @@ func TestFactCache_cacheFactsLogsNoKeysForNilFreshCacheLikeRubyCacheManager(t *t
 	}
 }
 
-func TestFactCache_resolveFactsWarnsWhenCorruptCacheCannotBeDeletedLikeRubyCacheManager(t *testing.T) {
-	dir := t.TempDir()
-	cachePath := filepath.Join(dir, "ext_file.txt")
-	if err := os.WriteFile(cachePath, []byte("{"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	originalRemove := cacheRemove
-	cacheRemove = func(string) error { return os.ErrPermission }
-	t.Cleanup(func() {
-		cacheRemove = originalRemove
-	})
+func TestWarnCacheDeleteFailureWarnsForPermissionErrors(t *testing.T) {
 	warnings := []string{}
 	logger := captureLogger(nil, &warnings, nil)
 
-	cache := NewFactCache(dir, []FactTTL{{Fact: "ext_file.txt", TTL: "1 hour"}}, nil, logger)
-	searched := []ResolvedFact{{Name: "my_external_fact", Type: "file", File: "/tmp/ext_file.txt"}}
-
-	remaining, cached := cache.ResolveFacts(searched)
-
-	if !reflect.DeepEqual(remaining, searched) {
-		t.Fatalf("remaining = %#v, want searched fact", remaining)
-	}
-	if len(cached) != 0 {
-		t.Fatalf("cached = %#v, want none", cached)
-	}
+	warnCacheDeleteFailure(os.ErrPermission, logger)
 	if len(warnings) != 1 {
 		t.Fatalf("warnings = %#v, want one warning", warnings)
 	}

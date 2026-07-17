@@ -27,14 +27,6 @@ var ttlEntryPattern = regexp.MustCompile(`(?is)\{\s*(?:"([^"]+)"|'([^']+)'|([A-Z
 var factGroupPattern = regexp.MustCompile(`(?is)(?:^|[\s{,])(?:"([^"]+)"|'([^']+)'|([A-Za-z0-9_-]+))\s*[:=]\s*(\[(.*?)\]|"([^"]*)"|'([^']*)'|([A-Za-z0-9_.-]+))`)
 var configArrayValuePattern = regexp.MustCompile(`"([^"]*)"|'([^']*)'|([^,\]\s]+)`)
 
-// NativeDefaultConfigPath returns the platform default facts-native
-// facts.conf path, consulted before the facter-compatible default.
-var NativeDefaultConfigPath = platformNativeDefaultConfigPath
-
-// DefaultConfigPath returns the platform default facter-compatible
-// facter.conf path, read when no facts-native config file exists.
-var DefaultConfigPath = platformDefaultConfigPath
-
 // Config contains the supported Facter config values loaded from a config file.
 type Config struct {
 	Disabled           []string
@@ -103,19 +95,20 @@ type FactTTL struct {
 	TTL  string
 }
 
-// ParseConfig returns every supported value from a Facter config file.
-// Diagnostics (an unreadable or invalid config file) are emitted to log; pass a
-// discard logger to ignore them.
-func ParseConfig(path string, log *slog.Logger) (Config, error) {
-	return readConfigOptionsFile(path, log)
+// ParseConfig returns every supported value from a Facter config file,
+// consulting defaults when path is empty. Diagnostics (an unreadable or
+// invalid config file) are emitted to log; pass a discard logger to ignore
+// them.
+func ParseConfig(path string, log *slog.Logger, defaults DiscoveryDefaults) (Config, error) {
+	return readConfigOptionsFile(path, log, defaults)
 }
 
-func readConfigOptionsFile(path string, log *slog.Logger) (Config, error) {
+func readConfigOptionsFile(path string, log *slog.Logger, defaults DiscoveryDefaults) (Config, error) {
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
 	if path == "" {
-		path = readableDefaultConfigPath()
+		path = readableDefaultConfigPath(defaults)
 		if path == "" {
 			return Config{}, nil
 		}
@@ -216,8 +209,8 @@ func skipConfigComment(content string, start int) int {
 // readableDefaultConfigPath returns the first existing default config file:
 // the facts-native facts.conf wins over the facter-compatible facter.conf.
 // Both are parsed with identical semantics; an explicit path overrides both.
-func readableDefaultConfigPath() string {
-	for _, path := range []string{NativeDefaultConfigPath(), DefaultConfigPath()} {
+func readableDefaultConfigPath(defaults DiscoveryDefaults) string {
+	for _, path := range []string{defaults.NativeConfigPath, defaults.CompatibleConfigPath} {
 		if path == "" {
 			continue
 		}

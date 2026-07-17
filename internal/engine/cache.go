@@ -17,14 +17,6 @@ import (
 
 const cacheFormatVersion = 1
 
-var (
-	cacheRemove    = os.Remove
-	cacheWriteFile = writeCacheFile
-)
-
-// DefaultCachePath returns the platform default directory for cached fact groups.
-var DefaultCachePath = platformDefaultCachePath
-
 // FactCache reads and writes Facter-compatible cached fact groups.
 type FactCache struct {
 	dir    string
@@ -223,7 +215,7 @@ func (fc *FactCache) CacheFacts(facts []ResolvedFact) error {
 		if !ok {
 			continue
 		}
-		if err := cacheWriteFile(path, encoded, 0o600); err != nil {
+		if err := writeCacheFile(path, encoded, 0o600); err != nil {
 			if warnCacheWriteFailure(err, fc.logger()) {
 				return nil
 			}
@@ -425,7 +417,11 @@ func windowsReservedCacheName(name string) bool {
 }
 
 func deleteCacheFile(path string, log *slog.Logger) {
-	if err := cacheRemove(path); err != nil {
+	warnCacheDeleteFailure(os.Remove(path), log)
+}
+
+func warnCacheDeleteFailure(err error, log *slog.Logger) {
+	if err != nil {
 		log.Warn(fmt.Sprintf("Could not delete cache: %v", err))
 	}
 }

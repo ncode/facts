@@ -44,6 +44,10 @@ type EngineConfig struct {
 	Logger *slog.Logger
 	// Facts are registered facts, fixed at construction.
 	Facts []ProgrammaticFact
+	// Defaults supplies invocation-local ambient paths to internal callers.
+	// A nil value derives fresh process defaults for each system-following or
+	// cache-enabled discovery.
+	Defaults *DiscoveryDefaults
 
 	// The remaining fields are CLI-only knobs set by internal/app; the public
 	// facts package exposes no options for them.
@@ -69,11 +73,6 @@ type EngineConfig struct {
 	// every Discover.
 	ConfigLoaded bool
 	Config       Config
-	// DefaultExternalDirs overrides process default external dirs for
-	// internal/app tests and CLI adapter wiring. Nil is a valid override when
-	// DefaultExternalDirsSet is true.
-	DefaultExternalDirsSet bool
-	DefaultExternalDirs    []string
 	// IncludeTypedDotted enables CLI/config force-dot query projection.
 	IncludeTypedDotted bool
 }
@@ -96,7 +95,7 @@ func NewEngine(cfg EngineConfig) (*Engine, error) {
 	cfg.ExternalDirs = slices.Clone(cfg.ExternalDirs)
 	cfg.DisabledFacts = cloneBoolMap(cfg.DisabledFacts)
 	cfg.ExtraDisabled = slices.Clone(cfg.ExtraDisabled)
-	cfg.DefaultExternalDirs = slices.Clone(cfg.DefaultExternalDirs)
+	cfg.Defaults = cloneDiscoveryDefaults(cfg.Defaults)
 	cfg.Config = cloneConfig(cfg.Config)
 	cfg.Facts = slices.Clone(cfg.Facts)
 	for i, fact := range cfg.Facts {
@@ -249,7 +248,7 @@ func (e *Engine) Discover(ctx context.Context, queries ...string) (*Snapshot, er
 	}
 
 	if plan.useCache && ctx.Err() == nil {
-		cache := NewFactCache(DefaultCachePath(), plan.cacheTTLs, plan.cacheGroups, s.logger)
+		cache := NewFactCache(plan.cachePath, plan.cacheTTLs, plan.cacheGroups, s.logger)
 		cacheFacts := FilterDisabledFacts(facts, plan.disabledFacts)
 		remaining, cached := cache.ResolveFacts(cacheFacts)
 		cached = FilterDisabledFacts(cached, plan.disabledFacts)

@@ -266,12 +266,8 @@ func plan9ProcessorsCoreFacts(info processorInfo, isa string) []ResolvedFact {
 }
 
 func plan9NetworkingCoreFacts(s *Session) []ResolvedFact {
-	return plan9NetworkingCoreFactsWithGlob(s, s.glob)
-}
-
-func plan9NetworkingCoreFactsWithGlob(s *Session, glob pathGlobber) []ResolvedFact {
 	hostname := parsePlan9Sysname(readFileString("/dev/sysname", s.readFile))
-	interfaces := currentPlan9Interfaces(s.readFile, glob)
+	interfaces := currentPlan9Interfaces(s.readFile, s.glob)
 	primary, interfaces := currentNetworkingData("plan9", interfaces, s.commandOutput, s.readFile)
 	ipv4, _ := primaryInterfaceFact(interfaces, primary, "ip").(string)
 	primaryBinding := primaryIPv4Binding(interfaces, ipv4)

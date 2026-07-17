@@ -19,11 +19,11 @@
   or fact group with `--disable a,b`, the `FACTS_DISABLE=a,b` environment
   variable, or the `facts.conf` `disable` key; the Facter `blocklist` key keeps
   working as its compatibility alias, and `--no-block` clears every disable
-  source. Disabling is resolution-gated — a disabled standalone-resolver fact
-  (`networking`, `processors`, `memory`, `ssh`, `timezone`, `fips`, `augeas`,
-  `xen`) is not resolved at all, not merely filtered from output; multi-output
-  categories resolve then prune. An explicitly queried fact disabled by the
-  environment or config emits a one-line stderr diagnostic.
+  source. Disabling is resolution-gated — a gateable resolver is skipped when
+  every top-level root it can emit is disabled; when any sibling root remains
+  enabled, the resolver runs and only disabled output is pruned. An explicitly
+  queried fact disabled by the environment or config emits a one-line stderr
+  diagnostic.
 - Release artifacts and cross-compile CI now include `arm` and `arm64` for
   FreeBSD, OpenBSD, and NetBSD.
 - Added native-gated Plan 9 (`plan9/amd64`) fact support for canonical
@@ -53,6 +53,9 @@
 
 ### Fixed
 
+- Fully disabled multi-output and shared-output core resolvers now skip their
+  probe work, including demand-driven DMI/GCE sharing; enabled sibling roots,
+  output pruning, queries, cache behavior, and disable diagnostics are unchanged.
 - The DragonFly `disks`/`partitions` probe no longer reports empty memory-disk
   (`md`) phantoms and no longer fans out `disklabel` across non-existent slice
   targets. It skips `md`/`cd` pseudo-devices and enumerates only the slice nodes
